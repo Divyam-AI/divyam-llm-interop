@@ -1,0 +1,10 @@
+{
+  "model": "o4-mini",
+  "messages": [
+    {
+      "role": "user",
+      "content": "What is the capital of India?"
+    }
+  ],
+  "max_completion_tokens": 32768
+}

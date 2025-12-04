@@ -1,0 +1,134 @@
+{
+  "source": {
+    "id": "chatcmpl-CNmx1XXqf8Z3TGfWUi6f42onl7RXs",
+    "choices": [
+      {
+        "finish_reason": "stop",
+        "index": 0,
+        "logprobs": null,
+        "message": {
+          "content": "The capital of India is New Delhi.",
+          "refusal": null,
+          "role": "assistant",
+          "annotations": [],
+          "audio": null,
+          "function_call": null,
+          "tool_calls": null
+        },
+        "content_filter_results": {
+          "hate": {
+            "filtered": false,
+            "severity": "safe"
+          },
+          "protected_material_code": {
+            "filtered": false,
+            "detected": false
+          },
+          "protected_material_text": {
+            "filtered": false,
+            "detected": false
+          },
+          "self_harm": {
+            "filtered": false,
+            "severity": "safe"
+          },
+          "sexual": {
+            "filtered": false,
+            "severity": "safe"
+          },
+          "violence": {
+            "filtered": false,
+            "severity": "safe"
+          }
+        }
+      }
+    ],
+    "created": 1759785747,
+    "model": "random-source",
+    "object": "chat.completion",
+    "service_tier": null,
+    "system_fingerprint": "fp_c82f8028fa",
+    "usage": {
+      "completion_tokens": 9,
+      "prompt_tokens": 14,
+      "total_tokens": 23,
+      "completion_tokens_details": {
+        "accepted_prediction_tokens": 0,
+        "audio_tokens": 0,
+        "reasoning_tokens": 0,
+        "rejected_prediction_tokens": 0
+      },
+      "prompt_tokens_details": {
+        "audio_tokens": 0,
+        "cached_tokens": 0
+      }
+    },
+    "prompt_filter_results": [
+      {
+        "prompt_index": 0,
+        "content_filter_results": {
+          "hate": {
+            "filtered": false,
+            "severity": "safe"
+          },
+          "jailbreak": {
+            "filtered": false,
+            "detected": false
+          },
+          "self_harm": {
+            "filtered": false,
+            "severity": "safe"
+          },
+          "sexual": {
+            "filtered": false,
+            "severity": "safe"
+          },
+          "violence": {
+            "filtered": false,
+            "severity": "safe"
+          }
+        }
+      }
+    ]
+  },
+  "target": {
+    "created_at": 0,
+    "id": "static_id",
+    "model": "random-source",
+    "object": "response",
+    "output": [
+      {
+        "content": [
+          {
+            "annotations": [],
+            "text": "The capital of India is New Delhi.",
+            "type": "output_text"
+          }
+        ],
+        "id": "static_id",
+        "role": "assistant",
+        "status": "completed",
+        "type": "message"
+      }
+    ],
+    "status": "completed",
+    "system_fingerprint": "fp_c82f8028fa",
+    "parallel_tool_calls": false,
+    "tool_choice": "none",
+    "tools": [],
+    "usage": {
+      "input_tokens": 14,
+      "input_tokens_details": {
+        "cached_tokens": 0
+      },
+      "output_tokens": 9,
+      "output_tokens_details": {
+        "accepted_prediction_tokens": 0,
+        "audio_tokens": 0,
+        "reasoning_tokens": 0,
+        "rejected_prediction_tokens": 0
+      },
+      "total_tokens": 23
+    }
+  }
+}

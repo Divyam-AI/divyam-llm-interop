@@ -1,0 +1,67 @@
+- selector:
+    name:
+      regex:
+        - .*llama.*
+  capabilities:
+    supported_api_types:
+      - COMPLETIONS
+    api_capabilities:
+      COMPLETIONS:
+        rename_fields:
+          max_completion_tokens: max_tokens
+- selector:
+    name:
+      regex:
+        - llama-2-.*
+  capabilities:
+    supported_api_types:
+      - COMPLETIONS
+    supports_reasoning: false
+- selector:
+    name:
+      regex:
+        - llama-3-.*
+  capabilities:
+    supported_api_types:
+      - COMPLETIONS
+    supports_reasoning: false
+- selector:
+    name:
+      regex:
+        - llama-3\.1-.*
+  capabilities:
+    supported_api_types:
+      - COMPLETIONS
+    supports_reasoning: false
+- selector:
+    name:
+      regex:
+        - llama-3\.2-.*
+  capabilities:
+    supported_api_types:
+      - COMPLETIONS
+    supports_reasoning: false
+- selector:
+    name:
+      regex:
+        - codellama.*
+  capabilities:
+    supported_api_types:
+      - COMPLETIONS
+    supports_reasoning: false
+- selector:
+    name:
+      regex:
+        - llamaguard-.*
+  capabilities:
+    supported_api_types:
+      - COMPLETIONS
+    supports_reasoning: false
+- selector:
+    name:
+      regex:
+        - prompt-guard.*
+  capabilities:
+    supported_api_types:
+      - COMPLETIONS
+    supports_reasoning: false

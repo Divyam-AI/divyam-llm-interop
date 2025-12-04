@@ -1,0 +1,149 @@
+{
+  "completions": [
+    {
+      "choices": [
+        {
+          "delta": {
+            "content": [
+              {
+                "type": "text",
+                "text": "Check this image:"
+              },
+              {
+                "type": "image_url",
+                "image_url": {
+                  "url": "https://example.com/img.png"
+                }
+              },
+              {
+                "type": "file",
+                "filename": "report.pdf"
+              }
+            ]
+          },
+          "finish_reason": "stop"
+        }
+      ]
+    }
+  ],
+  "responses": [
+    {
+      "type": "response.created",
+      "sequence_number": 1,
+      "response": {
+        "id": "resp_1",
+        "object": "response",
+        "created_at": 0,
+        "model": "gpt-4o",
+        "status": "in_progress",
+        "output": [],
+        "instructions": null,
+        "tools": [],
+        "metadata": {},
+        "temperature": null,
+        "top_p": null,
+        "max_output_tokens": null,
+        "usage": null,
+        "error": null,
+        "incomplete_details": null
+      }
+    },
+    {
+      "type": "response.output_item.added",
+      "sequence_number": 2,
+      "item": {
+        "id": "msg_1",
+        "type": "message",
+        "role": "assistant",
+        "content": [],
+        "status": "in_progress"
+      }
+    },
+    {
+      "type": "response.output_text.delta",
+      "sequence_number": 3,
+      "delta": "Check this image:",
+      "item_id": "msg_1"
+    },
+    {
+      "type": "response.output_text.delta",
+      "sequence_number": 4,
+      "delta": "[Image: https://example.com/img.png]",
+      "item_id": "msg_1"
+    },
+    {
+      "type": "response.output_text.delta",
+      "sequence_number": 5,
+      "delta": "[File: report.pdf]",
+      "item_id": "msg_1"
+    },
+    {
+      "type": "response.output_text.done",
+      "sequence_number": 6,
+      "item_id": "msg_1",
+      "text": [
+        {
+          "type": "output_text",
+          "text": "Check this image:",
+          "annotations": []
+        },
+        {
+          "type": "output_image",
+          "image_url": "https://example.com/img.png"
+        },
+        {
+          "type": "output_file",
+          "filename": "report.pdf"
+        }
+      ]
+    },
+    {
+      "type": "response.output_item.completed",
+      "sequence_number": 7,
+      "item_id": "msg_1"
+    },
+    {
+      "type": "response.done",
+      "sequence_number": 8,
+      "response": {
+        "id": "resp_1",
+        "object": "response",
+        "created_at": 0,
+        "model": "gpt-4o",
+        "status": "completed",
+        "output": [
+          {
+            "id": "msg_1",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "output_text",
+                "text": "Check this image:",
+                "annotations": []
+              },
+              {
+                "type": "output_image",
+                "image_url": "https://example.com/img.png"
+              },
+              {
+                "type": "output_file",
+                "filename": "report.pdf"
+              }
+            ],
+            "status": "completed"
+          }
+        ],
+        "instructions": null,
+        "tools": [],
+        "metadata": {},
+        "temperature": null,
+        "top_p": null,
+        "max_output_tokens": null,
+        "usage": null,
+        "error": null,
+        "incomplete_details": null
+      }
+    }
+  ]
+}

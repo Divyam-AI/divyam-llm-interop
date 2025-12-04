@@ -1,0 +1,9 @@
+- name: yi-1.5-6b
+- name: yi-1.5-9b
+- name: yi-1.5-34b
+- name: yi-1.5-6b-chat
+- name: yi-1.5-9b-chat
+- name: yi-1.5-34b-chat
+- name: yi-2-6b
+- name: yi-2-34b
+- name: yi-vl

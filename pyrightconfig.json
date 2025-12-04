@@ -1,0 +1,12 @@
+{
+  "include": [
+    "src/divyam_llm_interop",
+    "tests"
+  ],
+  "venvPath": ".",
+  "venv": ".venv",
+  "pythonVersion": "3.13",
+  "pythonPlatform": "Linux",
+  "typeCheckingMode": "basic",
+  "useLibraryCodeForTypes": true
+}

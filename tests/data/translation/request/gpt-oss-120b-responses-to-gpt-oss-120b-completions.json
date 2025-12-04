@@ -1,0 +1,662 @@
+{
+  "target": {
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are an assistant.\nFollow structured step-by-step instructions to respond.\n. The user's Id is 101"
+      },
+      {
+        "role": "user",
+        "content": "hi"
+      },
+      {
+        "role": "assistant",
+        "content": "Sorry I did not understand. Can you please elaborate your request?"
+      },
+      {
+        "role": "user",
+        "content": "I need to check status of my request id is 5"
+      }
+    ],
+    "model": "gpt-4.1",
+    "max_completion_tokens": 512,
+    "stream": false,
+    "temperature": 0.2,
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "fn_check_status",
+          "description": "Returns detailed status information for all IDs in the request.",
+          "parameters": {
+            "properties": {
+              "user_id": {
+                "type": "string",
+                "description": "User ID (string)"
+              },
+              "request_id": {
+                "type": "string",
+                "description": "Request ID (string)"
+              }
+            },
+            "required": [
+              "user_id",
+              "request_id"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "fn_get_items",
+          "description": "Gets the items in a request.",
+          "parameters": {
+            "properties": {
+              "user_id": {
+                "type": "string",
+                "description": "User ID (string)"
+              },
+              "request_id": {
+                "type": "string",
+                "description": "Request ID (string)"
+              }
+            },
+            "required": [
+              "user_id",
+              "request_id"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "fn_get_removed_items",
+          "description": "Gets details of removed items from a request if any.",
+          "parameters": {
+            "properties": {
+              "user_id": {
+                "type": "string"
+              },
+              "request_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "user_id",
+              "request_id"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "fn_get_payment_info",
+          "description": "Fetches payment and refund details for the request.",
+          "parameters": {
+            "properties": {
+              "user_id": {
+                "type": "string"
+              },
+              "request_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "user_id",
+              "request_id"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "fn_raise_delay_ticket",
+          "description": "Raises a delay ticket for the given request.",
+          "parameters": {
+            "properties": {
+              "user_id": {
+                "type": "string"
+              },
+              "request_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "user_id",
+              "request_id"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "fn_cancel_request",
+          "description": "Cancels the request or part of it for the given user ID and request ID.",
+          "parameters": {
+            "properties": {
+              "user_id": {
+                "type": "string"
+              },
+              "item_id": {
+                "type": "string"
+              },
+              "reason_code": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "reason_text": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": "Unknown"
+              }
+            },
+            "required": [
+              "user_id",
+              "item_id"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "fn_status_mismatch",
+          "description": "Raises a mismatch ticket in cases of status mismatch.",
+          "parameters": {
+            "properties": {
+              "user_id": {
+                "type": "string"
+              },
+              "item_id": {
+                "type": "string"
+              },
+              "reason_code": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              }
+            },
+            "required": [
+              "user_id",
+              "item_id"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "fn_create_return",
+          "description": "Creates a return for the given IDs and list of items.",
+          "parameters": {
+            "properties": {
+              "user_id": {
+                "type": "string"
+              },
+              "item_id": {
+                "type": "string"
+              },
+              "items_list": {
+                "type": "array",
+                "items": {},
+                "description": "List of items with id and quantity."
+              },
+              "reason_code": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              }
+            },
+            "required": [
+              "user_id",
+              "item_id",
+              "items_list"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "fn_get_returnable_items",
+          "description": "Fetches the list of items eligible for return.",
+          "parameters": {
+            "properties": {
+              "user_id": {
+                "type": "string"
+              },
+              "request_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "user_id",
+              "request_id"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "fn_get_return_status",
+          "description": "Fetches the status of a return.",
+          "parameters": {
+            "properties": {
+              "user_id": {
+                "type": "string"
+              },
+              "item_id": {
+                "type": "string"
+              },
+              "return_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "complaint_code": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              }
+            },
+            "required": [
+              "user_id",
+              "item_id"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "fn_faq_lookup",
+          "description": "Get answers to common questions.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "query_text": {
+                "type": "string",
+                "description": "Question to search in FAQs."
+              }
+            },
+            "required": [
+              "query_text"
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "source": {
+    "input": [
+      {
+        "content": "hi",
+        "role": "user",
+        "type": "message"
+      },
+      {
+        "content": "Sorry I did not understand. Can you please elaborate your request?",
+        "role": "assistant",
+        "type": "message"
+      },
+      {
+        "content": "I need to check status of my request id is 5",
+        "role": "user",
+        "type": "message"
+      }
+    ],
+    "instructions": "You are an assistant.\nFollow structured step-by-step instructions to respond.\n. The user's Id is 101",
+    "max_output_tokens": 512,
+    "model": "gpt-oss-120b",
+    "stream": false,
+    "temperature": 0.2,
+    "tools": [
+      {
+        "type": "function",
+        "name": "fn_check_status",
+        "description": "Returns detailed status information for all IDs in the request.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "user_id": {
+              "type": "string",
+              "description": "User ID (string)"
+            },
+            "request_id": {
+              "type": "string",
+              "description": "Request ID (string)"
+            }
+          },
+          "required": [
+            "user_id",
+            "request_id"
+          ]
+        }
+      },
+      {
+        "type": "function",
+        "name": "fn_get_items",
+        "description": "Gets the items in a request.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "user_id": {
+              "type": "string",
+              "description": "User ID (string)"
+            },
+            "request_id": {
+              "type": "string",
+              "description": "Request ID (string)"
+            }
+          },
+          "required": [
+            "user_id",
+            "request_id"
+          ]
+        }
+      },
+      {
+        "type": "function",
+        "name": "fn_get_removed_items",
+        "description": "Gets details of removed items from a request if any.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "user_id": {
+              "type": "string"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "user_id",
+            "request_id"
+          ]
+        }
+      },
+      {
+        "type": "function",
+        "name": "fn_get_payment_info",
+        "description": "Fetches payment and refund details for the request.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "user_id": {
+              "type": "string"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "user_id",
+            "request_id"
+          ]
+        }
+      },
+      {
+        "type": "function",
+        "name": "fn_raise_delay_ticket",
+        "description": "Raises a delay ticket for the given request.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "user_id": {
+              "type": "string"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "user_id",
+            "request_id"
+          ]
+        }
+      },
+      {
+        "type": "function",
+        "name": "fn_cancel_request",
+        "description": "Cancels the request or part of it for the given user ID and request ID.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "user_id": {
+              "type": "string"
+            },
+            "item_id": {
+              "type": "string"
+            },
+            "reason_code": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "reason_text": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": "Unknown"
+            }
+          },
+          "required": [
+            "user_id",
+            "item_id"
+          ]
+        }
+      },
+      {
+        "type": "function",
+        "name": "fn_status_mismatch",
+        "description": "Raises a mismatch ticket in cases of status mismatch.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "user_id": {
+              "type": "string"
+            },
+            "item_id": {
+              "type": "string"
+            },
+            "reason_code": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "required": [
+            "user_id",
+            "item_id"
+          ]
+        }
+      },
+      {
+        "type": "function",
+        "name": "fn_create_return",
+        "description": "Creates a return for the given IDs and list of items.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "user_id": {
+              "type": "string"
+            },
+            "item_id": {
+              "type": "string"
+            },
+            "items_list": {
+              "type": "array",
+              "items": {},
+              "description": "List of items with id and quantity."
+            },
+            "reason_code": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "required": [
+            "user_id",
+            "item_id",
+            "items_list"
+          ]
+        }
+      },
+      {
+        "type": "function",
+        "name": "fn_get_returnable_items",
+        "description": "Fetches the list of items eligible for return.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "user_id": {
+              "type": "string"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "user_id",
+            "request_id"
+          ]
+        }
+      },
+      {
+        "type": "function",
+        "name": "fn_get_return_status",
+        "description": "Fetches the status of a return.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "user_id": {
+              "type": "string"
+            },
+            "item_id": {
+              "type": "string"
+            },
+            "return_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "complaint_code": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "required": [
+            "user_id",
+            "item_id"
+          ]
+        }
+      },
+      {
+        "type": "function",
+        "name": "fn_faq_lookup",
+        "description": "Get answers to common questions.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query_text": {
+              "type": "string",
+              "description": "Question to search in FAQs."
+            }
+          },
+          "required": [
+            "query_text"
+          ]
+        }
+      }
+    ]
+  }
+}

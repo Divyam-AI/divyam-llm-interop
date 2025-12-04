@@ -1,0 +1,43 @@
+# Force strict completions compatibility for all gemini models
+- selector:
+    name:
+      regex: gemma-3.*
+  capabilities:
+    description: Gemma-3.* configuration
+    strict_completions_compatibility: true
+    supported_api_types:
+      - completions
+    max_tokens:
+      min: 1
+      max: 8192
+    input_token_limit: 128000
+    temperature:
+      min: 0
+      max: 2
+    top_k:
+      min: 1
+      max: 100
+    top_p:
+      min: 0
+      max: 1
+    frequency_penalty:
+      min: -2
+      max: 2
+    presence_penalty:
+      min: -2
+      max: 2
+    candidate_count:
+      min: 1
+      max: 8
+    supports_stop_sequences: true
+    stop_sequences:
+      max_count: 5
+      max_length_each: 20
+    supports_reasoning: true
+    reasoning_effort:
+      allowed_values:
+        - none
+        - low
+        - medium
+        - high
+      default: none

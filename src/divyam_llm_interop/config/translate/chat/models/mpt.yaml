@@ -1,0 +1,6 @@
+- name: mpt-7b
+- name: mpt-7b-instruct
+- name: mpt-7b-retrieval
+- name: mpt-30b
+- name: mpt-30b-instruct
+- name: mpt-30b-chat

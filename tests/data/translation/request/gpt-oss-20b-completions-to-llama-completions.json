@@ -1,0 +1,35 @@
+{
+  "source": {
+    "model": "openai/gpt-oss-20b",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a travel planner agent. Help user's plan their trip"
+      },
+      {
+        "role": "user",
+        "content": "Hi"
+      }
+    ],
+    "max_tokens": 1000,
+    "temperature": 0.2,
+    "top_p": 0.9,
+    "reasoning_effort": "low"
+  },
+  "target": {
+    "model": "meta/llama-3.1-8b-instruct",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a travel planner agent. Help user's plan their trip"
+      },
+      {
+        "role": "user",
+        "content": "Hi"
+      }
+    ],
+    "max_tokens": 1000,
+    "temperature": 0.2,
+    "top_p": 0.9
+  }
+}

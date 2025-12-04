@@ -1,0 +1,87 @@
+{
+  "source": {
+    "model": "gemini-2.5-flash",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a structured assistant that answers questions step-by-step."
+      },
+      {
+        "role": "user",
+        "content": "Check the status of my request id 42"
+      }
+    ],
+    "reasoning_effort": "high",
+    "max_completion_tokens": 512,
+    "n": 1,
+    "stream": false,
+    "temperature": 0.2,
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "fn_check_status",
+          "description": "Returns detailed status information for a request.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "user_id": {
+                "type": "string"
+              },
+              "request_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "user_id",
+              "request_id"
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "target": {
+    "input": [
+      {
+        "content": [
+          {
+            "text": "Check the status of my request id 42",
+            "type": "input_text"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "instructions": "You are a structured assistant that answers questions step-by-step.",
+    "max_output_tokens": 512,
+    "model": "gpt-oss-120b",
+    "stream": false,
+    "temperature": 0.2,
+    "reasoning": {
+      "effort": "high"
+    },
+    "tools": [
+      {
+        "description": "Returns detailed status information for a request.",
+        "name": "fn_check_status",
+        "parameters": {
+          "properties": {
+            "request_id": {
+              "type": "string"
+            },
+            "user_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "user_id",
+            "request_id"
+          ],
+          "type": "object"
+        },
+        "type": "function"
+      }
+    ]
+  }
+}

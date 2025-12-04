@@ -1,0 +1,9 @@
+- selector:
+    name:
+      regex:
+        - falcon-.*
+  capabilities:
+    strict_completions_compatibility: false
+    supported_api_types:
+      - COMPLETIONS
+    supports_reasoning: false

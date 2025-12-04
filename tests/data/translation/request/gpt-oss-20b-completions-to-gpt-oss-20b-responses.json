@@ -1,0 +1,42 @@
+{
+  "source": {
+    "model": "openai/gpt-oss-20b",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a poet"
+      },
+      {
+        "role": "user",
+        "content": "Write a poem"
+      }
+    ],
+    "max_tokens": 2200,
+    "temperature": 0.2,
+    "top_p": 0.9,
+    "reasoning": {
+      "effort": "high"
+    }
+  },
+  "target": {
+    "input": [
+      {
+        "content": [
+          {
+            "text": "Write a poem",
+            "type": "input_text"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "instructions": "You are a poet",
+    "max_output_tokens": 2200,
+    "model": "gpt-oss-120b",
+    "reasoning": {
+      "effort": "high"
+    },
+    "temperature": 0.2,
+    "top_p": 0.9
+  }
+}

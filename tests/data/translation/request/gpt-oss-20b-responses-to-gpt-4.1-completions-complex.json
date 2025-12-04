@@ -1,0 +1,370 @@
+{
+  "target": {
+    "model": "gpt-4.1",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a helpful weather assistant that can call the `get_weather` tool to fetch current weather data for a location."
+      },
+      {
+        "role": "user",
+        "content": "Hi"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello! How can I help you today?"
+      },
+      {
+        "role": "user",
+        "content": "What’s the weather in London right now?"
+      },
+      {
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "id": "call_01HZYQAX8FN8PZQJ6KCCK2F9GH",
+            "type": "function",
+            "function": {
+              "name": "get_weather",
+              "arguments": "{\n\t\"location\": \"London\",\n\t\"unit\": \"celsius\"\n}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "tool_call_id": "call_01HZYQAX8FN8PZQJ6KCCK2F9GH",
+        "content": "{ \"temperature\": 16, \"condition\": \"light rain\" }"
+      },
+      {
+        "role": "assistant",
+        "content": "The current temperature in London is 16°C with light rain."
+      },
+      {
+        "role": "user",
+        "content": "Oh, sounds chilly! How about in New York?"
+      },
+      {
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "id": "call_01HZYPFX9GZ3TRDL8MC8H2Q9JR",
+            "type": "function",
+            "function": {
+              "name": "get_weather",
+              "arguments": "{\n\t\"location\": \"New York\",\n\t\"unit\": \"celsius\"\n}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "tool_call_id": "call_01HZYPFX9GZ3TRDL8MC8H2Q9JR",
+        "content": "{ \"temperature\": 20, \"condition\": \"sunny\" }"
+      },
+      {
+        "role": "assistant",
+        "content": "In New York, it's currently 20°C and sunny — a nice day compared to London!"
+      },
+      {
+        "role": "user",
+        "content": "Nice! Can you also tell me the temperature difference between the two cities?"
+      },
+      {
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "id": "call_01HZYPKX3LF5DTV5CDV5S9BBPZ",
+            "type": "function",
+            "function": {
+              "name": "get_weather_difference",
+              "arguments": "{\n\t\"city_a\": \"London\",\n\t\"city_b\": \"New York\",\n\t\"unit\": \"celsius\"\n}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "tool_call_id": "call_01HZYPKX3LF5DTV5CDV5S9BBPZ",
+        "content": "{ \"difference\": 4 }"
+      },
+      {
+        "role": "assistant",
+        "content": "The temperature difference between London and New York is about 4°C — New York is warmer right now."
+      },
+      {
+        "role": "user",
+        "content": "Please replay the entire interaction so far and include the tool call outputs as well"
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "description": "Retrieve current weather information for a given location.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "location": {
+                "type": "string",
+                "description": "City name to get the weather for."
+              },
+              "unit": {
+                "type": "string",
+                "enum": [
+                  "celsius",
+                  "fahrenheit"
+                ],
+                "description": "Temperature unit to use."
+              }
+            },
+            "required": [
+              "location"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather_difference",
+          "description": "Calculate the temperature difference between two cities.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city_a": {
+                "type": "string",
+                "description": "First city name."
+              },
+              "city_b": {
+                "type": "string",
+                "description": "Second city name."
+              },
+              "unit": {
+                "type": "string",
+                "enum": [
+                  "celsius",
+                  "fahrenheit"
+                ],
+                "description": "Temperature unit to use."
+              }
+            },
+            "required": [
+              "city_a",
+              "city_b"
+            ]
+          }
+        }
+      }
+    ],
+    "temperature": 0.7,
+    "max_completion_tokens": 256
+  },
+  "source": {
+    "model": "openai/gpt-oss-20b",
+    "instructions": "You are a helpful weather assistant that can call the `get_weather` tool to fetch current weather data for a location.",
+    "input": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Hi"
+          }
+        ]
+      },
+      {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Hello! How can I help you today?"
+          }
+        ]
+      },
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "What\u2019s the weather in London right now?"
+          }
+        ]
+      },
+      {
+        "role": "assistant",
+        "content": [],
+        "tool_calls": [
+          {
+            "id": "call_01HZYQAX8FN8PZQJ6KCCK2F9GH",
+            "type": "function",
+            "name": "get_weather",
+            "arguments": "{\n\t\"location\": \"London\",\n\t\"unit\": \"celsius\"\n}",
+            "status": null
+          }
+        ]
+      },
+      {
+        "call_id": "call_01HZYQAX8FN8PZQJ6KCCK2F9GH",
+        "name": "get_weather",
+        "output": "{ \"temperature\": 16, \"condition\": \"light rain\" }",
+        "role": "tool",
+        "type": "function_call_output"
+      },
+      {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "The current temperature in London is 16\u00b0C with light rain."
+          }
+        ]
+      },
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Oh, sounds chilly! How about in New York?"
+          }
+        ]
+      },
+      {
+        "role": "assistant",
+        "content": [],
+        "tool_calls": [
+          {
+            "id": "call_01HZYPFX9GZ3TRDL8MC8H2Q9JR",
+            "type": "function",
+            "name": "get_weather",
+            "arguments": "{\n\t\"location\": \"New York\",\n\t\"unit\": \"celsius\"\n}",
+            "status": null
+          }
+        ]
+      },
+      {
+        "call_id": "call_01HZYPFX9GZ3TRDL8MC8H2Q9JR",
+        "name": "get_weather",
+        "output": "{ \"temperature\": 20, \"condition\": \"sunny\" }",
+        "role": "tool",
+        "type": "function_call_output"
+      },
+      {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "In New York, it's currently 20\u00b0C and sunny \u2014 a nice day compared to London!"
+          }
+        ]
+      },
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Nice! Can you also tell me the temperature difference between the two cities?"
+          }
+        ]
+      },
+      {
+        "role": "assistant",
+        "content": [],
+        "tool_calls": [
+          {
+            "id": "call_01HZYPKX3LF5DTV5CDV5S9BBPZ",
+            "type": "function",
+            "name": "get_weather_difference",
+            "arguments": "{\n\t\"city_a\": \"London\",\n\t\"city_b\": \"New York\",\n\t\"unit\": \"celsius\"\n}",
+            "status": null
+          }
+        ]
+      },
+      {
+        "call_id": "call_01HZYPKX3LF5DTV5CDV5S9BBPZ",
+        "name": "get_weather_difference",
+        "output": "{ \"difference\": 4 }",
+        "role": "tool",
+        "type": "function_call_output"
+      },
+      {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "The temperature difference between London and New York is about 4\u00b0C \u2014 New York is warmer right now."
+          }
+        ]
+      },
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Please replay the entire interaction so far and include the tool call outputs as well"
+          }
+        ]
+      }
+    ],
+    "temperature": 0.7,
+    "max_output_tokens": 256,
+    "tools": [
+      {
+        "type": "function",
+        "name": "get_weather",
+        "description": "Retrieve current weather information for a given location.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "location": {
+              "description": "City name to get the weather for.",
+              "type": "string"
+            },
+            "unit": {
+              "description": "Temperature unit to use.",
+              "type": "string",
+              "enum": [
+                "celsius",
+                "fahrenheit"
+              ]
+            }
+          },
+          "required": [
+            "location"
+          ]
+        }
+      },
+      {
+        "type": "function",
+        "name": "get_weather_difference",
+        "description": "Calculate the temperature difference between two cities.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "city_a": {
+              "description": "First city name.",
+              "type": "string"
+            },
+            "city_b": {
+              "description": "Second city name.",
+              "type": "string"
+            },
+            "unit": {
+              "description": "Temperature unit to use.",
+              "type": "string",
+              "enum": [
+                "celsius",
+                "fahrenheit"
+              ]
+            }
+          },
+          "required": [
+            "city_a",
+            "city_b"
+          ]
+        }
+      }
+    ]
+  }
+}

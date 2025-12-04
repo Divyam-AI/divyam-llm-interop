@@ -1,0 +1,12 @@
+- selector:
+    name:
+      regex: .*
+  capabilities:
+    description: Handle deprecated fields
+    strict_completions_compatibility: true
+    supported_api_types:
+      - completions
+    api_capabilities:
+      completions:
+        rename_fields:
+          max_output_tokens: max_tokens

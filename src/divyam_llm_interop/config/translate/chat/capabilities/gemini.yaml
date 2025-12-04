@@ -1,0 +1,301 @@
+- selector:
+    name:
+      regex: gemini.*
+  capabilities:
+    description: Force strict completions compatibility for all gemini models
+    strict_completions_compatibility: true
+    supports_google_extra_body: true
+    supported_api_types:
+      - completions
+
+# Model specific configuration
+- selector:
+    name: gemini-2.5-pro
+  capabilities:
+    max_tokens: { min: 1, max: 65536 }
+    input_token_limit: 1048576
+    temperature: { min: 0.0, max: 2.0 }
+    top_k: { min: 1, max: 100 }
+    top_p: { min: 0.0, max: 1.0 }
+    frequency_penalty: { min: -2.0, max: 2.0 }
+    presence_penalty: { min: -2.0, max: 2.0 }
+    candidate_count: { min: 1, max: 8 }
+    supports_stop_sequences: true
+    stop_sequences:
+      max_count: 5
+      max_length_each: 20
+    supports_reasoning: true
+    supports_google_thinking_config: true
+    api_capabilities:
+      completions:
+        drop_fields:
+          - frequency_penalty
+          - presence_penalty
+
+- selector:
+    name: gemini-2.5-flash
+  capabilities:
+    max_tokens: { min: 1, max: 65536 }
+    input_token_limit: 1048576
+    temperature: { min: 0.0, max: 2.0 }
+    top_k: { min: 1, max: 100 }
+    top_p: { min: 0.0, max: 1.0 }
+    frequency_penalty: { min: -2.0, max: 2.0 }
+    presence_penalty: { min: -2.0, max: 2.0 }
+    candidate_count: { min: 1, max: 8 }
+    supports_stop_sequences: true
+    stop_sequences:
+      max_count: 5
+      max_length_each: 20
+    supports_reasoning: true
+    supports_google_thinking_config: true
+    api_capabilities:
+      completions:
+        drop_fields:
+          - frequency_penalty
+          - presence_penalty
+
+- selector:
+    name: gemini-2.5-flash-lite
+  capabilities:
+    max_tokens: { min: 1, max: 65536 }
+    input_token_limit: 1048576
+    temperature: { min: 0.0, max: 2.0 }
+    top_k: { min: 1, max: 100 }
+    top_p: { min: 0.0, max: 1.0 }
+    frequency_penalty: { min: -2.0, max: 2.0 }
+    presence_penalty: { min: -2.0, max: 2.0 }
+    candidate_count: { min: 1, max: 8 }
+    supports_stop_sequences: true
+    stop_sequences:
+      max_count: 5
+      max_length_each: 20
+    supports_reasoning: true
+    supports_google_thinking_config: true
+    api_capabilities:
+      completions:
+        drop_fields:
+          - frequency_penalty
+          - presence_penalty
+
+- selector:
+    name: gemini-live-2.5-flash-preview
+  capabilities:
+    max_tokens: { min: 1, max: 8192 }
+    input_token_limit: 1048576
+    temperature: { min: 0.0, max: 2.0 }
+    top_k: { min: 1, max: 100 }
+    top_p: { min: 0.0, max: 1.0 }
+    frequency_penalty: { min: -2.0, max: 2.0 }
+    presence_penalty: { min: -2.0, max: 2.0 }
+    candidate_count: { min: 1, max: 1 }
+    supports_stop_sequences: true
+    stop_sequences:
+      max_count: 5
+      max_length_each: 20
+    api_capabilities:
+      completions:
+        drop_fields:
+          - frequency_penalty
+          - presence_penalty
+
+- selector:
+    name: gemini-2.5-flash-preview-native-audio-dialog
+  capabilities:
+    max_tokens: { min: 1, max: 8000 }
+    input_token_limit: 128000
+    temperature: { min: 0.0, max: 2.0 }
+    top_k: { min: 1, max: 100 }
+    top_p: { min: 0.0, max: 1.0 }
+    frequency_penalty: { min: -2.0, max: 2.0 }
+    presence_penalty: { min: -2.0, max: 2.0 }
+    candidate_count: { min: 1, max: 1 }
+    supports_stop_sequences: true
+    stop_sequences:
+      max_count: 5
+      max_length_each: 20
+    api_capabilities:
+      completions:
+        drop_fields:
+          - frequency_penalty
+          - presence_penalty
+
+- selector:
+    name: gemini-2.5-flash-preview-tts
+  capabilities:
+    max_tokens: { min: 1, max: 16000 }
+    input_token_limit: 8000
+    temperature: { min: 0.0, max: 2.0 }
+    top_k: { min: 1, max: 100 }
+    top_p: { min: 0.0, max: 1.0 }
+    frequency_penalty: { min: -2.0, max: 2.0 }
+    presence_penalty: { min: -2.0, max: 2.0 }
+    candidate_count: { min: 1, max: 1 }
+    supports_stop_sequences: true
+    stop_sequences:
+      max_count: 5
+      max_length_each: 20
+    api_capabilities:
+      completions:
+        drop_fields:
+          - frequency_penalty
+
+- selector:
+    name: gemini-2.5-pro-preview-tts
+  capabilities:
+    max_tokens: { min: 1, max: 16000 }
+    input_token_limit: 8000
+    temperature: { min: 0.0, max: 2.0 }
+    top_k: { min: 1, max: 100 }
+    top_p: { min: 0.0, max: 1.0 }
+    frequency_penalty: { min: -2.0, max: 2.0 }
+    presence_penalty: { min: -2.0, max: 2.0 }
+    candidate_count: { min: 1, max: 1 }
+    supports_stop_sequences: true
+    stop_sequences:
+      max_count: 5
+      max_length_each: 20
+    api_capabilities:
+      completions:
+        drop_fields:
+          - frequency_penalty
+
+- selector:
+    name: gemini-2.0-flash
+  capabilities:
+    max_tokens: { min: 1, max: 8192 }
+    input_token_limit: 1048576
+    temperature: { min: 0.0, max: 2.0 }
+    top_k: { min: 1, max: 100 }
+    top_p: { min: 0.0, max: 1.0 }
+    frequency_penalty: { min: -2.0, max: 2.0 }
+    presence_penalty: { min: -2.0, max: 2.0 }
+    candidate_count: { min: 1, max: 8 }
+    supports_stop_sequences: true
+    stop_sequences:
+      max_count: 5
+      max_length_each: 20
+    api_capabilities:
+      completions:
+        drop_fields:
+          - frequency_penalty
+
+- selector:
+    name: gemini-2.0-flash-preview-image-generation
+  capabilities:
+    max_tokens: { min: 1, max: 8192 }
+    input_token_limit: 32000
+    temperature: { min: 0.0, max: 2.0 }
+    top_k: { min: 1, max: 100 }
+    top_p: { min: 0.0, max: 1.0 }
+    frequency_penalty: { min: -2.0, max: 2.0 }
+    presence_penalty: { min: -2.0, max: 2.0 }
+    candidate_count: { min: 1, max: 8 }
+    supports_stop_sequences: true
+    stop_sequences:
+      max_count: 5
+      max_length_each: 20
+    api_capabilities:
+      completions:
+        drop_fields:
+          - frequency_penalty
+
+- selector:
+    name: gemini-2.0-flash-lite
+  capabilities:
+    max_tokens: { min: 1, max: 8192 }
+    input_token_limit: 1048576
+    temperature: { min: 0.0, max: 2.0 }
+    top_k: { min: 1, max: 100 }
+    top_p: { min: 0.0, max: 1.0 }
+    frequency_penalty: { min: -2.0, max: 2.0 }
+    presence_penalty: { min: -2.0, max: 2.0 }
+    candidate_count: { min: 1, max: 8 }
+    supports_stop_sequences: true
+    stop_sequences:
+      max_count: 5
+      max_length_each: 20
+    api_capabilities:
+      completions:
+        drop_fields:
+          - frequency_penalty
+
+- selector:
+    name: gemini-2.0-flash-live-001
+  capabilities:
+    max_tokens: { min: 1, max: 8192 }
+    input_token_limit: 1048576
+    temperature: { min: 0.0, max: 2.0 }
+    top_k: { min: 1, max: 100 }
+    top_p: { min: 0.0, max: 1.0 }
+    frequency_penalty: { min: -2.0, max: 2.0 }
+    presence_penalty: { min: -2.0, max: 2.0 }
+    candidate_count: { min: 1, max: 1 }
+    supports_stop_sequences: true
+    stop_sequences:
+      max_count: 5
+      max_length_each: 20
+    api_capabilities:
+      completions:
+        drop_fields:
+          - frequency_penalty
+
+- selector:
+    name: gemini-1.5-flash
+  capabilities:
+    max_tokens: { min: 1, max: 8192 }
+    input_token_limit: 1048576
+    temperature: { min: 0.0, max: 2.0 }
+    top_k: { min: 1, max: 100 }
+    top_p: { min: 0.0, max: 1.0 }
+    frequency_penalty: { min: -2.0, max: 2.0 }
+    presence_penalty: { min: -2.0, max: 2.0 }
+    candidate_count: { min: 1, max: 8 }
+    supports_stop_sequences: true
+    stop_sequences:
+      max_count: 5
+      max_length_each: 20
+    api_capabilities:
+      completions:
+        drop_fields:
+          - frequency_penalty
+
+- selector:
+    name: gemini-1.5-flash-8b
+  capabilities:
+    max_tokens: { min: 1, max: 8192 }
+    input_token_limit: 1048576
+    temperature: { min: 0.0, max: 2.0 }
+    top_k: { min: 1, max: 100 }
+    top_p: { min: 0.0, max: 1.0 }
+    frequency_penalty: { min: -2.0, max: 2.0 }
+    presence_penalty: { min: -2.0, max: 2.0 }
+    candidate_count: { min: 1, max: 8 }
+    supports_stop_sequences: true
+    stop_sequences:
+      max_count: 5
+      max_length_each: 20
+    api_capabilities:
+      completions:
+        drop_fields:
+          - frequency_penalty
+
+- selector:
+    name: gemini-1.5-pro
+  capabilities:
+    max_tokens: { min: 1, max: 8192 }
+    input_token_limit: 2097152
+    temperature: { min: 0.0, max: 2.0 }
+    top_k: { min: 1, max: 100 }
+    top_p: { min: 0.0, max: 1.0 }
+    frequency_penalty: { min: -2.0, max: 2.0 }
+    presence_penalty: { min: -2.0, max: 2.0 }
+    candidate_count: { min: 1, max: 8 }
+    supports_stop_sequences: true
+    stop_sequences:
+      max_count: 5
+      max_length_each: 20
+    api_capabilities:
+      completions:
+        drop_fields:
+          - frequency_penalty

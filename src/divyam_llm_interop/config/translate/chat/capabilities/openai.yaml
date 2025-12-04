@@ -1,0 +1,705 @@
+- selector:
+    name:
+      regex:
+        - gpt-.*
+        - o3-.*
+        - o4-.*
+  capabilities:
+    description: Openai models supporting completions and responses
+    supported_api_types:
+      - completions
+      - responses
+- selector:
+    name:
+      regex:
+        - gpt-3.*
+        - o1-.*
+  capabilities:
+    description: gpt-3.* models use max_output_tokens and do not support responses
+    supported_api_types:
+      - completions
+    api_capabilities:
+      completions:
+        rename_fields:
+          max_tokens: max_output_tokens
+- selector:
+    name: gpt-3.5-turbo
+  capabilities:
+    strict_completions_compatibility: false
+    max_tokens:
+      min: 1
+      max: 4096
+    temperature:
+      min: 0
+      max: 2
+    top_p:
+      min: 0
+      max: 1
+    frequency_penalty:
+      min: -2
+      max: 2
+    presence_penalty:
+      min: -2
+      max: 2
+    n:
+      min: 1
+      max: 128
+    input_token_limit: 4096
+    supports_stop_sequences: true
+    supports_json_mode: false
+    supports_function_calling: true
+    supports_vision: false
+    supports_reasoning: false
+    supports_code_execution: false
+- selector:
+    name: gpt-3.5-turbo-16k
+  capabilities:
+    strict_completions_compatibility: false
+    max_tokens:
+      min: 1
+      max: 4096
+    temperature:
+      min: 0
+      max: 2
+    top_p:
+      min: 0
+      max: 1
+    frequency_penalty:
+      min: -2
+      max: 2
+    presence_penalty:
+      min: -2
+      max: 2
+    n:
+      min: 1
+      max: 128
+    input_token_limit: 16384
+    supports_stop_sequences: true
+    supports_json_mode: false
+    supports_function_calling: false
+    supports_vision: false
+    supports_reasoning: false
+    supports_code_execution: false
+- selector:
+    name: gpt-3.5-turbo-0613
+  capabilities:
+    strict_completions_compatibility: false
+    max_tokens:
+      min: 1
+      max: 4096
+    temperature:
+      min: 0
+      max: 2
+    top_p:
+      min: 0
+      max: 1
+    frequency_penalty:
+      min: -2
+      max: 2
+    presence_penalty:
+      min: -2
+      max: 2
+    n:
+      min: 1
+      max: 128
+    input_token_limit: 4096
+    supports_stop_sequences: true
+    supports_json_mode: true
+    supports_function_calling: true
+    supports_vision: false
+    supports_reasoning: false
+    supports_code_execution: false
+- selector:
+    name: gpt-3.5-turbo-0301
+  capabilities:
+    strict_completions_compatibility: false
+    max_tokens:
+      min: 1
+      max: 4096
+    temperature:
+      min: 0
+      max: 2
+    top_p:
+      min: 0
+      max: 1
+    frequency_penalty:
+      min: -2
+      max: 2
+    presence_penalty:
+      min: -2
+      max: 2
+    n:
+      min: 1
+      max: 128
+    input_token_limit: 4096
+    supports_stop_sequences: true
+    supports_json_mode: false
+    supports_function_calling: false
+    supports_vision: false
+    supports_reasoning: false
+    supports_code_execution: false
+- selector:
+    name: gpt-3.5-turbo-instruct
+  capabilities:
+    strict_completions_compatibility: false
+    max_tokens:
+      min: 1
+      max: 4096
+    temperature:
+      min: 0
+      max: 2
+    top_p:
+      min: 0
+      max: 1
+    frequency_penalty:
+      min: -2
+      max: 2
+    presence_penalty:
+      min: -2
+      max: 2
+    n:
+      min: 1
+      max: 128
+    input_token_limit: 4096
+    supports_stop_sequences: true
+    supports_json_mode: false
+    supports_function_calling: false
+    supports_vision: false
+    supports_reasoning: false
+    supports_code_execution: false
+- selector:
+    name: text-davinci-003
+  capabilities:
+    strict_completions_compatibility: false
+    max_tokens:
+      min: 1
+      max: 4000
+    temperature:
+      min: 0
+      max: 2
+    top_p:
+      min: 0
+      max: 1
+    frequency_penalty:
+      min: -2
+      max: 2
+    presence_penalty:
+      min: -2
+      max: 2
+    n:
+      min: 1
+      max: 128
+    input_token_limit: 4097
+    supports_stop_sequences: true
+    supports_json_mode: false
+    supports_function_calling: false
+    supports_vision: false
+    supports_reasoning: false
+    supports_code_execution: false
+- selector:
+    name: text-davinci-002
+  capabilities:
+    strict_completions_compatibility: false
+    max_tokens:
+      min: 1
+      max: 4000
+    temperature:
+      min: 0
+      max: 2
+    top_p:
+      min: 0
+      max: 1
+    frequency_penalty:
+      min: -2
+      max: 2
+    presence_penalty:
+      min: -2
+      max: 2
+    n:
+      min: 1
+      max: 128
+    input_token_limit: 4097
+    supports_stop_sequences: true
+    supports_json_mode: false
+    supports_function_calling: false
+    supports_vision: false
+    supports_reasoning: false
+    supports_code_execution: false
+- selector:
+    name: code-davinci-002
+  capabilities:
+    strict_completions_compatibility: false
+    max_tokens:
+      min: 1
+      max: 8000
+    temperature:
+      min: 0
+      max: 2
+    top_p:
+      min: 0
+      max: 1
+    frequency_penalty:
+      min: -2
+      max: 2
+    presence_penalty:
+      min: -2
+      max: 2
+    n:
+      min: 1
+      max: 128
+    input_token_limit: 4097
+    supports_stop_sequences: true
+    supports_json_mode: false
+    supports_function_calling: false
+    supports_vision: false
+    supports_reasoning: false
+    supports_code_execution: false
+- selector:
+    name: gpt-5
+  capabilities:
+    strict_completions_compatibility: false
+    max_tokens:
+      min: 1
+      max: 131072
+    temperature:
+      min: 0
+      max: 2
+    top_p:
+      min: 0
+      max: 1
+    frequency_penalty:
+      min: -2
+      max: 2
+    presence_penalty:
+      min: -2
+      max: 2
+    n:
+      min: 1
+      max: 128
+    input_token_limit: 2000000
+    supports_stop_sequences: true
+    supports_json_mode: true
+    supports_function_calling: true
+    supports_vision: true
+    supports_reasoning: true
+    supports_code_execution: true
+- selector:
+    name: gpt-5-turbo
+  capabilities:
+    strict_completions_compatibility: false
+    max_tokens:
+      min: 1
+      max: 65536
+    temperature:
+      min: 0
+      max: 2
+    top_p:
+      min: 0
+      max: 1
+    frequency_penalty:
+      min: -2
+      max: 2
+    presence_penalty:
+      min: -2
+      max: 2
+    n:
+      min: 1
+      max: 128
+    input_token_limit: 1000000
+    supports_stop_sequences: true
+    supports_json_mode: true
+    supports_function_calling: true
+    supports_vision: true
+    supports_reasoning: true
+- selector:
+    name: gpt-4
+  capabilities:
+    strict_completions_compatibility: false
+    max_tokens:
+      min: 1
+      max: 32768
+    temperature:
+      min: 0
+      max: 2
+    top_p:
+      min: 0
+      max: 1
+    frequency_penalty:
+      min: -2
+      max: 2
+    presence_penalty:
+      min: -2
+      max: 2
+    n:
+      min: 1
+      max: 1
+    input_token_limit: 32768
+    supports_stop_sequences: true
+    supports_json_mode: false
+    supports_function_calling: true
+    supports_vision: true
+    supports_reasoning: true
+- selector:
+    name: gpt-4.5
+  capabilities:
+    strict_completions_compatibility: false
+    max_tokens:
+      min: 1
+      max: 32768
+    temperature:
+      min: 0
+      max: 2
+    top_p:
+      min: 0
+      max: 1
+    n:
+      min: 1
+      max: 128
+    input_token_limit: 256000
+    supports_stop_sequences: true
+    supports_json_mode: true
+    supports_function_calling: true
+    supports_vision: true
+    supports_reasoning: true
+- selector:
+    name: gpt-4.1
+  capabilities:
+    strict_completions_compatibility: false
+    max_tokens:
+      min: 1
+      max: 32768
+    temperature:
+      min: 0
+      max: 2
+    top_p:
+      min: 0
+      max: 1
+    frequency_penalty:
+      min: -2
+      max: 2
+    presence_penalty:
+      min: -2
+      max: 2
+    n:
+      min: 1
+      max: 128
+    input_token_limit: 256000
+    supports_stop_sequences: true
+    supports_json_mode: true
+    supports_function_calling: true
+    supports_vision: true
+    supports_reasoning: false
+- selector:
+    name: gpt-4.1-turbo
+  capabilities:
+    strict_completions_compatibility: false
+    max_tokens:
+      min: 1
+      max: 32768
+    temperature:
+      min: 0
+      max: 2
+    top_p:
+      min: 0
+      max: 1
+    frequency_penalty:
+      min: -2
+      max: 2
+    presence_penalty:
+      min: -2
+      max: 2
+    n:
+      min: 1
+      max: 128
+    input_token_limit: 256000
+    supports_stop_sequences: true
+    supports_json_mode: true
+    supports_function_calling: true
+    supports_vision: true
+    supports_reasoning: false
+- selector:
+    name: gpt-4.1-mini
+  capabilities:
+    strict_completions_compatibility: false
+    max_tokens:
+      min: 1
+      max: 32768
+    temperature:
+      min: 0
+      max: 2
+    top_p:
+      min: 0
+      max: 1
+    frequency_penalty:
+      min: -2
+      max: 2
+    presence_penalty:
+      min: -2
+      max: 2
+    n:
+      min: 1
+      max: 128
+    input_token_limit: 128000
+    supports_stop_sequences: true
+    supports_json_mode: true
+    supports_function_calling: true
+    supports_vision: true
+    supports_reasoning: false
+- selector:
+    name: gpt-4.1-nano
+  capabilities:
+    strict_completions_compatibility: false
+    max_tokens:
+      min: 1
+      max: 32768
+    temperature:
+      min: 0
+      max: 2
+    top_p:
+      min: 0
+      max: 1
+    frequency_penalty:
+      min: -2
+      max: 2
+    presence_penalty:
+      min: -2
+      max: 2
+    n:
+      min: 1
+      max: 128
+    input_token_limit: 32000
+    supports_stop_sequences: true
+    supports_json_mode: true
+    supports_function_calling: true
+    supports_vision: false
+    supports_reasoning: false
+- selector:
+    name: o3
+  capabilities:
+    strict_completions_compatibility: false
+    max_tokens:
+      min: 1
+      max: 65536
+    temperature:
+      min: 1
+      max: 1
+    n:
+      min: 1
+      max: 1
+    input_token_limit: 256000
+    supports_reasoning: true
+    api_capabilities:
+      completions:
+        rename_fields:
+          max_output_tokens: max_completion_tokens
+          max_tokens: max_completion_tokens
+        drop_fields:
+          - frequency_penalty
+          - presence_penalty
+          - stop
+          - temperature
+          - top_p
+- selector:
+    name: o3-mini
+  capabilities:
+    strict_completions_compatibility: false
+    max_tokens:
+      min: 1
+      max: 32768
+    temperature:
+      min: 1
+      max: 1
+    n:
+      min: 1
+      max: 1
+    input_token_limit: 128000
+    supports_reasoning: true
+    api_capabilities:
+      completions:
+        rename_fields:
+          max_tokens: max_completion_tokens
+          max_output_tokens: max_completion_tokens
+        drop_fields:
+          - frequency_penalty
+          - presence_penalty
+          - stop
+          - temperature
+          - top_p
+- selector:
+    name: o3-mini-high
+  capabilities:
+    strict_completions_compatibility: false
+    max_tokens:
+      min: 1
+      max: 32768
+    temperature:
+      min: 1
+      max: 1
+    n:
+      min: 1
+      max: 1
+    input_token_limit: 128000
+    supports_reasoning: true
+    api_capabilities:
+      completions:
+        rename_fields:
+          max_tokens: max_completion_tokens
+          max_output_tokens: max_completion_tokens
+        drop_fields:
+          - frequency_penalty
+          - presence_penalty
+          - stop
+          - temperature
+          - top_p
+- selector:
+    name: o4-mini
+  capabilities:
+    strict_completions_compatibility: false
+    max_tokens:
+      min: 1
+      max: 32768
+    temperature:
+      min: 1
+      max: 1
+    n:
+      min: 1
+      max: 1
+    input_token_limit: 128000
+    supports_reasoning: true
+    api_capabilities:
+      completions:
+        rename_fields:
+          max_tokens: max_completion_tokens
+          max_output_tokens: max_completion_tokens
+        drop_fields:
+          - frequency_penalty
+          - presence_penalty
+          - stop
+          - temperature
+          - top_p
+- selector:
+    name: o4-mini-high
+  capabilities:
+    strict_completions_compatibility: false
+    max_tokens:
+      min: 1
+      max: 65536
+    temperature:
+      min: 1
+      max: 1
+    n:
+      min: 1
+      max: 1
+    input_token_limit: 128000
+    supports_reasoning: true
+    api_capabilities:
+      completions:
+        rename_fields:
+          max_tokens: max_completion_tokens
+          max_output_tokens: max_completion_tokens
+        drop_fields:
+          - frequency_penalty
+          - presence_penalty
+          - stop
+          - temperature
+          - top_p
+- selector:
+    name: gpt-oss-20b
+  capabilities:
+    strict_completions_compatibility: false
+    max_tokens:
+      min: 1
+      max: 4096
+    temperature:
+      min: 0
+      max: 2
+    top_p:
+      min: 0
+      max: 1
+    n:
+      min: 1
+      max: 16
+    input_token_limit: 32000
+    supports_stop_sequences: true
+    supports_json_mode: true
+    supports_function_calling: false
+    supports_vision: false
+    supports_reasoning: true
+- selector:
+    name: gpt-oss-120b
+  capabilities:
+    strict_completions_compatibility: false
+    max_tokens:
+      min: 1
+      max: 8192
+    temperature:
+      min: 0
+      max: 2
+    top_p:
+      min: 0
+      max: 1
+    n:
+      min: 1
+      max: 16
+    input_token_limit: 128000
+    supports_stop_sequences: true
+    supports_json_mode: true
+    supports_function_calling: false
+    supports_vision: false
+    supports_reasoning: true
+- selector:
+    name: gpt-4o
+  capabilities:
+    strict_completions_compatibility: false
+    max_tokens:
+      min: 1
+      max: 32768
+    temperature:
+      min: 0
+      max: 2
+    top_p:
+      min: 0
+      max: 1
+    frequency_penalty:
+      min: -2
+      max: 2
+    presence_penalty:
+      min: -2
+      max: 2
+    n:
+      min: 1
+      max: 128
+    input_token_limit: 256000
+    supports_stop_sequences: true
+    supports_json_mode: true
+    supports_function_calling: true
+    supports_vision: true
+    supports_reasoning: true
+- selector:
+    name: gpt-4o-mini
+  capabilities:
+    strict_completions_compatibility: false
+    max_tokens:
+      min: 1
+      max: 32768
+    temperature:
+      min: 0
+      max: 2
+    top_p:
+      min: 0
+      max: 1
+    frequency_penalty:
+      min: -2
+      max: 2
+    presence_penalty:
+      min: -2
+      max: 2
+    n:
+      min: 1
+      max: 128
+    input_token_limit: 128000
+    supports_stop_sequences: true
+    supports_json_mode: true
+    supports_function_calling: true
+    supports_vision: true
+    supports_reasoning: false

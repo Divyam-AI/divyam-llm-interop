@@ -1,0 +1,35 @@
+{
+  "source": {
+    "model": "openai/gpt-oss-20b",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a support superstar. Answer user queries"
+      },
+      {
+        "role": "user",
+        "content": "Hi"
+      }
+    ],
+    "max_tokens": 1000,
+    "temperature": 0.2,
+    "top_p": 0.9,
+    "reasoning_effort": "low"
+  },
+  "target": {
+    "model": "gemini-2.0-flash",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a support superstar. Answer user queries"
+      },
+      {
+        "role": "user",
+        "content": "Hi"
+      }
+    ],
+    "max_tokens": 1000,
+    "temperature": 0.2,
+    "top_p": 0.9
+  }
+}

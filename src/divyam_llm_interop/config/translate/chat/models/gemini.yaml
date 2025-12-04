@@ -1,0 +1,14 @@
+- name: gemini-2.5-pro
+- name: gemini-2.5-flash
+- name: gemini-2.5-flash-lite
+- name: gemini-live-2.5-flash-preview
+- name: gemini-2.5-flash-preview-native-audio-dialog
+- name: gemini-2.5-flash-preview-tts
+- name: gemini-2.5-pro-preview-tts
+- name: gemini-2.0-flash
+- name: gemini-2.0-flash-preview-image-generation
+- name: gemini-2.0-flash-lite
+- name: gemini-2.0-flash-live-001
+- name: gemini-1.5-flash
+- name: gemini-1.5-flash-8b
+- name: gemini-1.5-pro

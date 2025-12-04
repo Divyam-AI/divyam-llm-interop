@@ -1,0 +1,32 @@
+- selector:
+    name:
+      regex:
+        - chatglm-.*
+  capabilities:
+    supported_api_types:
+      - COMPLETIONS
+    supports_reasoning: false
+- selector:
+    name:
+      regex:
+        - dolphin-.*
+  capabilities:
+    supported_api_types:
+      - COMPLETIONS
+    supports_reasoning: false
+- selector:
+    name:
+      regex:
+        - hermes-.*
+  capabilities:
+    supported_api_types:
+      - COMPLETIONS
+    supports_reasoning: false
+- selector:
+    name:
+      regex:
+        - opnhermes-.*
+  capabilities:
+    supported_api_types:
+      - COMPLETIONS
+    supports_reasoning: false

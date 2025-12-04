@@ -1,0 +1,56 @@
+{
+  "source": {
+    "model": "gpt-4.1-mini",
+    "messages": [
+      {
+        "role": "user",
+        "content": "What is the capital of India?"
+      },
+      {
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "type": "function",
+            "function": {
+              "name": "get_order_status",
+              "arguments": "{\"customer_id\": \"******\", \"order_id\": \"*******\"}"
+            },
+            "id": "call_nisNSQvk6BRZJVdttwKOlaHQ"
+          }
+        ]
+      }
+    ],
+    "temperature": 0.7,
+    "top_p": 5.9,
+    "max_output_tokens": 100000,
+    "frequency_penalty": 0.5,
+    "presence_penalty": 0.5,
+    "reasoning_effort": "high"
+  },
+  "target": {
+    "model": "gemini-2.5-pro",
+    "messages": [
+      {
+        "role": "user",
+        "content": "What is the capital of India?"
+      },
+      {
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "type": "function",
+            "function": {
+              "name": "get_order_status",
+              "arguments": "{\"customer_id\": \"******\", \"order_id\": \"*******\"}"
+            },
+            "id": "call_nisNSQvk6BRZJVdttwKOlaHQ"
+          }
+        ]
+      }
+    ],
+    "temperature": 0.7,
+    "top_p": 1.0,
+    "max_tokens": 65536,
+    "reasoning_effort": "high"
+  }
+}

@@ -1,0 +1,6 @@
+- name: falcon-7b
+- name: falcon-7b-instruct
+- name: falcon-40b
+- name: falcon-40b-instruct
+- name: falcon-180b
+- name: falcon-180b-instruct

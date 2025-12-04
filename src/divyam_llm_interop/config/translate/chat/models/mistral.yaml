@@ -1,0 +1,11 @@
+- name: mistral-7b
+- name: mistral-7b-instruct
+- name: mixtral-8x7b
+- name: mixtral-8x7b-instruct
+- name: mixtral-8x22b
+- name: mistral-medium-2312
+- name: mistral-medium-3
+- name: mistral-large-2.1
+- name: codestral
+- name: codestral-instruct
+- name: voxtral-mini-transcribe

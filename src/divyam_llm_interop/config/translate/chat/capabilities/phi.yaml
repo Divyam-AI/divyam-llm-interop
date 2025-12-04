@@ -1,0 +1,16 @@
+- selector:
+    name:
+      regex:
+        - phi-1
+  capabilities:
+    supported_api_types:
+      - COMPLETIONS
+    supports_reasoning: false
+- selector:
+    name:
+      regex:
+        - phi-2
+  capabilities:
+    supported_api_types:
+      - COMPLETIONS
+    supports_reasoning: false

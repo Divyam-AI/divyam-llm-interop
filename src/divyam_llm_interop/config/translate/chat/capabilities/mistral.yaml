@@ -1,0 +1,24 @@
+- selector:
+    name:
+      regex:
+        - mistral-.*
+  capabilities:
+    supported_api_types:
+      - COMPLETIONS
+    supports_reasoning: false
+- selector:
+    name:
+      regex:
+        - codestral-.*
+  capabilities:
+    supported_api_types:
+      - COMPLETIONS
+    supports_reasoning: false
+- selector:
+    name:
+      regex:
+        - voxtral-.*
+  capabilities:
+    supported_api_types:
+      - COMPLETIONS
+    supports_reasoning: false

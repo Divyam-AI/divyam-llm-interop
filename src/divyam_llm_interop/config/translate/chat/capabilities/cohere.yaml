@@ -1,0 +1,8 @@
+- selector:
+    name:
+      regex:
+        - command-.*
+  capabilities:
+    supported_api_types:
+      - COMPLETIONS
+    supports_reasoning: false

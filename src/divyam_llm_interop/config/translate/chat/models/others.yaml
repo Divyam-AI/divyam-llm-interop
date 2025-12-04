@@ -1,0 +1,14 @@
+- name: baichuan-2-13b
+- name: baichuan-2-13b-chat
+- name: baichuan-3-7b
+- name: internlm2-7b
+- name: internlm-2-13b
+- name: orca-2-13b
+- name: orca-2-70b
+- name: chatglm3-6b
+- name: chatglm3-6b-chat
+- name: hermes-2-pro-llama-3-8b
+- name: hermes-2-mixtral-8x7b
+- name: openhermes-2.5-mistral-7b
+- name: dolphin-2.6-mixtral-8x7b
+- name: dolphin-2.6-llama-3-8b

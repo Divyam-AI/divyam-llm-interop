@@ -1,0 +1,68 @@
+{
+  "source": {
+    "choices": [
+      {
+        "finish_reason": "tool_calls",
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "tool_calls": [
+            {
+              "function": {
+                "arguments": "{\"request_id\":\"5\",\"user_id\":\"10\"}",
+                "name": "fn_check_status"
+              },
+              "id": "static_id",
+              "type": "function"
+            }
+          ]
+        }
+      }
+    ],
+    "created": 1759834789,
+    "id": "static_id",
+    "model": "openai/gpt-oss-20b",
+    "object": "chat.completion",
+    "usage": {
+      "completion_tokens": 61,
+      "completion_tokens_details": {
+        "reasoning_tokens": 43
+      },
+      "prompt_tokens": 616,
+      "total_tokens": 677
+    }
+  },
+  "target": {
+    "choices": [
+      {
+        "finish_reason": "tool_calls",
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "tool_calls": [
+            {
+              "function": {
+                "arguments": "{\"request_id\":\"5\",\"user_id\":\"10\"}",
+                "name": "fn_check_status"
+              },
+              "id": "static_id",
+              "type": "function"
+            }
+          ]
+        }
+      }
+    ],
+    "created": 1759834789,
+    "id": "static_id",
+    "model": "openai/gpt-oss-20b",
+    "object": "chat.completion",
+    "usage": {
+      "completion_tokens": 61,
+      "completion_tokens_details": {
+        "reasoning_tokens": 43
+      },
+      "prompt_tokens": 616,
+      "total_tokens": 677
+    }
+  }
+}

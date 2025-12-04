@@ -1,0 +1,974 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "OpenAI Chat Completions API Schema",
+  "description": "Complete JSON schema for OpenAI Chat Completions API request and response",
+  "definitions": {
+    "ChatCompletionRequest": {
+      "type": "object",
+      "required": [
+        "model",
+        "messages"
+      ],
+      "properties": {
+        "model": {
+          "type": "string",
+          "description": "ID of the model to use (e.g., gpt-4, gpt-4-turbo, gpt-3.5-turbo)",
+          "examples": [
+            "gpt-4",
+            "gpt-4-turbo",
+            "gpt-3.5-turbo",
+            "gpt-4o",
+            "gpt-4o-mini"
+          ]
+        },
+        "messages": {
+          "type": "array",
+          "description": "List of messages comprising the conversation so far",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/definitions/ChatCompletionMessage"
+          }
+        },
+        "temperature": {
+          "type": "number",
+          "description": "Sampling temperature between 0 and 2. Higher values make output more random",
+          "minimum": 0,
+          "maximum": 2,
+          "default": 1
+        },
+        "top_p": {
+          "type": "number",
+          "description": "Nucleus sampling parameter. Alternative to temperature",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 1
+        },
+        "n": {
+          "type": "integer",
+          "description": "Number of chat completion choices to generate",
+          "minimum": 1,
+          "default": 1
+        },
+        "stream": {
+          "type": "boolean",
+          "description": "Whether to stream back partial progress",
+          "default": false
+        },
+        "stream_options": {
+          "type": "object",
+          "description": "Options for streaming response",
+          "properties": {
+            "include_usage": {
+              "type": "boolean",
+              "description": "Whether to include usage information in stream"
+            }
+          }
+        },
+        "stop": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 4
+            }
+          ],
+          "description": "Up to 4 sequences where the API will stop generating"
+        },
+        "max_tokens": {
+          "type": "integer",
+          "description": "Maximum number of tokens to generate",
+          "minimum": 1
+        },
+        "max_completion_tokens": {
+          "type": "integer",
+          "description": "Upper bound for the number of tokens that can be generated",
+          "minimum": 1
+        },
+        "presence_penalty": {
+          "type": "number",
+          "description": "Penalty for new tokens based on their presence in the text so far",
+          "minimum": -2,
+          "maximum": 2,
+          "default": 0
+        },
+        "frequency_penalty": {
+          "type": "number",
+          "description": "Penalty for new tokens based on their frequency in the text so far",
+          "minimum": -2,
+          "maximum": 2,
+          "default": 0
+        },
+        "logit_bias": {
+          "type": "object",
+          "description": "Modify the likelihood of specified tokens appearing",
+          "additionalProperties": {
+            "type": "number",
+            "minimum": -100,
+            "maximum": 100
+          }
+        },
+        "logprobs": {
+          "type": "boolean",
+          "description": "Whether to return log probabilities of output tokens",
+          "default": false
+        },
+        "top_logprobs": {
+          "type": "integer",
+          "description": "Number of most likely tokens to return at each position",
+          "minimum": 0,
+          "maximum": 20
+        },
+        "user": {
+          "type": "string",
+          "description": "Unique identifier for the end-user"
+        },
+        "seed": {
+          "type": "integer",
+          "description": "Seed for deterministic sampling"
+        },
+        "tools": {
+          "type": "array",
+          "description": "List of tools the model may call",
+          "items": {
+            "$ref": "#/definitions/Tool"
+          }
+        },
+        "tool_choice": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "none",
+                "auto",
+                "required"
+              ]
+            },
+            {
+              "type": "object",
+              "required": [
+                "type",
+                "function"
+              ],
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "function"
+                  ]
+                },
+                "function": {
+                  "type": "object",
+                  "required": [
+                    "name"
+                  ],
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "description": "Controls which tool is called by the model"
+        },
+        "parallel_tool_calls": {
+          "type": "boolean",
+          "description": "Whether to enable parallel function calling",
+          "default": true
+        },
+        "response_format": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "type"
+              ],
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "text",
+                    "json_object"
+                  ]
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "type",
+                "json_schema"
+              ],
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "json_schema"
+                  ]
+                },
+                "json_schema": {
+                  "type": "object",
+                  "required": [
+                    "name",
+                    "schema"
+                  ],
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "description": "Name of the schema"
+                    },
+                    "description": {
+                      "type": "string",
+                      "description": "Description of the schema"
+                    },
+                    "schema": {
+                      "type": "object",
+                      "description": "JSON Schema object"
+                    },
+                    "strict": {
+                      "type": "boolean",
+                      "description": "Whether to enforce strict schema adherence",
+                      "default": false
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "description": "Format for the model output"
+        },
+        "functions": {
+          "type": "array",
+          "description": "Deprecated. Use tools instead",
+          "items": {
+            "$ref": "#/definitions/Function"
+          }
+        },
+        "function_call": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "none",
+                "auto"
+              ]
+            },
+            {
+              "type": "object",
+              "required": [
+                "name"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string"
+                }
+              }
+            }
+          ],
+          "description": "Deprecated. Use tool_choice instead"
+        },
+        "metadata": {
+          "type": "object",
+          "description": "Developer-defined metadata"
+        },
+        "store": {
+          "type": "boolean",
+          "description": "Whether to store the output for training",
+          "default": false
+        },
+        "reasoning_effort": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "description": "Amount of effort to spend on reasoning (for reasoning models)"
+        },
+        "modalities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "text",
+              "audio"
+            ]
+          },
+          "description": "Output modalities for the response"
+        },
+        "audio": {
+          "type": "object",
+          "description": "Audio output configuration",
+          "properties": {
+            "voice": {
+              "type": "string",
+              "enum": [
+                "alloy",
+                "echo",
+                "fable",
+                "onyx",
+                "nova",
+                "shimmer"
+              ]
+            },
+            "format": {
+              "type": "string",
+              "enum": [
+                "wav",
+                "mp3",
+                "flac",
+                "opus",
+                "pcm16"
+              ]
+            }
+          }
+        },
+        "service_tier": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "default"
+          ],
+          "description": "Service tier for processing"
+        }
+      }
+    },
+    "ChatCompletionMessage": {
+      "type": "object",
+      "required": [
+        "role",
+        "content"
+      ],
+      "properties": {
+        "role": {
+          "type": "string",
+          "enum": [
+            "system",
+            "user",
+            "assistant",
+            "tool",
+            "function"
+          ],
+          "description": "The role of the message author"
+        },
+        "content": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/ContentPart"
+              }
+            }
+          ],
+          "description": "The contents of the message"
+        },
+        "name": {
+          "type": "string",
+          "description": "Optional name for the participant"
+        },
+        "tool_calls": {
+          "type": "array",
+          "description": "Tool calls generated by the model",
+          "items": {
+            "$ref": "#/definitions/ToolCall"
+          }
+        },
+        "tool_call_id": {
+          "type": "string",
+          "description": "Tool call that this message is responding to"
+        },
+        "function_call": {
+          "type": "object",
+          "description": "Deprecated. Use tool_calls instead",
+          "required": [
+            "name",
+            "arguments"
+          ],
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "arguments": {
+              "type": "string"
+            }
+          }
+        },
+        "audio": {
+          "type": "object",
+          "description": "Audio input data",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "data": {
+              "type": "string",
+              "description": "Base64 encoded audio data"
+            },
+            "format": {
+              "type": "string",
+              "enum": [
+                "wav",
+                "mp3"
+              ]
+            },
+            "transcript": {
+              "type": "string"
+            }
+          }
+        },
+        "refusal": {
+          "type": "string",
+          "description": "Refusal message if the model refused to comply"
+        }
+      }
+    },
+    "ContentPart": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "text"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "text"
+              ]
+            },
+            "text": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "image_url"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "image_url"
+              ]
+            },
+            "image_url": {
+              "type": "object",
+              "required": [
+                "url"
+              ],
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "description": "URL or base64 encoded image"
+                },
+                "detail": {
+                  "type": "string",
+                  "enum": [
+                    "auto",
+                    "low",
+                    "high"
+                  ],
+                  "default": "auto"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "input_audio"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "input_audio"
+              ]
+            },
+            "input_audio": {
+              "type": "object",
+              "required": [
+                "data",
+                "format"
+              ],
+              "properties": {
+                "data": {
+                  "type": "string",
+                  "description": "Base64 encoded audio data"
+                },
+                "format": {
+                  "type": "string",
+                  "enum": [
+                    "wav",
+                    "mp3"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "Tool": {
+      "type": "object",
+      "required": [
+        "type",
+        "function"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "function"
+          ]
+        },
+        "function": {
+          "$ref": "#/definitions/Function"
+        }
+      }
+    },
+    "Function": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name of the function"
+        },
+        "description": {
+          "type": "string",
+          "description": "Description of what the function does"
+        },
+        "parameters": {
+          "type": "object",
+          "description": "Parameters as JSON Schema object"
+        },
+        "strict": {
+          "type": "boolean",
+          "description": "Whether to enable strict schema adherence",
+          "default": false
+        }
+      }
+    },
+    "ToolCall": {
+      "type": "object",
+      "required": [
+        "id",
+        "type",
+        "function"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the tool call"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "function"
+          ]
+        },
+        "function": {
+          "type": "object",
+          "required": [
+            "name",
+            "arguments"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Name of the function to call"
+            },
+            "arguments": {
+              "type": "string",
+              "description": "Arguments as JSON string"
+            }
+          }
+        }
+      }
+    },
+    "ChatCompletionResponse": {
+      "type": "object",
+      "required": [
+        "id",
+        "object",
+        "created",
+        "model",
+        "choices"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the completion"
+        },
+        "object": {
+          "type": "string",
+          "enum": [
+            "chat.completion"
+          ],
+          "description": "Object type, always 'chat.completion'"
+        },
+        "created": {
+          "type": "integer",
+          "description": "Unix timestamp of creation"
+        },
+        "model": {
+          "type": "string",
+          "description": "Model used for completion"
+        },
+        "choices": {
+          "type": "array",
+          "description": "List of completion choices",
+          "items": {
+            "$ref": "#/definitions/Choice"
+          }
+        },
+        "usage": {
+          "$ref": "#/definitions/Usage"
+        },
+        "system_fingerprint": {
+          "type": "string",
+          "description": "Fingerprint of backend configuration"
+        },
+        "service_tier": {
+          "type": "string",
+          "enum": [
+            "scale",
+            "default"
+          ],
+          "description": "Service tier used for the request"
+        }
+      }
+    },
+    "Choice": {
+      "type": "object",
+      "required": [
+        "index",
+        "message",
+        "finish_reason"
+      ],
+      "properties": {
+        "index": {
+          "type": "integer",
+          "description": "Index of the choice"
+        },
+        "message": {
+          "$ref": "#/definitions/ChatCompletionMessage"
+        },
+        "finish_reason": {
+          "type": "string",
+          "enum": [
+            "stop",
+            "length",
+            "tool_calls",
+            "content_filter",
+            "function_call"
+          ],
+          "description": "Reason why the model stopped generating"
+        },
+        "logprobs": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "Log probability information",
+          "properties": {
+            "content": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "$ref": "#/definitions/LogprobContent"
+              }
+            },
+            "refusal": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "$ref": "#/definitions/LogprobContent"
+              }
+            }
+          }
+        }
+      }
+    },
+    "LogprobContent": {
+      "type": "object",
+      "required": [
+        "token",
+        "logprob",
+        "bytes",
+        "top_logprobs"
+      ],
+      "properties": {
+        "token": {
+          "type": "string"
+        },
+        "logprob": {
+          "type": "number"
+        },
+        "bytes": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "integer"
+          }
+        },
+        "top_logprobs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "token",
+              "logprob",
+              "bytes"
+            ],
+            "properties": {
+              "token": {
+                "type": "string"
+              },
+              "logprob": {
+                "type": "number"
+              },
+              "bytes": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Usage": {
+      "type": "object",
+      "required": [
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens"
+      ],
+      "properties": {
+        "prompt_tokens": {
+          "type": "integer",
+          "description": "Number of tokens in the prompt"
+        },
+        "completion_tokens": {
+          "type": "integer",
+          "description": "Number of tokens in the completion"
+        },
+        "total_tokens": {
+          "type": "integer",
+          "description": "Total tokens used"
+        },
+        "prompt_tokens_details": {
+          "type": "object",
+          "properties": {
+            "cached_tokens": {
+              "type": "integer",
+              "description": "Number of cached tokens in the prompt"
+            },
+            "audio_tokens": {
+              "type": "integer",
+              "description": "Number of audio tokens in the prompt"
+            }
+          }
+        },
+        "completion_tokens_details": {
+          "type": "object",
+          "properties": {
+            "reasoning_tokens": {
+              "type": "integer",
+              "description": "Number of reasoning tokens generated"
+            },
+            "audio_tokens": {
+              "type": "integer",
+              "description": "Number of audio tokens generated"
+            },
+            "accepted_prediction_tokens": {
+              "type": "integer",
+              "description": "Number of accepted prediction tokens"
+            },
+            "rejected_prediction_tokens": {
+              "type": "integer",
+              "description": "Number of rejected prediction tokens"
+            }
+          }
+        }
+      }
+    },
+    "ChatCompletionChunk": {
+      "type": "object",
+      "required": [
+        "id",
+        "object",
+        "created",
+        "model",
+        "choices"
+      ],
+      "description": "Streaming response chunk",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "object": {
+          "type": "string",
+          "enum": [
+            "chat.completion.chunk"
+          ]
+        },
+        "created": {
+          "type": "integer"
+        },
+        "model": {
+          "type": "string"
+        },
+        "system_fingerprint": {
+          "type": "string"
+        },
+        "choices": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ChunkChoice"
+          }
+        },
+        "usage": {
+          "$ref": "#/definitions/Usage"
+        }
+      }
+    },
+    "ChunkChoice": {
+      "type": "object",
+      "required": [
+        "index",
+        "delta"
+      ],
+      "properties": {
+        "index": {
+          "type": "integer"
+        },
+        "delta": {
+          "type": "object",
+          "properties": {
+            "role": {
+              "type": "string",
+              "enum": [
+                "assistant"
+              ]
+            },
+            "content": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "tool_calls": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/DeltaToolCall"
+              }
+            },
+            "refusal": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        "finish_reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "stop",
+            "length",
+            "tool_calls",
+            "content_filter",
+            null
+          ]
+        },
+        "logprobs": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      }
+    },
+    "DeltaToolCall": {
+      "type": "object",
+      "required": [
+        "index"
+      ],
+      "properties": {
+        "index": {
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "function"
+          ]
+        },
+        "function": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "arguments": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  },
+  "oneOf": [
+    {
+      "$ref": "#/definitions/ChatCompletionRequest",
+      "description": "Request schema for creating a chat completion"
+    },
+    {
+      "$ref": "#/definitions/ChatCompletionResponse",
+      "description": "Response schema for a completed chat completion"
+    },
+    {
+      "$ref": "#/definitions/ChatCompletionChunk",
+      "description": "Response schema for streaming chat completion chunks"
+    }
+  ]
+}

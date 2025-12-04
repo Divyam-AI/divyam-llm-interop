@@ -1,0 +1,47 @@
+[tool.poetry]
+name = "divyam-llm-interop"
+version = "0.1.0"
+description = "A lightweight, provider-neutral library for translating LLM requests and responses across model APIs."
+authors = ["DivyamAI Technologies Private Limited"]
+license = "Apache-2.0"
+readme = "README.md"
+
+packages = [
+    { include = "divyam_llm_interop", from = "src" }
+]
+
+include = ["src/divyam_llm_interop/py.typed"]
+
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Typing :: Typed",
+]
+
+[tool.poetry.urls]
+Homepage = "https://github.com/Divyam-AI/divyam-llm-interop"
+Source = "https://github.com/Divyam-AI/divyam-llm-interop"
+Issues = "https://github.com/Divyam-AI/divyam-llm-interop/issues"
+
+[tool.poetry.dependencies]
+python = ">=3.10,<4.0"
+pyyaml = ">=6.0.3"
+poetry-core = ">=2.0.0"
+typing-extensions = "^4.15.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^9.0.1"
+pytest-cov = "^7.0.0"
+pytest-asyncio = "^1.3.0"
+ruff = "^0.14.6"
+pyright = "^1.1.407"
+pre-commit = "^4.5.0"
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

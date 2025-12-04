@@ -1,0 +1,171 @@
+{
+  "target": {
+    "model": "gpt-4o-mini",
+    "system_fingerprint": "fp_5abc123xyz",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a helpful weather assistant that can call the `get_weather` tool to fetch current weather data for a location."
+      },
+      {
+        "role": "user",
+        "content": "Hi"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello! How can I help you today?"
+      },
+      {
+        "role": "user",
+        "content": "What’s the weather in London right now?"
+      },
+      {
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "id": "call_01HZYQAX8FN8PZQJ6KCCK2F9GH",
+            "type": "function",
+            "function": {
+              "name": "get_weather",
+              "arguments": "{\n\t\"location\": \"London\",\n\t\"unit\": \"celsius\"\n}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "tool_call_id": "call_01HZYQAX8FN8PZQJ6KCCK2F9GH",
+        "content": "{ \"temperature\": 16, \"condition\": \"light rain\" }"
+      },
+      {
+        "role": "assistant",
+        "content": "The current temperature in London is 16°C with light rain."
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "description": "Retrieve current weather information for a given location.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "location": {
+                "type": "string",
+                "description": "City name to get the weather for."
+              },
+              "unit": {
+                "type": "string",
+                "enum": [
+                  "celsius",
+                  "fahrenheit"
+                ],
+                "description": "Temperature unit to use."
+              }
+            },
+            "required": [
+              "location"
+            ]
+          }
+        }
+      }
+    ],
+    "temperature": 0.7,
+    "max_completion_tokens": 256
+  },
+  "source": {
+    "input": [
+      {
+        "content": [
+          {
+            "text": "Hi",
+            "type": "input_text"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "text": "Hello! How can I help you today?",
+            "type": "output_text"
+          }
+        ],
+        "role": "assistant"
+      },
+      {
+        "content": [
+          {
+            "text": "What’s the weather in London right now?",
+            "type": "input_text"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [],
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "arguments": "{\n\t\"location\": \"London\",\n\t\"unit\": \"celsius\"\n}",
+            "name": "get_weather",
+            "id": "call_01HZYQAX8FN8PZQJ6KCCK2F9GH",
+            "type": "function"
+          }
+        ]
+      },
+      {
+        "content": [
+          {
+            "text": "{ \"temperature\": 16, \"condition\": \"light rain\" }",
+            "type": "output_text"
+          }
+        ],
+        "role": "tool",
+        "tool_call_id": "call_01HZYQAX8FN8PZQJ6KCCK2F9GH"
+      },
+      {
+        "content": [
+          {
+            "text": "The current temperature in London is 16°C with light rain.",
+            "type": "output_text"
+          }
+        ],
+        "role": "assistant"
+      }
+    ],
+    "instructions": "You are a helpful weather assistant that can call the `get_weather` tool to fetch current weather data for a location.",
+    "max_output_tokens": 256,
+    "model": "gpt-4o-mini",
+    "system_fingerprint": "fp_5abc123xyz",
+    "temperature": 0.7,
+    "tools": [
+      {
+        "description": "Retrieve current weather information for a given location.",
+        "name": "get_weather",
+        "parameters": {
+          "properties": {
+            "location": {
+              "description": "City name to get the weather for.",
+              "type": "string"
+            },
+            "unit": {
+              "description": "Temperature unit to use.",
+              "enum": [
+                "celsius",
+                "fahrenheit"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "location"
+          ],
+          "type": "object"
+        },
+        "type": "function"
+      }
+    ]
+  }
+}

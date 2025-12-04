@@ -1,0 +1,1161 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "OpenAI Responses API - Complete Schema",
+  "description": "Comprehensive JSON schema for OpenAI Responses API request and response structures",
+  "definitions": {
+    "CreateResponseRequest": {
+      "type": "object",
+      "description": "Request schema for creating a new response",
+      "required": [
+        "model",
+        "input"
+      ],
+      "properties": {
+        "model": {
+          "type": "string",
+          "description": "ID of the model to use. Supports gpt-4o, gpt-4.1, gpt-5, o1, o3, o4-mini, computer-use-preview, gpt-image-1, etc.",
+          "examples": [
+            "gpt-4o",
+            "gpt-4.1-nano",
+            "o3-mini",
+            "gpt-5"
+          ]
+        },
+        "input": {
+          "description": "Input messages or content for the model",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/InputItem"
+              }
+            }
+          ]
+        },
+        "instructions": {
+          "type": "string",
+          "description": "System-level instructions for the model's behavior"
+        },
+        "tools": {
+          "type": "array",
+          "description": "List of tools available to the model",
+          "items": {
+            "$ref": "#/definitions/Tool"
+          }
+        },
+        "tool_choice": {
+          "description": "Controls which tools are called by the model",
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "none",
+                "auto",
+                "required"
+              ]
+            },
+            {
+              "$ref": "#/definitions/ToolChoice"
+            }
+          ]
+        },
+        "parallel_tool_calls": {
+          "type": "boolean",
+          "description": "Whether to enable parallel function calling",
+          "default": true
+        },
+        "metadata": {
+          "type": "object",
+          "description": "Set of key-value pairs for storing additional information",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "temperature": {
+          "type": "number",
+          "description": "Sampling temperature between 0 and 2",
+          "minimum": 0,
+          "maximum": 2,
+          "default": 1.0
+        },
+        "top_p": {
+          "type": "number",
+          "description": "Nucleus sampling parameter",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 1.0
+        },
+        "max_output_tokens": {
+          "type": "integer",
+          "description": "Maximum number of tokens to generate",
+          "minimum": 1
+        },
+        "truncation": {
+          "type": "string",
+          "description": "Controls truncation behavior",
+          "enum": [
+            "auto"
+          ]
+        },
+        "stream": {
+          "type": "boolean",
+          "description": "Whether to stream the response",
+          "default": false
+        },
+        "background": {
+          "type": "boolean",
+          "description": "Whether to run as a background task (for long-running operations)",
+          "default": false
+        },
+        "store": {
+          "type": "boolean",
+          "description": "Whether to store the response on the server",
+          "default": true
+        },
+        "previous_response_id": {
+          "type": "string",
+          "description": "ID of previous response to chain with this request",
+          "pattern": "^resp_[a-zA-Z0-9]+$"
+        },
+        "reasoning": {
+          "$ref": "#/definitions/ReasoningConfig",
+          "description": "Configuration for reasoning models (o1, o3, etc.)"
+        },
+        "reasoning_effort": {
+          "type": "string",
+          "description": "Effort level for reasoning (deprecated, use reasoning.effort)",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "response_format": {
+          "$ref": "#/definitions/ResponseFormat",
+          "description": "Format for structured outputs"
+        },
+        "user": {
+          "type": "string",
+          "description": "Unique identifier representing the end-user"
+        },
+        "include": {
+          "type": "array",
+          "description": "Additional fields to include in the response",
+          "items": {
+            "type": "string",
+            "enum": [
+              "reasoning.encrypted_content"
+            ]
+          }
+        }
+      }
+    },
+    "InputItem": {
+      "type": "object",
+      "description": "An input item in the conversation",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "message",
+            "function_call_output",
+            "mcp_approval_response"
+          ]
+        }
+      },
+      "oneOf": [
+        {
+          "$ref": "#/definitions/MessageInput"
+        },
+        {
+          "$ref": "#/definitions/FunctionCallOutput"
+        },
+        {
+          "$ref": "#/definitions/McpApprovalResponse"
+        }
+      ]
+    },
+    "MessageInput": {
+      "type": "object",
+      "required": [
+        "type",
+        "role"
+      ],
+      "properties": {
+        "type": {
+          "const": "message"
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "user",
+            "assistant",
+            "system"
+          ]
+        },
+        "content": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/ContentPart"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "ContentPart": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "oneOf": [
+        {
+          "$ref": "#/definitions/TextContent"
+        },
+        {
+          "$ref": "#/definitions/ImageContent"
+        },
+        {
+          "$ref": "#/definitions/FileContent"
+        }
+      ]
+    },
+    "TextContent": {
+      "type": "object",
+      "required": [
+        "type",
+        "text"
+      ],
+      "properties": {
+        "type": {
+          "const": "input_text"
+        },
+        "text": {
+          "type": "string"
+        }
+      }
+    },
+    "ImageContent": {
+      "type": "object",
+      "required": [
+        "type",
+        "image_url"
+      ],
+      "properties": {
+        "type": {
+          "const": "input_image"
+        },
+        "image_url": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "uri"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "FileContent": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "input_file"
+        },
+        "file_id": {
+          "type": "string",
+          "description": "ID of uploaded file"
+        },
+        "file_data": {
+          "type": "string",
+          "description": "Base64-encoded file data with data URI prefix"
+        },
+        "filename": {
+          "type": "string"
+        }
+      }
+    },
+    "McpApprovalResponse": {
+      "type": "object",
+      "required": [
+        "type",
+        "approval_request_id",
+        "approve"
+      ],
+      "properties": {
+        "type": {
+          "const": "mcp_approval_response"
+        },
+        "approval_request_id": {
+          "type": "string"
+        },
+        "approve": {
+          "type": "boolean"
+        }
+      }
+    },
+    "Tool": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "oneOf": [
+        {
+          "$ref": "#/definitions/FunctionTool"
+        },
+        {
+          "$ref": "#/definitions/CodeInterpreterTool"
+        },
+        {
+          "$ref": "#/definitions/FileSearchTool"
+        },
+        {
+          "$ref": "#/definitions/ImageGenerationTool"
+        },
+        {
+          "$ref": "#/definitions/McpTool"
+        }
+      ]
+    },
+    "FunctionTool": {
+      "type": "object",
+      "required": [
+        "type",
+        "name",
+        "parameters"
+      ],
+      "properties": {
+        "type": {
+          "const": "function"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "parameters": {
+          "type": "object",
+          "description": "JSON Schema for function parameters"
+        },
+        "strict": {
+          "type": "boolean"
+        }
+      }
+    },
+    "CodeInterpreterTool": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "code_interpreter"
+        },
+        "container": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "auto"
+            },
+            "files": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "FileSearchTool": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "file_search"
+        }
+      }
+    },
+    "ImageGenerationTool": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "image_generation"
+        }
+      }
+    },
+    "McpTool": {
+      "type": "object",
+      "required": [
+        "type",
+        "server_label",
+        "server_url"
+      ],
+      "properties": {
+        "type": {
+          "const": "mcp"
+        },
+        "server_label": {
+          "type": "string"
+        },
+        "server_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "require_approval": {
+          "type": "string",
+          "enum": [
+            "always",
+            "never"
+          ],
+          "default": "always"
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "ToolChoice": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "function"
+        },
+        "function": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "ReasoningConfig": {
+      "type": "object",
+      "properties": {
+        "effort": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "encrypted_content": {
+          "type": "string"
+        }
+      }
+    },
+    "ResponseFormat": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "text",
+            "json_object",
+            "json_schema"
+          ]
+        },
+        "json_schema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "schema": {
+              "type": "object"
+            },
+            "strict": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "ResponseObject": {
+      "type": "object",
+      "description": "Response object returned by the API",
+      "required": [
+        "id",
+        "object",
+        "created_at",
+        "model",
+        "status"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the response",
+          "pattern": "^resp_[a-zA-Z0-9]+$"
+        },
+        "object": {
+          "type": "string",
+          "const": "response"
+        },
+        "created_at": {
+          "type": "number",
+          "description": "Unix timestamp of when the response was created"
+        },
+        "model": {
+          "type": "string",
+          "description": "The model used for generation"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "in_progress",
+            "completed",
+            "incomplete",
+            "failed",
+            "cancelled"
+          ],
+          "description": "Current status of the response"
+        },
+        "output": {
+          "type": "array",
+          "description": "Array of output items generated by the model",
+          "items": {
+            "$ref": "#/definitions/OutputItem"
+          }
+        },
+        "output_text": {
+          "type": "string",
+          "description": "Concatenated text from all output_text items (convenience field)"
+        },
+        "instructions": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "System instructions used"
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Tool"
+          }
+        },
+        "tool_choice": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "$ref": "#/definitions/ToolChoice"
+            }
+          ]
+        },
+        "parallel_tool_calls": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "temperature": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "top_p": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "max_output_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "truncation": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "previous_response_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reasoning": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/ReasoningOutput"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reasoning_effort": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "usage": {
+          "$ref": "#/definitions/Usage"
+        },
+        "error": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/ErrorObject"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "incomplete_details": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/IncompleteDetails"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "user": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "OutputItem": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "message",
+            "function_call",
+            "code_interpreter_call",
+            "image_generation_call",
+            "mcp_approval_request"
+          ]
+        }
+      },
+      "oneOf": [
+        {
+          "$ref": "#/definitions/MessageOutput"
+        },
+        {
+          "$ref": "#/definitions/FunctionCallOutput"
+        },
+        {
+          "$ref": "#/definitions/CodeInterpreterCallOutput"
+        },
+        {
+          "$ref": "#/definitions/ImageGenerationCallOutput"
+        },
+        {
+          "$ref": "#/definitions/McpApprovalRequestOutput"
+        }
+      ]
+    },
+    "MessageOutput": {
+      "type": "object",
+      "required": [
+        "id",
+        "type",
+        "role",
+        "content"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "message"
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "assistant"
+          ]
+        },
+        "content": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MessageContent"
+          }
+        },
+        "status": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "in_progress",
+            "completed",
+            null
+          ]
+        }
+      }
+    },
+    "MessageContent": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "oneOf": [
+        {
+          "$ref": "#/definitions/TextOutputContent"
+        },
+        {
+          "$ref": "#/definitions/ImageOutputContent"
+        }
+      ]
+    },
+    "TextOutputContent": {
+      "type": "object",
+      "required": [
+        "type",
+        "text"
+      ],
+      "properties": {
+        "type": {
+          "const": "output_text"
+        },
+        "text": {
+          "type": "string"
+        },
+        "annotations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Annotation"
+          }
+        }
+      }
+    },
+    "ImageOutputContent": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "output_image"
+        },
+        "image": {
+          "type": "object",
+          "properties": {
+            "file_id": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "Annotation": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "file_citation",
+            "file_path"
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "file_citation": {
+          "type": "object",
+          "properties": {
+            "file_id": {
+              "type": "string"
+            },
+            "quote": {
+              "type": "string"
+            }
+          }
+        },
+        "file_path": {
+          "type": "object",
+          "properties": {
+            "file_id": {
+              "type": "string"
+            }
+          }
+        },
+        "start_index": {
+          "type": "integer"
+        },
+        "end_index": {
+          "type": "integer"
+        }
+      }
+    },
+    "FunctionCallOutput": {
+      "type": "object",
+      "required": [
+        "id",
+        "type",
+        "name",
+        "call_id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "function_call"
+        },
+        "name": {
+          "type": "string"
+        },
+        "call_id": {
+          "type": "string"
+        },
+        "arguments": {
+          "type": "string"
+        },
+        "status": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "CodeInterpreterCallOutput": {
+      "type": "object",
+      "required": [
+        "id",
+        "type",
+        "call_id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "code_interpreter_call"
+        },
+        "call_id": {
+          "type": "string"
+        },
+        "container_id": {
+          "type": "string"
+        },
+        "input": {
+          "type": "string"
+        },
+        "outputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CodeInterpreterOutput"
+          }
+        }
+      }
+    },
+    "CodeInterpreterOutput": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "logs",
+            "image",
+            "file"
+          ]
+        },
+        "logs": {
+          "type": "string"
+        },
+        "image": {
+          "type": "object",
+          "properties": {
+            "file_id": {
+              "type": "string"
+            }
+          }
+        },
+        "file": {
+          "type": "object",
+          "properties": {
+            "file_id": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "ImageGenerationCallOutput": {
+      "type": "object",
+      "required": [
+        "id",
+        "type",
+        "call_id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "image_generation_call"
+        },
+        "call_id": {
+          "type": "string"
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "result": {
+          "type": "string",
+          "description": "Base64-encoded image data"
+        }
+      }
+    },
+    "McpApprovalRequestOutput": {
+      "type": "object",
+      "required": [
+        "id",
+        "type",
+        "server_label",
+        "name"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "mcp_approval_request"
+        },
+        "server_label": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "arguments": {
+          "type": "object"
+        }
+      }
+    },
+    "ReasoningOutput": {
+      "type": "object",
+      "properties": {
+        "content": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "text"
+              },
+              "text": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "encrypted_content": {
+          "type": "string"
+        }
+      }
+    },
+    "Usage": {
+      "type": "object",
+      "required": [
+        "input_tokens",
+        "output_tokens",
+        "total_tokens"
+      ],
+      "properties": {
+        "input_tokens": {
+          "type": "integer",
+          "description": "Number of tokens in the input"
+        },
+        "output_tokens": {
+          "type": "integer",
+          "description": "Number of tokens in the output"
+        },
+        "output_tokens_details": {
+          "type": "object",
+          "properties": {
+            "reasoning_tokens": {
+              "type": "integer",
+              "description": "Number of tokens used for reasoning"
+            }
+          }
+        },
+        "total_tokens": {
+          "type": "integer",
+          "description": "Total tokens used"
+        }
+      }
+    },
+    "ErrorObject": {
+      "type": "object",
+      "required": [
+        "type",
+        "message"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "Error type"
+        },
+        "message": {
+          "type": "string",
+          "description": "Human-readable error message"
+        },
+        "code": {
+          "type": "string",
+          "description": "Error code"
+        },
+        "param": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Parameter that caused the error"
+        }
+      }
+    },
+    "IncompleteDetails": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "type": "string",
+          "enum": [
+            "max_output_tokens",
+            "content_filter"
+          ],
+          "description": "Reason why the response is incomplete"
+        }
+      }
+    },
+    "StreamEvent": {
+      "type": "object",
+      "description": "Server-sent event during streaming",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "response.created",
+            "response.output_item.added",
+            "response.output_text.delta",
+            "response.output_text.done",
+            "response.function_call_arguments.delta",
+            "response.function_call_arguments.done",
+            "response.done",
+            "response.failed",
+            "response.cancelled"
+          ]
+        },
+        "sequence_number": {
+          "type": "integer",
+          "description": "Sequence number for resuming streams"
+        },
+        "response": {
+          "$ref": "#/definitions/ResponseObject"
+        },
+        "item": {
+          "$ref": "#/definitions/OutputItem"
+        },
+        "delta": {
+          "type": "string",
+          "description": "Incremental text update"
+        },
+        "error": {
+          "$ref": "#/definitions/ErrorObject"
+        }
+      }
+    },
+    "ListResponsesResponse": {
+      "type": "object",
+      "properties": {
+        "object": {
+          "const": "list"
+        },
+        "data": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ResponseObject"
+          }
+        },
+        "has_more": {
+          "type": "boolean"
+        },
+        "first_id": {
+          "type": "string"
+        },
+        "last_id": {
+          "type": "string"
+        }
+      }
+    },
+    "DeleteResponseResponse": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "object": {
+          "const": "response.deleted"
+        },
+        "deleted": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

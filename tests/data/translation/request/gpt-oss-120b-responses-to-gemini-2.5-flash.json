@@ -1,0 +1,112 @@
+{
+  "target": {
+    "model": "gemini-2.5-flash",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a structured assistant that answers questions step-by-step."
+      },
+      {
+        "role": "user",
+        "content": "Check the status of my request id 42"
+      }
+    ],
+    "max_completion_tokens": 512,
+    "stream": false,
+    "temperature": 0.2,
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "fn_check_status",
+          "description": "Returns detailed status information for a request.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "user_id": {
+                "type": "string"
+              },
+              "request_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "user_id",
+              "request_id"
+            ]
+          }
+        }
+      }
+    ],
+    "response_format": {
+      "type": "json_schema",
+      "json_schema": {
+        "name": "weather_response",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "location": {
+              "type": "string"
+            },
+            "temperature": {
+              "type": "number"
+            }
+          }
+        }
+      }
+    }
+  },
+  "source": {
+    "model": "gpt-oss-120b",
+    "instructions": "You are a structured assistant that answers questions step-by-step.",
+    "input": [
+      {
+        "type": "message",
+        "role": "user",
+        "content": "Check the status of my request id 42"
+      }
+    ],
+    "temperature": 0.2,
+    "max_output_tokens": 512,
+    "stream": false,
+    "tools": [
+      {
+        "type": "function",
+        "name": "fn_check_status",
+        "description": "Returns detailed status information for a request.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "user_id": {
+              "type": "string"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "user_id",
+            "request_id"
+          ]
+        }
+      }
+    ],
+    "response_format": {
+      "type": "json_schema",
+      "json_schema": {
+        "name": "weather_response",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "location": {
+              "type": "string"
+            },
+            "temperature": {
+              "type": "number"
+            }
+          }
+        }
+      }
+    }
+  }
+}

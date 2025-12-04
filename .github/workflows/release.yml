@@ -1,0 +1,100 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      test-pypi:
+        description: "Publish to TestPyPI instead of PyPI"
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+
+  lint:
+    uses: ./.github/workflows/lint.yml
+
+  publish:
+    runs-on: ubuntu-latest
+    needs: [test, lint]
+
+    # Allow tag pushes only from protected branch (main)
+    if: >
+      (github.event_name == 'push' && github.ref_protected == 'true') ||
+      github.event_name == 'workflow_dispatch'
+
+    permissions:
+      id-token: write
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: snok/install-poetry@v1
+        with:
+          version: latest
+
+      - name: Verify version matches tag
+        if: github.event_name == 'push'
+        run: |
+          TAG_VERSION="${GITHUB_REF#refs/tags/v}"
+          FILE_VERSION=$(grep -E '^version = ' pyproject.toml | sed -E 's/version = "(.*)"/\1/')
+          echo "Tag version: $TAG_VERSION"
+          echo "File version: $FILE_VERSION"
+          if [ "$TAG_VERSION" != "$FILE_VERSION" ]; then
+            echo "ERROR: Version in pyproject.toml does not match tag"
+            exit 1
+          fi
+
+      - name: Check if version already exists on PyPI
+        if: github.event_name == 'push'
+        run: |
+          PACKAGE_NAME=$(grep -E '^name = ' pyproject.toml | sed -E 's/name = "(.*)"/\1/')
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          EXISTS=$(curl -s -o /dev/null -w "%{http_code}" "https://pypi.org/pypi/$PACKAGE_NAME/$VERSION/json")
+          if [ "$EXISTS" -eq 200 ]; then
+            echo "ERROR: Version already exists on PyPI. Aborting."
+            exit 1
+          fi
+
+      - name: Build distribution
+        run: poetry build
+
+      - name: Install Twine
+        run: pip install twine
+
+      - name: Validate distributions
+        run: twine check dist/*
+
+      - name: Publish to PyPI
+        if: >
+          (github.event_name == 'push' && github.ref_protected == 'true') ||
+          (github.event_name == 'workflow_dispatch' && inputs.test-pypi == false)
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          verbose: true
+
+      - name: Publish to TestPyPI
+        if: github.event_name == 'workflow_dispatch' && inputs.test-pypi == true
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          verbose: true
+
+      - name: Upload release assets
+        if: github.event_name == 'push' && github.ref_protected == 'true'
+        uses: softprops/action-gh-release@v1
+        with:
+          files: dist/*
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

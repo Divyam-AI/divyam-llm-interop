@@ -1,0 +1,8 @@
+- selector:
+    name:
+      regex:
+        - deepseek-*
+  capabilities:
+    supported_api_types:
+      - COMPLETIONS
+    supports_reasoning: false
