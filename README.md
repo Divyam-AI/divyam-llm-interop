@@ -5,6 +5,93 @@ and responses. Divyam LLM Interop provides a unified interface for
 interacting with models across providers while maintaining consistent request
 and response semantics.
 
+## Installation
+
+```shell
+# Install from PyPI
+pip install divyam-llm-interop
+```
+
+See [PyPI](https://pypi.org/project/divyam-llm-interop/)
+
+## Usage
+
+The primary API for text based chat request and response conversion is [ChatTranslator](./src/divyam_llm_interop/translate/chat/translate.py). 
+
+### Translate a chat request
+```python
+from divyam_llm_interop.translate.chat.api_types import ModelApiType
+from divyam_llm_interop.translate.chat.translate import ChatTranslator
+from divyam_llm_interop.translate.chat.types import ChatRequest, ChatResponse, Model
+
+# Translate gemini-1.5-pro Chat Completions API request to a gpt-4.1
+# Responses API request
+translator = ChatTranslator()
+chat_request = ChatRequest(body={
+    "model": "gemini-1.5-pro",
+    "messages": [
+        {
+            "role": "user",
+            "content": "What is the capital of India?"
+        },
+        {
+            "role": "user",
+            "content": "What is the capital of India?"
+        }
+    ],
+    "temperature": 0.7,
+    "top_p": 1.0,
+    "max_tokens": 100000,
+    "presence_penalty": 0.5
+})
+source = Model(name="gemini-1.5-pro", api_type=ModelApiType.COMPLETIONS)
+target = Model(name="gpt-4.1", api_type=ModelApiType.RESPONSES)
+translated = translator.translate_request(chat_request, source, target)
+```
+
+### Translate chat response
+```python
+from divyam_llm_interop.translate.chat.api_types import ModelApiType
+from divyam_llm_interop.translate.chat.translate import ChatTranslator
+from divyam_llm_interop.translate.chat.types import ChatResponse, Model
+
+# Translate Responses API response to Chat Completions API Response. 
+translator = ChatTranslator()
+
+# Response body most likely obtained from a LLM call.
+chat_response = ChatResponse(body={
+    "id": "resp_abc123",
+    "object": "response",
+    "model": "gpt-4.1",
+    "created": 1733400000,
+    "output": [
+        {
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "output_text",
+                    "text": "The capital of India is New Delhi."
+                }
+            ]
+        }
+    ],
+    "usage": {
+        "input_tokens": 35,
+        "output_tokens": 10,
+        "total_tokens": 45
+    },
+    "metadata": {
+        "temperature": 0.7,
+        "top_p": 1.0,
+        "presence_penalty": 0.5
+    }
+})
+
+source = Model(name="gpt-4.1", api_type=ModelApiType.RESPONSES)
+target = Model(name="gpt-4.1", api_type=ModelApiType.COMPLETIONS)
+translated = translator.translate_response(chat_response, source, target)
+```
+
 ## Development Environment Setup
 
 ### Create a virtual environment
