@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "divyam-llm-interop"
-version = "0.1.0"
+version = "0.1.1"
 description = "A lightweight, provider-neutral library for translating LLM requests and responses across model APIs."
 authors = ["DivyamAI Technologies Private Limited"]
 license = "Apache-2.0"
