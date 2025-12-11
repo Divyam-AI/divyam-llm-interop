@@ -1,91 +1,72 @@
-name: CI
+name: Test
 
 on:
-  push:
-  pull_request:
+  workflow_call:
+    inputs:
+      upload-coverage:
+        description: 'Upload coverage to Codecov'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
-  build:
+  test:
     runs-on: ${{ matrix.os }}
-
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
-
-    env:
-      POETRY_VIRTUALENVS_IN_PROJECT: "true"
-      POETRY_CACHE_DIR: ./.poetry-cache
-      VIRTUALENV_ALWAYS_COPY: "true"
-      PYTHONIOENCODING: "utf-8"
-      PYTHONUTF8: "1"
+        os: [ ubuntu-latest, macos-latest, windows-latest ]
+        python-version: [ "3.10", "3.11", "3.12", "3.13" ]
+        exclude:
+          - os: windows-latest
+            python-version: "3.13"
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Windows UTF-8 console patch
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          echo "Patching Windows code page → UTF-8"
-          chcp 65001
-
-      - name: Patch Poetry interpreter bug (Windows + Python 3.13)
-        if: runner.os == 'Windows' && startsWith(matrix.python-version, '3.13')
-        shell: bash
-        run: |
-          echo "Applying Poetry shim for Windows Python 3.13..."
-
-          TARGET="C:/hostedtoolcache/windows/Python/3.13.9/x64"
-          REAL="${pythonLocation//\\/\/}"
-          echo "Poetry expects: $TARGET"
-          echo "Actual python:  $REAL"
-
-          mkdir -p "$TARGET"
-
-          # Shim python.exe
-          cat > "$TARGET/python.exe" << EOF
-          #!/bin/bash
-          exec "$REAL/python.exe" "\$@"
-          EOF
-                    chmod +x "$TARGET/python.exe"
-          
-                    # Shim python3.exe
-                    cat > "$TARGET/python3.exe" << EOF
-          #!/bin/bash
-          exec "$REAL/python.exe" "\$@"
-          EOF
-          chmod +x "$TARGET/python3.exe"
-
-          echo "Shim installed."
-
       - name: Install Poetry
-        run: |
-          pip install -U pip setuptools wheel
-          pip install poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: latest
+          virtualenvs-create: true
+          virtualenvs-in-project: true
 
-      - name: Force UTF-8 & fix Poetry env on Windows
+      - name: Load cached venv
+        id: cached-poetry-dependencies
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('**/poetry.lock') }}
+          restore-keys: |
+            venv-${{ runner.os }}-${{ matrix.python-version }}-
+
+      - name: Add Poetry to PATH (Windows)
         if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          echo "Enforcing UTF-8 env vars..."
-          export PYTHONIOENCODING=utf-8
-          export PYTHONUTF8=1
+        run: echo "C:\\Users\\runneradmin\\.local\\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        shell: powershell
 
-          echo "Forcing Poetry to use correct Python interpreter..."
-          poetry env use "${pythonLocation//\\/\/}/python.exe"
-
-      - name: Show Poetry env info
-        run: poetry env info
-
-      - name: Install dependencies
+      - name: Install project dependencies
         run: poetry install --no-interaction
 
+      - name: Force UTF-8 (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          echo "PYTHONUTF8=1" >> $env:GITHUB_ENV
+          echo "PYTHONIOENCODING=utf-8" >> $env:GITHUB_ENV
+        shell: powershell
+
       - name: Run tests
-        run: poetry run pytest -q
+        run: |
+          poetry run pytest --cov=. --cov-report=xml --cov-report=term-missing
+
+      - name: Upload coverage to Codecov
+        if: inputs.upload-coverage && matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.xml
+          fail_ci_if_error: false
