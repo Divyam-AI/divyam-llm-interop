@@ -195,7 +195,7 @@ class ModelCapabilities:
     extra: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
-        for api_type in self.supported_api_types:
+        for api_type in ModelApiType:
             if api_type not in self.api_capabilities:
                 self.api_capabilities[api_type] = ApiTypeSpecificRules()
 
