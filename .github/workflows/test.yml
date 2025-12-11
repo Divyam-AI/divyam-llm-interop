@@ -14,6 +14,13 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.10", "3.11", "3.12", "3.13"]
 
+    env:
+      POETRY_VIRTUALENVS_IN_PROJECT: "true"
+      POETRY_CACHE_DIR: ./.poetry-cache
+      VIRTUALENV_ALWAYS_COPY: "true"
+      PYTHONIOENCODING: "utf-8"
+      PYTHONUTF8: "1"
+
     steps:
       - uses: actions/checkout@v4
 
@@ -22,44 +29,57 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      # -----------------------
-      # Windows + Python 3.13 FIX
-      # -----------------------
-      - name: Patch Poetry interpreter bug (Windows + Python 3.13 only)
+      - name: Windows UTF-8 console patch
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          echo "Patching Windows code page → UTF-8"
+          chcp 65001
+
+      - name: Patch Poetry interpreter bug (Windows + Python 3.13)
         if: runner.os == 'Windows' && startsWith(matrix.python-version, '3.13')
         shell: bash
         run: |
-          echo "Applying Windows Python 3.13 shim patch..."
+          echo "Applying Poetry shim for Windows Python 3.13..."
 
-          # The path Poetry EXPECTS but does not exist
           TARGET="C:/hostedtoolcache/windows/Python/3.13.9/x64"
-          REAL="${pythonLocation//\\/\/}"   # from setup-python
-
+          REAL="${pythonLocation//\\/\/}"
           echo "Poetry expects: $TARGET"
-          echo "Actual Python:  $REAL"
+          echo "Actual python:  $REAL"
 
-          # Create fake path
           mkdir -p "$TARGET"
 
-          # Create shim python.exe
-          cat > "$TARGET/python.exe" << 'EOF'
+          # Shim python.exe
+          cat > "$TARGET/python.exe" << EOF
           #!/bin/bash
-          exec "$pythonLocation/python.exe" "$@"
+          exec "$REAL/python.exe" "\$@"
           EOF
                     chmod +x "$TARGET/python.exe"
           
-                    # Create shim python3.exe
-                    cat > "$TARGET/python3.exe" << 'EOF'
+                    # Shim python3.exe
+                    cat > "$TARGET/python3.exe" << EOF
           #!/bin/bash
-          exec "$pythonLocation/python.exe" "$@"
+          exec "$REAL/python.exe" "\$@"
           EOF
-          
           chmod +x "$TARGET/python3.exe"
 
           echo "Shim installed."
 
       - name: Install Poetry
-        run: pip install poetry
+        run: |
+          pip install -U pip setuptools wheel
+          pip install poetry
+
+      - name: Force UTF-8 & fix Poetry env on Windows
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          echo "Enforcing UTF-8 env vars..."
+          export PYTHONIOENCODING=utf-8
+          export PYTHONUTF8=1
+
+          echo "Forcing Poetry to use correct Python interpreter..."
+          poetry env use "${pythonLocation//\\/\/}/python.exe"
 
       - name: Show Poetry env info
         run: poetry env info
