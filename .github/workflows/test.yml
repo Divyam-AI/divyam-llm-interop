@@ -52,6 +52,8 @@ jobs:
         run: poetry install --no-interaction --no-root
 
       - name: Install project
+        env:
+          POETRY_VIRTUALENVS_IN_PROJECT: true
         run: poetry install --no-interaction
 
       - name: Force UTF-8 (Windows)
