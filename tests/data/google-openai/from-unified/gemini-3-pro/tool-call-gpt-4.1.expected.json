@@ -1,4 +1,5 @@
 {
+  "model": "gemini-3-pro",
   "messages": [
     {
       "role": "system",
@@ -17,12 +18,11 @@
       "content": "I need to check status of my request id is 5"
     }
   ],
-  "model": "gpt-5",
   "reasoning_effort": "high",
-  "max_completion_tokens": 512,
+  "temperature": 0.2,
   "n": 1,
   "stream": false,
-  "temperature": 1,
+  "max_completion_tokens": 512,
   "tools": [
     {
       "type": "function",
@@ -30,21 +30,21 @@
         "name": "fn_check_status",
         "description": "Returns detailed status information for all IDs in the request.",
         "parameters": {
+          "type": "object",
           "properties": {
             "user_id": {
-              "type": "string",
-              "description": "User ID (string)"
+              "description": "User ID (string)",
+              "type": "string"
             },
             "request_id": {
-              "type": "string",
-              "description": "Request ID (string)"
+              "description": "Request ID (string)",
+              "type": "string"
             }
           },
           "required": [
             "user_id",
             "request_id"
-          ],
-          "type": "object"
+          ]
         }
       }
     },
@@ -54,21 +54,21 @@
         "name": "fn_get_items",
         "description": "Gets the items in a request.",
         "parameters": {
+          "type": "object",
           "properties": {
             "user_id": {
-              "type": "string",
-              "description": "User ID (string)"
+              "description": "User ID (string)",
+              "type": "string"
             },
             "request_id": {
-              "type": "string",
-              "description": "Request ID (string)"
+              "description": "Request ID (string)",
+              "type": "string"
             }
           },
           "required": [
             "user_id",
             "request_id"
-          ],
-          "type": "object"
+          ]
         }
       }
     },
@@ -78,6 +78,7 @@
         "name": "fn_get_removed_items",
         "description": "Gets details of removed items from a request if any.",
         "parameters": {
+          "type": "object",
           "properties": {
             "user_id": {
               "type": "string"
@@ -89,8 +90,7 @@
           "required": [
             "user_id",
             "request_id"
-          ],
-          "type": "object"
+          ]
         }
       }
     },
@@ -100,6 +100,7 @@
         "name": "fn_get_payment_info",
         "description": "Fetches payment and refund details for the request.",
         "parameters": {
+          "type": "object",
           "properties": {
             "user_id": {
               "type": "string"
@@ -111,8 +112,7 @@
           "required": [
             "user_id",
             "request_id"
-          ],
-          "type": "object"
+          ]
         }
       }
     },
@@ -122,6 +122,7 @@
         "name": "fn_raise_delay_ticket",
         "description": "Raises a delay ticket for the given request.",
         "parameters": {
+          "type": "object",
           "properties": {
             "user_id": {
               "type": "string"
@@ -133,8 +134,7 @@
           "required": [
             "user_id",
             "request_id"
-          ],
-          "type": "object"
+          ]
         }
       }
     },
@@ -144,6 +144,7 @@
         "name": "fn_cancel_request",
         "description": "Cancels the request or part of it for the given user ID and request ID.",
         "parameters": {
+          "type": "object",
           "properties": {
             "user_id": {
               "type": "string"
@@ -152,33 +153,28 @@
               "type": "string"
             },
             "reason_code": {
+              "default": null,
               "anyOf": [
                 {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
+                  "type": "integer",
+                  "nullable": true
                 }
-              ],
-              "default": null
+              ]
             },
             "reason_text": {
+              "default": "Unknown",
               "anyOf": [
                 {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
+                  "type": "string",
+                  "nullable": true
                 }
-              ],
-              "default": "Unknown"
+              ]
             }
           },
           "required": [
             "user_id",
             "item_id"
-          ],
-          "type": "object"
+          ]
         }
       }
     },
@@ -188,6 +184,7 @@
         "name": "fn_status_mismatch",
         "description": "Raises a mismatch ticket in cases of status mismatch.",
         "parameters": {
+          "type": "object",
           "properties": {
             "user_id": {
               "type": "string"
@@ -196,22 +193,19 @@
               "type": "string"
             },
             "reason_code": {
+              "default": null,
               "anyOf": [
                 {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
+                  "type": "integer",
+                  "nullable": true
                 }
-              ],
-              "default": null
+              ]
             }
           },
           "required": [
             "user_id",
             "item_id"
-          ],
-          "type": "object"
+          ]
         }
       }
     },
@@ -221,6 +215,7 @@
         "name": "fn_create_return",
         "description": "Creates a return for the given IDs and list of items.",
         "parameters": {
+          "type": "object",
           "properties": {
             "user_id": {
               "type": "string"
@@ -229,28 +224,25 @@
               "type": "string"
             },
             "items_list": {
+              "description": "List of items with id and quantity.",
               "type": "array",
-              "items": {},
-              "description": "List of items with id and quantity."
+              "items": {}
             },
             "reason_code": {
+              "default": null,
               "anyOf": [
                 {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
+                  "type": "integer",
+                  "nullable": true
                 }
-              ],
-              "default": null
+              ]
             }
           },
           "required": [
             "user_id",
             "item_id",
             "items_list"
-          ],
-          "type": "object"
+          ]
         }
       }
     },
@@ -260,6 +252,7 @@
         "name": "fn_get_returnable_items",
         "description": "Fetches the list of items eligible for return.",
         "parameters": {
+          "type": "object",
           "properties": {
             "user_id": {
               "type": "string"
@@ -271,8 +264,7 @@
           "required": [
             "user_id",
             "request_id"
-          ],
-          "type": "object"
+          ]
         }
       }
     },
@@ -282,6 +274,7 @@
         "name": "fn_get_return_status",
         "description": "Fetches the status of a return.",
         "parameters": {
+          "type": "object",
           "properties": {
             "user_id": {
               "type": "string"
@@ -290,33 +283,28 @@
               "type": "string"
             },
             "return_id": {
+              "default": null,
               "anyOf": [
                 {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
+                  "type": "string",
+                  "nullable": true
                 }
-              ],
-              "default": null
+              ]
             },
             "complaint_code": {
+              "default": null,
               "anyOf": [
                 {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
+                  "type": "integer",
+                  "nullable": true
                 }
-              ],
-              "default": null
+              ]
             }
           },
           "required": [
             "user_id",
             "item_id"
-          ],
-          "type": "object"
+          ]
         }
       }
     },
@@ -329,8 +317,8 @@
           "type": "object",
           "properties": {
             "query_text": {
-              "type": "string",
-              "description": "Question to search in FAQs."
+              "description": "Question to search in FAQs.",
+              "type": "string"
             }
           },
           "required": [

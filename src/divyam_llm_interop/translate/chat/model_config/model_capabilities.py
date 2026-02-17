@@ -228,6 +228,10 @@ class ModelCapabilities:
         if drop_fields:
             for field_name in drop_fields:
                 body.pop(field_name, None)
+        
+        if not self.supports_stop_sequences:
+            body.pop("stop_sequences", None)
+            body.pop("stop", None)
 
         if not self.supports_reasoning:
             # noinspection PyBroadException

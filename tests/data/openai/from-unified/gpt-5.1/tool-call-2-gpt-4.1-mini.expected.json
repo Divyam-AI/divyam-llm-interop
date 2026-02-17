@@ -65,8 +65,8 @@
       "content": "How much time new"
     }
   ],
-  "model": "gpt-5",
-  "max_tokens": 400,
+  "model": "gpt-5.1",
+  "max_completion_tokens": 400,
   "stream": false,
   "temperature": 1,
   "tools": [
