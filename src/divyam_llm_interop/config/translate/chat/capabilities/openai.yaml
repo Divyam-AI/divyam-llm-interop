@@ -262,8 +262,8 @@
       min: 1
       max: 131072
     temperature:
-      min: 0
-      max: 2
+      min: 1
+      max: 1
     top_p:
       min: 0
       max: 1
@@ -277,7 +277,7 @@
       min: 1
       max: 128
     input_token_limit: 2000000
-    supports_stop_sequences: true
+    supports_stop_sequences: false
     supports_json_mode: true
     supports_function_calling: true
     supports_vision: true
@@ -703,3 +703,242 @@
     supports_function_calling: true
     supports_vision: true
     supports_reasoning: false
+
+- selector:
+    name:
+      regex:
+          - "gpt-5\\..*"
+  capabilities:
+    strict_completions_compatibility: false
+    description: Newer models use max_completion_tokens instead of max_tokens
+    api_capabilities:
+      completions:
+        rename_fields:
+          max_tokens: max_completion_tokens
+
+- selector:
+    name: gpt-5.1-pro
+  capabilities:
+    strict_completions_compatibility: false
+    max_tokens:
+      min: 1
+      max: 131072
+    top_p: { min: 1, max: 1}
+    input_token_limit: 400000
+    supports_stop_sequences: true
+    supports_json_mode: true
+    supports_function_calling: true
+    supports_vision: true
+    supports_reasoning: true
+    supports_code_execution: true
+    api_capabilities:
+      completions:
+        rename_fields:
+          max_tokens: max_completion_tokens
+        supported_parameters:
+          - reasoning_effort: ["none", "low", "medium", "high"]
+        # Supports 24h Prompt Caching via 'prompt_cache_retention'
+
+- selector:
+    name: gpt-5.1
+  capabilities:
+    strict_completions_compatibility: false
+    max_tokens:
+      min: 1
+      max: 131072
+    top_p: { min: 1, max: 1}
+    input_token_limit: 400000
+    supports_stop_sequences: true
+    supports_json_mode: true
+    supports_function_calling: true
+    supports_vision: true
+    supports_reasoning: true
+    api_capabilities:
+      completions:
+        rename_fields:
+          max_tokens: max_completion_tokens
+        supported_parameters:
+          - reasoning_effort: ["none", "low", "medium", "high"]
+
+- selector:
+    name: gpt-5.1-mini
+  capabilities:
+    strict_completions_compatibility: false
+    max_tokens:
+      min: 1
+      max: 102400
+    top_p: { min: 1, max: 1}
+    input_token_limit: 400000
+    supports_stop_sequences: true
+    supports_json_mode: true
+    supports_function_calling: true
+    supports_vision: true
+    supports_reasoning: true
+    api_capabilities:
+      completions:
+        rename_fields:
+          max_tokens: max_completion_tokens
+        supported_parameters:
+          - reasoning_effort: ["none", "low", "medium"]
+
+- selector:
+    name: gpt-5.1-nano
+  capabilities:
+    strict_completions_compatibility: false
+    max_tokens:
+      min: 1
+      max: 32768
+    top_p: { min: 1, max: 1}
+    input_token_limit: 400000
+    supports_stop_sequences: true
+    supports_json_mode: true
+    supports_function_calling: true
+    supports_vision: true
+    supports_reasoning: true
+    api_capabilities:
+      completions:
+        rename_fields:
+          max_tokens: max_completion_tokens
+        supported_parameters:
+          - reasoning_effort: ["none", "low"]
+
+- selector:
+    name: gpt-5.1-codex-max
+  capabilities:
+    strict_completions_compatibility: false
+    max_tokens:
+      min: 1
+      max: 131072
+    top_p: { min: 1, max: 1}
+    input_token_limit: 1000000  # Extended via native compaction
+    supports_stop_sequences: true
+    supports_json_mode: true
+    supports_function_calling: true
+    supports_vision: true
+    supports_reasoning: true
+    supports_code_execution: true
+    api_capabilities:
+      completions:
+        rename_fields:
+          max_tokens: max_completion_tokens
+        supported_parameters:
+          - reasoning_effort: ["low", "medium", "high", "xhigh"]
+
+
+- selector:
+    name: gpt-5.2-pro
+  capabilities:
+    strict_completions_compatibility: false
+    max_completion_tokens: { min: 1, max: 131072 } # 128k output cap
+    top_p: { min: 1, max: 1}
+    input_token_limit: 272000 # 400k total minus 128k output buffer
+    supports_reasoning: true
+    supports_vision: true
+    supports_code_execution: true
+    api_capabilities:
+      completions:
+        supported_parameters:
+          - reasoning_effort: ["none", "low", "medium", "high", "xhigh"]
+        rename_fields:
+          max_tokens: max_completion_tokens
+
+- selector:
+    name: gpt-5.2
+  capabilities:
+    max_completion_tokens: { min: 1, max: 131072 }
+    top_p: { min: 1, max: 1}
+    input_token_limit: 272000
+    supports_reasoning: true
+    api_capabilities:
+      completions:
+        supported_parameters:
+          - reasoning_effort: ["none", "low", "medium", "high"]
+
+- selector:
+    name: gpt-5.3-codex
+  capabilities:
+    description: OpenAI's flagship agentic coding model; merges reasoning with software lifecycle management.
+    strict_completions_compatibility: false
+    max_completion_tokens:
+      min: 1
+      max: 131072
+    top_p: { min: 1, max: 1}
+    input_token_limit: 400000
+    supports_stop_sequences: true
+    supports_json_mode: true
+    supports_function_calling: true
+    supports_vision: true
+    supports_reasoning: true
+    supports_code_execution: true
+    api_capabilities:
+      completions:
+        rename_fields:
+          max_tokens: max_completion_tokens
+        supported_parameters:
+          - reasoning_effort: ["low", "medium", "high", "xhigh"]
+        # Note: Features "Real-time Steering" via WebSocket/Responses API
+
+- selector:
+    name: gpt-5.3-codex-spark
+  capabilities:
+    description: Ultra-fast real-time coding model (1000+ tokens/sec) for interactive iteration.
+    strict_completions_compatibility: false
+    max_completion_tokens:
+      min: 1
+      max: 32768
+    top_p: { min: 1, max: 1}
+    input_token_limit: 128000
+    supports_stop_sequences: true
+    supports_json_mode: true
+    supports_function_calling: false
+    supports_vision: false
+    supports_reasoning: true
+    supports_code_execution: true
+    top_k: { min: 1, max: 100 } # Spark-specific capability
+    temperature: { min: 0.0, max: 1.5 }
+    api_capabilities:
+      completions:
+        rename_fields:
+          max_tokens: max_completion_tokens
+        supported_parameters:
+          - reasoning_effort: ["low", "medium"]
+
+- selector:
+    name: gpt-5.2-codex
+  capabilities:
+    description: Legacy agentic coding model with native context compaction.
+    strict_completions_compatibility: false
+    max_completion_tokens:
+      min: 1
+      max: 128000
+    top_p: { min: 1, max: 1}
+    input_token_limit: 400000
+    supports_stop_sequences: true
+    supports_json_mode: true
+    supports_function_calling: true
+    supports_vision: true
+    supports_reasoning: true
+    supports_code_execution: true
+    api_capabilities:
+      completions:
+        rename_fields:
+          max_tokens: max_completion_tokens
+        supported_parameters:
+          - reasoning_effort: ["low", "medium", "high", "xhigh"]
+
+- selector:
+    name: gpt-5.1-codex
+  capabilities:
+    description: Initial GPT-5 generation coding specialist.
+    strict_completions_compatibility: false
+    max_tokens:
+      min: 1
+      max: 131072
+    top_p: { min: 1, max: 1}
+    input_token_limit: 256000
+    supports_stop_sequences: true
+    supports_json_mode: true
+    supports_function_calling: true
+    supports_vision: true
+    supports_reasoning: true
+    supports_code_execution: true

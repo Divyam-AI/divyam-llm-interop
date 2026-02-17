@@ -10,6 +10,88 @@
 
 # Model specific configuration
 - selector:
+    name: gemini-3-pro
+  capabilities:
+    max_tokens: { min: 1, max: 65536 }
+    input_token_limit: 1048576
+    temperature: { min: 0.0, max: 2.0 }
+    top_k: { min: 1, max: 100 }
+    top_p: { min: 0.0, max: 1.0 }
+    frequency_penalty: { min: -2.0, max: 2.0 }
+    presence_penalty: { min: -2.0, max: 2.0 }
+    candidate_count: { min: 1, max: 8 }
+    supports_stop_sequences: true
+    stop_sequences:
+      max_count: 5
+      max_length_each: 20
+    supports_reasoning: true
+    supports_google_thinking_config: true
+    api_capabilities:
+      completions:
+        drop_fields:
+          - frequency_penalty
+          - presence_penalty
+
+- selector:
+    name: gemini-3-flash
+  capabilities:
+    max_tokens: { min: 1, max: 65536 }
+    input_token_limit: 1048576
+    temperature: { min: 0.0, max: 2.0 }
+    top_k: { min: 1, max: 100 }
+    top_p: { min: 0.0, max: 1.0 }
+    frequency_penalty: { min: -2.0, max: 2.0 }
+    presence_penalty: { min: -2.0, max: 2.0 }
+    candidate_count: { min: 1, max: 8 }
+    supports_stop_sequences: true
+    stop_sequences:
+      max_count: 5
+      max_length_each: 20
+    supports_reasoning: true
+    supports_google_thinking_config: true
+    api_capabilities:
+      completions:
+        drop_fields:
+          - frequency_penalty
+          - presence_penalty
+
+- selector:
+    name: gemini-3-deep-think
+  capabilities:
+    max_tokens: { min: 1, max: 65536 }
+    input_token_limit: 1048576
+    temperature: { min: 0.0, max: 2.0 }
+    top_k: { min: 1, max: 100 }
+    top_p: { min: 0.0, max: 1.0 }
+    frequency_penalty: { min: -2.0, max: 2.0 }
+    presence_penalty: { min: -2.0, max: 2.0 }
+    candidate_count: { min: 1, max: 1 }
+    supports_stop_sequences: true
+    stop_sequences:
+      max_count: 5
+      max_length_each: 20
+    supports_reasoning: true
+    supports_google_thinking_config: true
+    api_capabilities:
+      completions:
+        drop_fields:
+          - frequency_penalty
+          - presence_penalty
+
+- selector:
+    name: gemini-3-pro-image-preview
+  capabilities:
+    max_tokens: { min: 1, max: 32768 }
+    input_token_limit: 65536
+    temperature: { min: 0.0, max: 2.0 }
+    top_k: { min: 1, max: 100 }
+    top_p: { min: 0.0, max: 1.0 }
+    candidate_count: { min: 1, max: 1 }
+    supports_stop_sequences: true
+    supports_reasoning: true
+    supports_google_thinking_config: true
+
+- selector:
     name: gemini-2.5-pro
   capabilities:
     max_tokens: { min: 1, max: 65536 }
@@ -77,6 +159,17 @@
         drop_fields:
           - frequency_penalty
           - presence_penalty
+
+- selector:
+    name: gemini-2.5-flash-image
+  capabilities:
+    max_tokens: { min: 1, max: 8192 }
+    input_token_limit: 32768
+    temperature: { min: 0.0, max: 2.0 }
+    top_k: { min: 1, max: 100 }
+    top_p: { min: 0.0, max: 1.0 }
+    candidate_count: { min: 1, max: 1 }
+    supports_stop_sequences: true
 
 - selector:
     name: gemini-live-2.5-flash-preview

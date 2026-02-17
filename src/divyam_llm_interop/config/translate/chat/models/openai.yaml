@@ -1,11 +1,24 @@
-- name: gpt-3.5-turbo
-- name: gpt-3.5-turbo-16k
-- name: gpt-3.5-turbo-0613
-- name: gpt-3.5-turbo-0301
-- name: gpt-3.5-turbo-instruct
-- name: text-davinci-003
-- name: text-davinci-002
-- name: code-davinci-002
+# OpenAI Model Registry - Updated February 17, 2026
+
+# GPT-5.3 Family (The "Garlic" Era - Agentic Reasoning Flagships)
+- name: gpt-5.3-codex
+- name: gpt-5.3-codex-spark
+
+# GPT-5.2 Family (Current Professional Standard)
+- name: gpt-5.2
+- name: gpt-5.2-pro
+- name: gpt-5.2-instant
+- name: gpt-5.2-thinking
+- name: gpt-5.2-codex
+
+# GPT-5.1 Family (Previous Flagship)
+- name: gpt-5.1
+- name: gpt-5.1-pro
+- name: gpt-5.1-mini
+- name: gpt-5.1-nano
+- name: gpt-5.1-codex-max
+
+# GPT-5.0 Family (Original August 2025 Release)
 - name: gpt-5
 - name: gpt-5-pro
 - name: gpt-5-mini
@@ -14,7 +27,19 @@
 - name: gpt-5-codex
 - name: gpt-5-thinking
 - name: gpt-5-thinking-mini
-- name: gpt-4
+
+# O-Series (Reasoning & Deep Logic)
+- name: o5-preview
+- name: o3
+- name: o3-mini
+- name: o3-mini-high
+- name: o3-pro
+- name: o1
+- name: o1-mini
+- name: o1-pro
+- name: o4-mini
+
+# GPT-4 Family (Retired from UI, API Access Only)
 - name: gpt-4.5
 - name: gpt-4.5-chat
 - name: gpt-4.1
@@ -22,11 +47,22 @@
 - name: gpt-4.1-nano
 - name: gpt-4o
 - name: gpt-4o-mini
-- name: o1
-- name: o1-mini
-- name: o3
-- name: o3-mini
-- name: o3-mini-high
-- name: o4-mini
-- name: gpt-oss-20b
+- name: gpt-4o-audio
+- name: gpt-4
+
+# GPT-3.5 & Classic (Legacy Support)
+- name: gpt-3.5-turbo
+- name: gpt-3.5-turbo-16k
+- name: gpt-3.5-turbo-0613
+- name: gpt-3.5-turbo-0301
+- name: gpt-3.5-turbo-instruct
+- name: text-davinci-003
+- name: text-davinci-002
+- name: code-davinci-002
+
+# Specialized & Open Models
 - name: gpt-oss-120b
+- name: gpt-oss-20b
+- name: gpt-oss-safeguard-120b
+- name: gpt-oss-safeguard-20b
+- name: gpt-image-1.5

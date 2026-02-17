@@ -17,7 +17,7 @@
       "content": "I need to check status of my request id is 5"
     }
   ],
-  "model": "gpt-5",
+  "model": "gpt-5.2",
   "reasoning_effort": "high",
   "max_completion_tokens": 512,
   "n": 1,

@@ -17,12 +17,12 @@
       "content": "I need to check status of my request id is 5"
     }
   ],
-  "model": "gpt-5",
+  "model": "gpt-4.1",
   "reasoning_effort": "high",
   "max_completion_tokens": 512,
   "n": 1,
   "stream": false,
-  "temperature": 1,
+  "temperature": 0.2,
   "tools": [
     {
       "type": "function",

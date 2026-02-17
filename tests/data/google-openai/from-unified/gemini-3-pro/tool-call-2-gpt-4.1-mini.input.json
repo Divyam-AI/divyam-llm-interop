@@ -65,10 +65,10 @@
       "content": "How much time new"
     }
   ],
-  "model": "gpt-5",
+  "model": "gpt-4.1-mini",
   "max_tokens": 400,
   "stream": false,
-  "temperature": 1,
+  "temperature": 0.2,
   "tools": [
     {
       "type": "function",

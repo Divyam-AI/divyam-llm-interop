@@ -3,7 +3,7 @@
 
 from dataclasses import dataclass
 from dataclasses import field, asdict, fields
-from typing import Iterable, cast, get_type_hints, get_origin, Union, get_args, ClassVar
+from typing import Iterable, get_type_hints, get_origin, Union, get_args, ClassVar
 from typing import List, Optional, Dict, Any
 
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
@@ -229,6 +229,10 @@ class ModelCapabilities:
             for field_name in drop_fields:
                 body.pop(field_name, None)
 
+        if not self.supports_stop_sequences:
+            body.pop("stop_sequences", None)
+            body.pop("stop", None)
+
         if not self.supports_reasoning:
             # noinspection PyBroadException
             try:
@@ -255,7 +259,7 @@ class ModelCapabilities:
                 range_config = getattr(self, field_name)
                 if not range_config or not isinstance(range_config, RangeConfig):
                     continue
-                range_config = cast(RangeConfig, range_config)
+                range_config = range_config
 
                 fitted_value = range_config.fit_to_range(value)
 
