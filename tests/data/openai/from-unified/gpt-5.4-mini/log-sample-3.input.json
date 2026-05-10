@@ -1,0 +1,18 @@
+{
+  "model": "gpt-4o-mini",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are the Planner Agent for a travel chatbot. Keep the output concise and structured."
+    },
+    {
+      "role": "user",
+      "content": "Overall conversation context: user needs a post-booking query plan with dependencies only when necessary."
+    }
+  ],
+  "max_tokens": 1000,
+  "temperature": 0.2,
+  "top_p": 0.9,
+  "presence_penalty": 0,
+  "frequency_penalty": 0
+}

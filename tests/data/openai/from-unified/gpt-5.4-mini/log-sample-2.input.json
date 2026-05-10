@@ -1,0 +1,18 @@
+{
+  "model": "gpt-4o-mini",
+  "messages": [
+    {
+      "role": "system",
+      "content": ""
+    },
+    {
+      "role": "user",
+      "content": "You are the Planner Agent for a travel chatbot. Current User Query: Open booking."
+    }
+  ],
+  "max_tokens": 1000,
+  "temperature": 0.2,
+  "top_p": 0.9,
+  "presence_penalty": 0,
+  "frequency_penalty": 0
+}
