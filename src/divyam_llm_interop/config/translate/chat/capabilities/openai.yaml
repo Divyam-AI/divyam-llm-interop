@@ -858,7 +858,7 @@
     name: gpt-5.4-pro
   capabilities:
     strict_completions_compatibility: false
-    max_completion_tokens: { min: 1, max: 131072 }
+    max_completion_tokens: { min: 1, max: 128000 }
     top_p: { min: 1, max: 1}
     input_token_limit: 922000
     supports_stop_sequences: true
@@ -878,7 +878,7 @@
     name: gpt-5.4
   capabilities:
     strict_completions_compatibility: false
-    max_completion_tokens: { min: 1, max: 131072 }
+    max_completion_tokens: { min: 1, max: 128000 }
     top_p: { min: 1, max: 1}
     input_token_limit: 922000
     supports_stop_sequences: true
@@ -898,7 +898,7 @@
     name: gpt-5.4-mini
   capabilities:
     strict_completions_compatibility: false
-    max_completion_tokens: { min: 1, max: 131072 }
+    max_completion_tokens: { min: 1, max: 128000 }
     top_p: { min: 1, max: 1}
     input_token_limit: 272000
     supports_stop_sequences: true
@@ -916,7 +916,7 @@
     name: gpt-5.4-nano
   capabilities:
     strict_completions_compatibility: false
-    max_completion_tokens: { min: 1, max: 131072 }
+    max_completion_tokens: { min: 1, max: 128000 }
     top_p: { min: 1, max: 1}
     input_token_limit: 272000
     supports_stop_sequences: true
