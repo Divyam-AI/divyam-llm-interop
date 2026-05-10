@@ -1,4 +1,10 @@
-# OpenAI Model Registry - Updated February 17, 2026
+# OpenAI Model Registry - Updated May 10, 2026
+
+# GPT-5.4 Family
+- name: gpt-5.4
+- name: gpt-5.4-pro
+- name: gpt-5.4-mini
+- name: gpt-5.4-nano
 
 # GPT-5.3 Family (The "Garlic" Era - Agentic Reasoning Flagships)
 - name: gpt-5.3-codex
