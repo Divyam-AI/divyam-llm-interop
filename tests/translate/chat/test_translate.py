@@ -255,6 +255,36 @@ def test_translate_response_gemini_native_to_openai(translator):
     assert translated.body["usage"]["prompt_tokens"] == 9
 
 
+def test_translate_response_gemini_genai_model_dump_shape_to_openai(translator):
+    """google.genai model_dump uses snake_case (usage_metadata, *_token_count)."""
+    source = Model(name="gemini-2.5-flash-lite", api_type=ModelApiType.GEMINI)
+    target = Model(name="gpt-4.1-mini", api_type=ModelApiType.COMPLETIONS)
+    chat_response = ChatResponse(
+        body={
+            "responseId": "gem_resp_dump",
+            "modelVersion": "gemini-2.5-flash-lite",
+            "candidates": [
+                {
+                    "content": {"role": "model", "parts": [{"text": "Hello"}]},
+                    "finish_reason": "STOP",
+                }
+            ],
+            "usage_metadata": {
+                "prompt_token_count": 3,
+                "candidates_token_count": 7,
+                "total_token_count": 10,
+            },
+        }
+    )
+
+    translated = translator.translate_response(chat_response, source, target)
+
+    assert translated.body["usage"]["prompt_tokens"] == 3
+    assert translated.body["usage"]["completion_tokens"] == 7
+    assert translated.body["usage"]["total_tokens"] == 10
+    assert translated.body["choices"][0]["finish_reason"] == "stop"
+
+
 def test_translate_response_gemini_native_to_gemini_native(translator):
     source = Model(name="gemini-2.5-pro", api_type=ModelApiType.GEMINI)
     target = Model(name="gemini-2.5-pro", api_type=ModelApiType.GEMINI)

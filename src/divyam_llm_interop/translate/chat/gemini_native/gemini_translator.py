@@ -308,24 +308,16 @@ class GeminiTranslator(Translator):
             if tool_calls:
                 message["tool_calls"] = [tc.to_dict() for tc in tool_calls]
 
+            finish = candidate.get("finishReason") or candidate.get("finish_reason")
             choices.append(
                 {
                     "index": index,
                     "message": message,
-                    "finish_reason": self._map_finish_reason_to_openai(
-                        candidate.get("finishReason")
-                    ),
+                    "finish_reason": self._map_finish_reason_to_openai(finish),
                 }
             )
 
-        usage_metadata = body.get("usageMetadata", {})
-        usage = None
-        if usage_metadata:
-            usage = {
-                "prompt_tokens": usage_metadata.get("promptTokenCount", 0),
-                "completion_tokens": usage_metadata.get("candidatesTokenCount", 0),
-                "total_tokens": usage_metadata.get("totalTokenCount", 0),
-            }
+        usage = self._openai_usage_from_gemini_body(body)
 
         completion_body = {
             "id": body.get("responseId", f"gemini_{int(time.time() * 1000)}"),
@@ -493,6 +485,38 @@ class GeminiTranslator(Translator):
                 )
             )
         return tool_calls
+
+    @staticmethod
+    def _openai_usage_from_gemini_body(body: Dict[str, Any]) -> Optional[Dict[str, int]]:
+        """Build OpenAI-style ``usage`` from a Gemini response body.
+
+        Supports both REST-style keys (``usageMetadata``, ``promptTokenCount``) and
+        ``google.genai`` ``model_dump`` output (``usage_metadata``, ``prompt_token_count``).
+        """
+
+        meta = body.get("usageMetadata") or body.get("usage_metadata")
+        if not meta:
+            return None
+
+        def _as_int(value: Any) -> int:
+            if value is None:
+                return 0
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return 0
+
+        return {
+            "prompt_tokens": _as_int(
+                meta.get("promptTokenCount", meta.get("prompt_token_count"))
+            ),
+            "completion_tokens": _as_int(
+                meta.get("candidatesTokenCount", meta.get("candidates_token_count"))
+            ),
+            "total_tokens": _as_int(
+                meta.get("totalTokenCount", meta.get("total_token_count"))
+            ),
+        }
 
     @staticmethod
     def _map_finish_reason_to_openai(finish_reason: Optional[str]) -> str:
