@@ -620,7 +620,7 @@ class TestModelRegistryIntegration:
         registry = ModelRegistry()
 
         # models supporting both responses and completions
-        for api_type in ModelApiType:
+        for api_type in [ModelApiType.COMPLETIONS, ModelApiType.RESPONSES]:
             match = registry.find_matching_model(
                 Model(
                     name="openai/gpt-4.1",
