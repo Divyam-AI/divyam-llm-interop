@@ -495,14 +495,20 @@ class GeminiTranslator(Translator):
         return tool_calls
 
     @staticmethod
-    def _map_finish_reason_to_openai(finish_reason: Optional[str]) -> Optional[str]:
+    def _map_finish_reason_to_openai(finish_reason: Optional[str]) -> str:
+        """Map Gemini ``finishReason`` to OpenAI ``finish_reason``.
+
+        Vertex / newer Gemini payloads sometimes omit ``finishReason`` on success;
+        OpenAI chat completions require ``finish_reason`` on every choice, so treat
+        missing values as a normal completed turn (``stop``).
+        """
         if finish_reason == "STOP":
             return "stop"
         if finish_reason == "MAX_TOKENS":
             return "length"
         if finish_reason == "SAFETY":
             return "content_filter"
-        return "stop" if finish_reason else None
+        return "stop"
 
     @staticmethod
     def _map_finish_reason_to_gemini(finish_reason: Optional[str]) -> str:
