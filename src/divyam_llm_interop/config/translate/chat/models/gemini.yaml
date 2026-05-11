@@ -1,12 +1,20 @@
 # Gemini 3 Generation (Current Flagship)
 - name: gemini-3-pro
+  name_match:
+    regex: "^gemini-3-pro(-\\d+)?$"
 - name: gemini-3-flash
+  name_match:
+    regex: "^gemini-3-flash(-\\d+)?$"
 - name: gemini-3-deep-think
 - name: gemini-3-pro-image-preview
 
 # Gemini 2.5 Generation
 - name: gemini-2.5-pro
+  name_match:
+    regex: "^gemini-2\\.5-pro(-\\d+)?$"
 - name: gemini-2.5-flash
+  name_match:
+    regex: "^gemini-2\\.5-flash(-\\d+)?$"
 - name: gemini-2.5-flash-lite
 - name: gemini-2.5-flash-image
 - name: gemini-live-2.5-flash-preview
@@ -17,6 +25,8 @@
 # Gemini 2.0 Generation
 - name: gemini-2.0-pro-exp
 - name: gemini-2.0-flash
+  name_match:
+    regex: "^gemini-2\\.0-flash(-\\d+)?$"
 - name: gemini-2.0-flash-preview-image-generation
 - name: gemini-2.0-flash-lite
 - name: gemini-2.0-flash-live-001

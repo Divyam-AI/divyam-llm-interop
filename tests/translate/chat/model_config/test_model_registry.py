@@ -643,6 +643,13 @@ class TestModelRegistryIntegration:
         assert match.api_type == ModelApiType.COMPLETIONS
         assert match.name == "gemma-3-12b-it"
 
+        # Catalog name_match: Google-style snapshot suffix on a base catalog name
+        match = registry.find_matching_model(
+            Model(name="gemini-2.0-flash-001", api_type=ModelApiType.COMPLETIONS)
+        )
+        assert match.name == "gemini-2.0-flash"
+        assert match.api_type == ModelApiType.COMPLETIONS
+
         # test no match
         with pytest.raises(ValueError):
             registry.find_matching_model(

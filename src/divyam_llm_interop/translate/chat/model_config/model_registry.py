@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import dataclasses
-from typing import List, Dict
+from typing import List, Dict, Tuple
 
 from divyam_llm_interop.translate.chat.base.translation_utils import (
     normalize_model_name,
@@ -20,6 +20,7 @@ from divyam_llm_interop.translate.chat.model_config.model_config import ModelCon
 from divyam_llm_interop.translate.chat.model_config.model_config_loader import (
     ModelConfigLoader,
 )
+from divyam_llm_interop.translate.chat.model_config.model_selector import SelectorRegex
 from divyam_llm_interop.translate.chat.types import Model
 
 
@@ -42,6 +43,20 @@ class ModelRegistry:
             matches.append(model)
             self._normalized_name_to_model_map[normalized_name] = matches
 
+        self._name_pattern_index: List[Tuple[SelectorRegex, Model]] = []
+        for entry in model_catalog:
+            patterns = getattr(entry, "name_match_patterns", ())
+            if not isinstance(patterns, tuple) or not patterns:
+                continue
+            selector_regex = SelectorRegex(list(patterns))
+            for registered in self._model_capabilities:
+                if (
+                    registered.name == entry.name
+                    and registered.version == entry.version
+                    and registered.provider == entry.provider
+                ):
+                    self._name_pattern_index.append((selector_regex, registered))
+
     def list_models(self) -> List[Model]:
         """List all models registered in this registry. There will be one
         entry per api type the model supports."""
@@ -56,10 +71,12 @@ class ModelRegistry:
     def find_matching_model(self, model: Model) -> Model:
         potential_matches = self.find_models_by_name(model.name)
         if not potential_matches:
+            potential_matches = self._find_models_by_name_pattern(model)
+        if not potential_matches:
             raise ValueError(f"Model {model} not found")
 
         best_score = 0
-        bast_candidate = None
+        best_candidate = None
         for candidate in potential_matches:
             if candidate.api_type != model.api_type:
                 # This is not a match
@@ -73,12 +90,24 @@ class ModelRegistry:
 
             if score > best_score:
                 best_score = score
-                bast_candidate = candidate
+                best_candidate = candidate
 
-        if not bast_candidate:
+        if not best_candidate:
             raise ValueError(f"Model {model} not found")
 
-        return bast_candidate
+        return best_candidate
+
+    def _find_models_by_name_pattern(self, model: Model) -> List[Model]:
+        """Resolve catalog models when the runtime name differs only by a
+        configurable regex (e.g. Google snapshot suffixes like -001)."""
+        normalized = normalize_model_name(model.name)
+        matches: List[Model] = []
+        for selector_regex, registered in self._name_pattern_index:
+            if registered.api_type != model.api_type:
+                continue
+            if selector_regex.matches(normalized):
+                matches.append(registered)
+        return matches
 
     def get_capabilities(self, model: Model) -> ModelCapabilities:
         """Get the capabilities of a given model registered in this registry.
