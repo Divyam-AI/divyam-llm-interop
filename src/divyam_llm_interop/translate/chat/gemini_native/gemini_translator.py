@@ -487,7 +487,61 @@ class GeminiTranslator(Translator):
         return tool_calls
 
     @staticmethod
-    def _openai_usage_from_gemini_body(body: Dict[str, Any]) -> Optional[Dict[str, int]]:
+    def _gemini_modality_str(modality: Any) -> str:
+        if modality is None:
+            return ""
+        value = getattr(modality, "value", modality)
+        if isinstance(value, str):
+            return value
+        return str(value)
+
+    @staticmethod
+    def _openai_prompt_tokens_details_from_gemini_usage(
+        meta: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        """Map Gemini per-modality prompt counts into OpenAI ``prompt_tokens_details``.
+
+        OpenAI's schema only defines ``audio_tokens`` and ``cached_tokens``; the full
+        Gemini breakdown is preserved under ``modalities`` (via unified ``unknowns``
+        / pydantic ``extra`` on ``PromptTokensDetails``).
+        """
+        rows = meta.get("prompt_tokens_details") or meta.get("promptTokensDetails")
+        if not isinstance(rows, list) or not rows:
+            return None
+
+        modalities: List[Dict[str, Any]] = []
+        audio_tokens = 0
+        cached_tokens = 0
+        for row in rows:
+            if not isinstance(row, dict):
+                if hasattr(row, "model_dump"):
+                    row = row.model_dump(mode="python")
+                else:
+                    continue
+            mod = GeminiTranslator._gemini_modality_str(row.get("modality"))
+            try:
+                cnt = int(row.get("token_count", 0))
+            except (TypeError, ValueError):
+                cnt = 0
+            modalities.append({"modality": mod, "token_count": cnt})
+            if mod.upper() == "AUDIO":
+                audio_tokens += cnt
+            ct = row.get("cached_tokens") or row.get("cachedTokens")
+            if ct is not None:
+                try:
+                    cached_tokens += int(ct)
+                except (TypeError, ValueError):
+                    pass
+
+        details: Dict[str, Any] = {"modalities": modalities}
+        if audio_tokens > 0:
+            details["audio_tokens"] = audio_tokens
+        if cached_tokens > 0:
+            details["cached_tokens"] = cached_tokens
+        return details
+
+    @staticmethod
+    def _openai_usage_from_gemini_body(body: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Build OpenAI-style ``usage`` from a Gemini response body.
 
         Supports both REST-style keys (``usageMetadata``, ``promptTokenCount``) and
@@ -506,7 +560,7 @@ class GeminiTranslator(Translator):
             except (TypeError, ValueError):
                 return 0
 
-        return {
+        usage: Dict[str, Any] = {
             "prompt_tokens": _as_int(
                 meta.get("promptTokenCount", meta.get("prompt_token_count"))
             ),
@@ -518,14 +572,25 @@ class GeminiTranslator(Translator):
             ),
         }
 
+        ptd = GeminiTranslator._openai_prompt_tokens_details_from_gemini_usage(meta)
+        if ptd is not None:
+            usage["prompt_tokens_details"] = ptd
+
+        return usage
+
     @staticmethod
-    def _map_finish_reason_to_openai(finish_reason: Optional[str]) -> str:
+    def _map_finish_reason_to_openai(finish_reason: Any) -> str:
         """Map Gemini ``finishReason`` to OpenAI ``finish_reason``.
 
         Vertex / newer Gemini payloads sometimes omit ``finishReason`` on success;
         OpenAI chat completions require ``finish_reason`` on every choice, so treat
         missing values as a normal completed turn (``stop``).
         """
+        if finish_reason is not None and hasattr(finish_reason, "value"):
+            finish_reason = finish_reason.value
+        if not isinstance(finish_reason, str):
+            finish_reason = str(finish_reason) if finish_reason is not None else ""
+
         if finish_reason == "STOP":
             return "stop"
         if finish_reason == "MAX_TOKENS":

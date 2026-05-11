@@ -273,6 +273,9 @@ def test_translate_response_gemini_genai_model_dump_shape_to_openai(translator):
                 "prompt_token_count": 3,
                 "candidates_token_count": 7,
                 "total_token_count": 10,
+                "prompt_tokens_details": [
+                    {"modality": "TEXT", "token_count": 3},
+                ],
             },
         }
     )
@@ -282,6 +285,9 @@ def test_translate_response_gemini_genai_model_dump_shape_to_openai(translator):
     assert translated.body["usage"]["prompt_tokens"] == 3
     assert translated.body["usage"]["completion_tokens"] == 7
     assert translated.body["usage"]["total_tokens"] == 10
+    ptd = translated.body["usage"]["prompt_tokens_details"]
+    assert ptd["modalities"][0]["modality"] == "TEXT"
+    assert ptd["modalities"][0]["token_count"] == 3
     assert translated.body["choices"][0]["finish_reason"] == "stop"
 
 
