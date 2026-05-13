@@ -101,8 +101,11 @@ class ModelRegistry:
         return best_candidate
 
     def _find_models_by_name_pattern(self, model: Model) -> List[Model]:
-        """Resolve catalog models when the runtime name differs only by a
-        configurable regex (e.g. Google snapshot suffixes like -001)."""
+        """Resolve catalog models via explicit catalog-level name_match regex.
+
+        This method only applies configured regex overrides. Generic runtime
+        variant matching is handled separately by _find_models_by_name_best_effort.
+        """
         normalized = normalize_model_name(model.name)
         matches: List[Model] = []
         for selector_regex, registered in self._name_pattern_index:
