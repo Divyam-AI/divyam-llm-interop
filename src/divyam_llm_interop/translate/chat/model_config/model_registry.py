@@ -137,21 +137,9 @@ class ModelRegistry:
                 continue
 
             score = -1
-            # Direct prefix: request extends a known catalog name with suffixes.
+            # Canonical prefix: runtime name extends a known catalog name (suffixes, FT, etc.).
             if requested.startswith(candidate_canonical):
                 score = 1000 + len(candidate_canonical)
-
-            # Runtime adapters often omit "instruct" while still targeting that
-            # capability profile. Prefer instruct variant when it shares family.
-            if candidate_name.endswith("-instruct"):
-                family_name = candidate_name[: -len("-instruct")]
-                family_canonical = self._canonicalize_name(family_name)
-                if (
-                    family_canonical
-                    and requested.startswith(family_canonical)
-                    and requested != family_canonical
-                ):
-                    score = max(score, 1200 + len(family_canonical))
 
             if score >= 0:
                 scored_matches.append((score, candidate))

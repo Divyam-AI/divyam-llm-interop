@@ -105,8 +105,12 @@ When a request model name is resolved against the catalog, matching happens in t
 2. Explicit catalog override via `name_match.regex` in model YAML.
 3. Generic best-effort fallback in code:
    - strips punctuation (`-`, `_`, `.`) for comparison,
-   - matches runtime names that extend a known catalog base name,
-   - prefers `-instruct` variants for suffixed runtime names when both base and instruct exist.
+   - matches runtime names that extend a known catalog name’s canonical form (longest match wins).
+
+Runtime names that include `-instruct` in the segment you care about (for example
+`llama-3.2-3b-instruct-ft-v1`) align with the `*-instruct` catalog entry; a name
+like `llama-3.2-3b-experiment_2026` aligns with the non-instruct base if both exist.
+Use `name_match.regex` if you need a different mapping.
 
 This means fine-tuned/runtime names like `gemini-2.0-flash-001`,
 `llama-3.2-3b-instruct-ft-custom-v1`, or `qwen-3-8b-adapter_x` can resolve

@@ -666,7 +666,7 @@ class TestModelRegistryIntegration:
                 api_type=ModelApiType.COMPLETIONS,
             )
         )
-        assert match.name == "llama-3.1-8b-instruct"
+        assert match.name == "llama-3.1-8b"
         assert match.api_type == ModelApiType.COMPLETIONS
 
         match = registry.find_matching_model(
@@ -675,7 +675,7 @@ class TestModelRegistryIntegration:
                 api_type=ModelApiType.COMPLETIONS,
             )
         )
-        assert match.name == "llama-3.2-3b-instruct"
+        assert match.name == "llama-3.2-3b"
         assert match.api_type == ModelApiType.COMPLETIONS
 
         match = registry.find_matching_model(
@@ -684,7 +684,7 @@ class TestModelRegistryIntegration:
                 api_type=ModelApiType.COMPLETIONS,
             )
         )
-        assert match.name == "qwen3-8b-instruct"
+        assert match.name == "qwen3-8b"
         assert match.api_type == ModelApiType.COMPLETIONS
 
         # test no match
