@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import dataclasses
+import re
 from typing import List, Dict, Tuple
 
 from divyam_llm_interop.translate.chat.base.translation_utils import (
@@ -73,6 +74,8 @@ class ModelRegistry:
         if not potential_matches:
             potential_matches = self._find_models_by_name_pattern(model)
         if not potential_matches:
+            potential_matches = self._find_models_by_name_best_effort(model)
+        if not potential_matches:
             raise ValueError(f"Model {model} not found")
 
         best_score = 0
@@ -108,6 +111,58 @@ class ModelRegistry:
             if selector_regex.matches(normalized):
                 matches.append(registered)
         return matches
+
+    def _find_models_by_name_best_effort(self, model: Model) -> List[Model]:
+        """Best-effort fallback for runtime fine-tuned names.
+
+        This is intentionally lower-priority than explicit name_match config so
+        per-model overrides can still be expressed declaratively.
+        """
+        normalized = normalize_model_name(model.name)
+        requested = self._canonicalize_name(normalized)
+        if not requested:
+            return []
+
+        scored_matches: List[Tuple[int, Model]] = []
+        for candidate in self._model_capabilities:
+            if candidate.api_type != model.api_type:
+                continue
+
+            candidate_name = normalize_model_name(candidate.name)
+            candidate_canonical = self._canonicalize_name(candidate_name)
+            if not candidate_canonical:
+                continue
+
+            score = -1
+            # Direct prefix: request extends a known catalog name with suffixes.
+            if requested.startswith(candidate_canonical):
+                score = 1000 + len(candidate_canonical)
+
+            # Runtime adapters often omit "instruct" while still targeting that
+            # capability profile. Prefer instruct variant when it shares family.
+            if candidate_name.endswith("-instruct"):
+                family_name = candidate_name[: -len("-instruct")]
+                family_canonical = self._canonicalize_name(family_name)
+                if (
+                    family_canonical
+                    and requested.startswith(family_canonical)
+                    and requested != family_canonical
+                ):
+                    score = max(score, 1200 + len(family_canonical))
+
+            if score >= 0:
+                scored_matches.append((score, candidate))
+
+        if not scored_matches:
+            return []
+
+        scored_matches.sort(key=lambda item: item[0], reverse=True)
+        best_score = scored_matches[0][0]
+        return [candidate for score, candidate in scored_matches if score == best_score]
+
+    @staticmethod
+    def _canonicalize_name(model_name: str) -> str:
+        return re.sub(r"[^a-z0-9]", "", model_name)
 
     def get_capabilities(self, model: Model) -> ModelCapabilities:
         """Get the capabilities of a given model registered in this registry.
