@@ -181,6 +181,7 @@ def detect_request_api_type(request_payload: Dict[str, Any]) -> ModelApiType:
     # Check for distinctive required fields
     has_messages = "messages" in request_payload
     has_input = "input" in request_payload
+    has_gemini_contents = "contents" in request_payload
 
     # Check for distinctive optional fields
     has_instructions = "instructions" in request_payload
@@ -188,6 +189,12 @@ def detect_request_api_type(request_payload: Dict[str, Any]) -> ModelApiType:
     has_max_completion_tokens = "max_completion_tokens" in request_payload
     has_previous_response_id = "previous_response_id" in request_payload
     has_background = "background" in request_payload
+    has_generation_config = "generationConfig" in request_payload
+    has_system_instruction = "systemInstruction" in request_payload
+
+    # Gemini native API (Vertex / AI Studio style)
+    if has_gemini_contents or has_generation_config or has_system_instruction:
+        return ModelApiType.GEMINI
 
     # Responses API: has 'input' and typically 'instructions' or 'max_output_tokens'
     if has_input:
@@ -222,6 +229,10 @@ def detect_response_api_type(response_payload: Dict[str, Any]) -> ModelApiType:
     # Responses API always has object == "response" and output array
     if "output" in response_payload:
         return ModelApiType.RESPONSES
+
+    # Gemini native API responses include candidates.
+    if "candidates" in response_payload:
+        return ModelApiType.GEMINI
 
     # Chat Completions API always has object == "chat.completion" and choices
     if "choices" in response_payload:

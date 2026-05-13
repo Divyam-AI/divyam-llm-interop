@@ -13,6 +13,9 @@ from divyam_llm_interop.translate.chat.base.translator import Translator
 from divyam_llm_interop.translate.chat.model_config.model_registry import (
     ModelRegistry,
 )
+from divyam_llm_interop.translate.chat.gemini_native.gemini_translator import (
+    GeminiTranslator,
+)
 from divyam_llm_interop.translate.chat.openai_completions.completions_translator import (
     CompletionsTranslator,
 )
@@ -45,6 +48,7 @@ class ChatTranslator:
             ModelApiType.RESPONSES: OpenAiResponsesTranslator(
                 model_registry=self._model_registry
             ),
+            ModelApiType.GEMINI: GeminiTranslator(model_registry=self._model_registry),
         }
 
     def translate_request(

@@ -97,6 +97,54 @@ target = Model(name="gpt-4.1", api_type=ModelApiType.COMPLETIONS)
 translated = translator.translate_response(chat_response, source, target)
 ```
 
+## Model Name Resolution and Fallback
+
+When a request model name is resolved against the catalog, matching happens in this order:
+
+1. Exact normalized name match (`provider/model-name` and case differences are normalized).
+2. Explicit catalog override via `name_match.regex` in model YAML.
+3. Generic best-effort fallback in code:
+   - strips punctuation (`-`, `_`, `.`) for comparison,
+   - matches runtime names that extend a known catalog name’s canonical form (longest match wins).
+
+Runtime names that include `-instruct` in the segment you care about (for example
+`llama-3.2-3b-instruct-ft-v1`) align with the `*-instruct` catalog entry; a name
+like `llama-3.2-3b-experiment_2026` aligns with the non-instruct base if both exist.
+Use `name_match.regex` if you need a different mapping.
+
+This means fine-tuned/runtime names like `gemini-2.0-flash-001`,
+`llama-3.2-3b-instruct-ft-custom-v1`, or `qwen-3-8b-adapter_x` can resolve
+without adding model-specific regex in config.
+
+### Adding New Models
+
+To add a new model family, start with canonical names only in:
+`src/divyam_llm_interop/config/translate/chat/models/*.yaml`.
+
+Example:
+
+```yaml
+- name: mymodel-4b
+- name: mymodel-4b-instruct
+```
+
+In most cases, this is enough because fallback matching handles runtime suffixes.
+Add `name_match.regex` only when you need an explicit override or a non-standard alias.
+
+Example override:
+
+```yaml
+- name: mymodel-4b-instruct
+  name_match:
+    regex:
+      - "^vendor-special-4b-v\\d+$"
+```
+
+Use override regex when:
+- naming does not share a stable base with catalog names,
+- multiple catalog names could match and you must force one,
+- you need provider-specific alias behavior.
+
 ## Development Environment Setup
 
 ### Create a virtual environment

@@ -620,7 +620,7 @@ class TestModelRegistryIntegration:
         registry = ModelRegistry()
 
         # models supporting both responses and completions
-        for api_type in ModelApiType:
+        for api_type in [ModelApiType.COMPLETIONS, ModelApiType.RESPONSES]:
             match = registry.find_matching_model(
                 Model(
                     name="openai/gpt-4.1",
@@ -643,11 +643,90 @@ class TestModelRegistryIntegration:
         assert match.api_type == ModelApiType.COMPLETIONS
         assert match.name == "gemma-3-12b-it"
 
+        # Best-effort fallback: Google-style snapshot suffix on a base model
+        match = registry.find_matching_model(
+            Model(name="gemini-2.0-flash-001", api_type=ModelApiType.COMPLETIONS)
+        )
+        assert match.name == "gemini-2.0-flash"
+        assert match.api_type == ModelApiType.COMPLETIONS
+
+        # Best-effort fallback: runtime suffixes map to closest instruct variants
+        match = registry.find_matching_model(
+            Model(
+                name="llama-3.2-3b-instruct-ft-custom-v1",
+                api_type=ModelApiType.COMPLETIONS,
+            )
+        )
+        assert match.name == "llama-3.2-3b-instruct"
+        assert match.api_type == ModelApiType.COMPLETIONS
+
+        match = registry.find_matching_model(
+            Model(
+                name="llama-3.1-8b-adapter_alpha",
+                api_type=ModelApiType.COMPLETIONS,
+            )
+        )
+        assert match.name == "llama-3.1-8b"
+        assert match.api_type == ModelApiType.COMPLETIONS
+
+        match = registry.find_matching_model(
+            Model(
+                name="llama-3.2-3b-experiment_2026",
+                api_type=ModelApiType.COMPLETIONS,
+            )
+        )
+        assert match.name == "llama-3.2-3b"
+        assert match.api_type == ModelApiType.COMPLETIONS
+
+        match = registry.find_matching_model(
+            Model(
+                name="qwen-3-8b-distilled_team-a",
+                api_type=ModelApiType.COMPLETIONS,
+            )
+        )
+        assert match.name == "qwen3-8b"
+        assert match.api_type == ModelApiType.COMPLETIONS
+
         # test no match
         with pytest.raises(ValueError):
             registry.find_matching_model(
                 Model(name="made-up-mode", api_type=ModelApiType.COMPLETIONS)
             )
+
+    @patch.object(ModelRegistry, "_get_model_capabilities_map")
+    @patch.object(ModelConfigLoader, "load_model_config")
+    @patch.object(ModelCatalogLoader, "load_models")
+    def test_name_match_overrides_best_effort_fallback(
+        self,
+        mock_load_models,
+        mock_load_config,
+        mock_get_model_capabilities_map,
+    ):
+        mock_load_models.return_value = [
+            ModelCatalogEntry(
+                name="foo-1",
+                name_match_patterns=(r"^foo-1-special.*$",),
+            ),
+            ModelCatalogEntry(name="foo-1-instruct"),
+        ]
+        mock_load_config.return_value = []
+
+        capabilities = ModelCapabilities(supported_api_types=[ModelApiType.COMPLETIONS])
+        mock_get_model_capabilities_map.return_value = {
+            Model(name="foo-1", api_type=ModelApiType.COMPLETIONS): capabilities,
+            Model(
+                name="foo-1-instruct", api_type=ModelApiType.COMPLETIONS
+            ): capabilities,
+        }
+
+        registry = ModelRegistry()
+        match = registry.find_matching_model(
+            Model(name="foo-1-special-adapter", api_type=ModelApiType.COMPLETIONS)
+        )
+
+        # Explicit catalog name_match wins over generic runtime fallback.
+        assert match.name == "foo-1"
+        assert match.api_type == ModelApiType.COMPLETIONS
 
 
 class TestModelRegistryDataclass:

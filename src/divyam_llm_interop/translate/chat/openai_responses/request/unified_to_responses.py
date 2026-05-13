@@ -80,15 +80,15 @@ def convert_completion_request_to_responses_request(
             tool_call_id = msg.get("tool_call_id")
             if not tool_call_id:
                 continue
-            content_parts: List[Dict[str, Any]] = []
+            tool_content_parts: List[Dict[str, Any]] = []
             content = msg.get("content")
             if isinstance(content, str):
-                content_parts.append({"type": "output_text", "text": content})
+                tool_content_parts.append({"type": "output_text", "text": content})
             elif isinstance(content, list):
                 for part in content:
                     if isinstance(part, dict):
-                        content_parts.append(part)
-            tool_call_results[tool_call_id] = content_parts
+                        tool_content_parts.append(part)
+            tool_call_results[tool_call_id] = tool_content_parts
 
     # Second pass: convert user and assistant messages
     input_items: List[Dict[str, Any]] = []

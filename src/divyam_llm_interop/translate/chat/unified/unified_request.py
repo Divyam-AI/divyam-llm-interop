@@ -452,21 +452,29 @@ class UnifiedChatCompletionsRequestBody:
         if data.get("audio"):
             audio = UnifiedAudioConfig.from_dict(data["audio"])
 
-        # Handle legacy max_tokens
+        # Normalize cross-provider aliases to the unified schema.
         max_tokens = None
-        if data.get("max_tokens"):
+        if "max_tokens" in data:
             max_tokens = data["max_tokens"]
-        if data.get("max_output_tokens"):
+        if "max_output_tokens" in data:
             max_tokens = data["max_output_tokens"]
+
+        n = data.get("n")
+        if n is None and "candidate_count" in data:
+            n = data.get("candidate_count")
+
+        stop = data.get("stop")
+        if stop is None and "stop_sequences" in data:
+            stop = data.get("stop_sequences")
 
         return cls(
             model=data["model"],
             messages=messages,
             temperature=data.get("temperature"),
             top_p=data.get("top_p"),
-            n=data.get("n"),
+            n=n,
             stream=data.get("stream"),
-            stop=data.get("stop"),
+            stop=stop,
             max_tokens=max_tokens,
             max_completion_tokens=data.get("max_completion_tokens"),
             presence_penalty=data.get("presence_penalty"),
