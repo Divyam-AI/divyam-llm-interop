@@ -1,0 +1,18 @@
+{
+  "model": "gpt-4o-mini",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are the Planner Agent for a travel chatbot. Your goal is to provide a query plan."
+    },
+    {
+      "role": "user",
+      "content": "Overall conversation context: destination under consideration is Goa. Current user query: plan my trip."
+    }
+  ],
+  "max_tokens": 1000,
+  "temperature": 0.2,
+  "top_p": 0.9,
+  "presence_penalty": 0,
+  "frequency_penalty": 0
+}

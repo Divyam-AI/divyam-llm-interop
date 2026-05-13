@@ -9,11 +9,12 @@ import pytest
 from divyam_llm_interop.translate.chat.base.translation_utils import (
     drop_null_values_top_level,
 )
+from divyam_llm_interop.translate.chat.api_types import ModelApiType
 from divyam_llm_interop.translate.chat.translate import (
     ChatTranslator,
     ChatTranslateConfig,
 )
-from divyam_llm_interop.translate.chat.types import ChatRequest, ChatResponse
+from divyam_llm_interop.translate.chat.types import ChatRequest, ChatResponse, Model
 from tests.translate.translation_testing_utils import (
     set_values_recursively,
     list_input_json_files,
@@ -56,6 +57,118 @@ def test_translate_curated_requests_unknown_models(generic_translator):
     validate_curated_requests(inputs, generic_translator)
 
 
+def test_translate_request_gemini_payload_aliases_to_openai(translator):
+    source = Model(name="gemini-2.5-pro", api_type=ModelApiType.COMPLETIONS)
+    target = Model(name="gpt-4.1-mini", api_type=ModelApiType.COMPLETIONS)
+    chat_request = ChatRequest(
+        body={
+            "model": "gemini-2.5-pro",
+            "messages": [{"role": "user", "content": "hello"}],
+            "candidate_count": 3,
+            "stop_sequences": ["END"],
+            "max_output_tokens": 1234,
+        }
+    )
+
+    translated = translator.translate_request(chat_request, source, target)
+
+    assert translated.body["model"] == "gpt-4.1-mini"
+    assert translated.body["n"] == 3
+    assert translated.body["stop"] == ["END"]
+    assert translated.body["max_tokens"] == 1234
+    assert "candidate_count" not in translated.body
+    assert "stop_sequences" not in translated.body
+
+
+def test_translate_request_openai_to_gemini_still_supported(translator):
+    source = Model(name="gpt-4.1-mini", api_type=ModelApiType.COMPLETIONS)
+    target = Model(name="gemini-2.5-pro", api_type=ModelApiType.COMPLETIONS)
+    chat_request = ChatRequest(
+        body={
+            "model": "gpt-4.1-mini",
+            "messages": [{"role": "user", "content": "hello"}],
+            "n": 2,
+            "stop": ["END"],
+            "max_tokens": 2222,
+        }
+    )
+
+    translated = translator.translate_request(chat_request, source, target)
+
+    assert translated.body["model"] == "gemini-2.5-pro"
+    assert translated.body["n"] == 2
+    assert translated.body["stop"] == ["END"]
+    assert translated.body["max_tokens"] == 2222
+
+
+def test_translate_request_openai_to_gemini_native(translator):
+    source = Model(name="gpt-4.1-mini", api_type=ModelApiType.COMPLETIONS)
+    target = Model(name="gemini-2.5-pro", api_type=ModelApiType.GEMINI)
+    chat_request = ChatRequest(
+        body={
+            "model": "gpt-4.1-mini",
+            "messages": [{"role": "user", "content": "hello"}],
+            "temperature": 0.4,
+            "n": 2,
+            "stop": ["END"],
+            "max_tokens": 1000,
+        }
+    )
+
+    translated = translator.translate_request(chat_request, source, target)
+
+    assert translated.body["model"] == "gemini-2.5-pro"
+    assert translated.body["contents"] == [
+        {"role": "user", "parts": [{"text": "hello"}]}
+    ]
+    assert translated.body["generationConfig"]["temperature"] == 0.4
+    assert translated.body["generationConfig"]["candidateCount"] == 2
+    assert translated.body["generationConfig"]["stopSequences"] == ["END"]
+    assert translated.body["generationConfig"]["maxOutputTokens"] == 1000
+
+
+def test_translate_request_gemini_native_to_openai(translator):
+    source = Model(name="gemini-2.5-pro", api_type=ModelApiType.GEMINI)
+    target = Model(name="gpt-4.1-mini", api_type=ModelApiType.COMPLETIONS)
+    chat_request = ChatRequest(
+        body={
+            "model": "gemini-2.5-pro",
+            "contents": [{"role": "user", "parts": [{"text": "hello"}]}],
+            "generationConfig": {
+                "temperature": 0.4,
+                "candidateCount": 2,
+                "stopSequences": ["END"],
+                "maxOutputTokens": 1000,
+            },
+        }
+    )
+
+    translated = translator.translate_request(chat_request, source, target)
+
+    assert translated.body["model"] == "gpt-4.1-mini"
+    assert translated.body["messages"] == [{"role": "user", "content": "hello"}]
+    assert translated.body["temperature"] == 0.4
+    assert translated.body["n"] == 2
+    assert translated.body["stop"] == ["END"]
+    assert translated.body["max_tokens"] == 1000
+
+
+def test_translate_request_gemini_native_to_gemini_native(translator):
+    source = Model(name="gemini-2.5-pro", api_type=ModelApiType.GEMINI)
+    target = Model(name="gemini-2.5-pro", api_type=ModelApiType.GEMINI)
+    chat_request = ChatRequest(
+        body={
+            "model": "gemini-2.5-pro",
+            "contents": [{"role": "user", "parts": [{"text": "hello"}]}],
+            "generationConfig": {"temperature": 0.2},
+        }
+    )
+
+    translated = translator.translate_request(chat_request, source, target)
+
+    assert translated == chat_request
+
+
 def validate_curated_requests(inputs: list[str], translator: ChatTranslator):
     for input_file in inputs:
         # TODO: Assuming we are only translating the body for now.
@@ -79,6 +192,131 @@ def test_translate_curated_responses(translator):
     )
 
     validate_curated_response(inputs, translator)
+
+
+def test_translate_response_openai_to_gemini_native(translator):
+    source = Model(name="gpt-4.1-mini", api_type=ModelApiType.COMPLETIONS)
+    target = Model(name="gemini-2.5-pro", api_type=ModelApiType.GEMINI)
+    chat_response = ChatResponse(
+        body={
+            "id": "chatcmpl_1",
+            "object": "chat.completion",
+            "created": 1733400000,
+            "model": "gpt-4.1-mini",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "Hello from OpenAI"},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 4, "total_tokens": 14},
+        }
+    )
+
+    translated = translator.translate_response(chat_response, source, target)
+
+    assert translated.body["modelVersion"] == "gpt-4.1-mini"
+    assert translated.body["responseId"] == "chatcmpl_1"
+    assert translated.body["candidates"][0]["content"]["role"] == "model"
+    assert translated.body["candidates"][0]["content"]["parts"][0]["text"] == (
+        "Hello from OpenAI"
+    )
+    assert translated.body["usageMetadata"]["promptTokenCount"] == 10
+
+
+def test_translate_response_gemini_native_to_openai(translator):
+    source = Model(name="gemini-2.5-pro", api_type=ModelApiType.GEMINI)
+    target = Model(name="gpt-4.1-mini", api_type=ModelApiType.COMPLETIONS)
+    chat_response = ChatResponse(
+        body={
+            "responseId": "gem_resp_1",
+            "modelVersion": "gemini-2.5-pro",
+            "candidates": [
+                {
+                    "index": 0,
+                    "content": {
+                        "role": "model",
+                        "parts": [{"text": "Hello from Gemini"}],
+                    },
+                    "finishReason": "STOP",
+                }
+            ],
+            "usageMetadata": {
+                "promptTokenCount": 9,
+                "candidatesTokenCount": 5,
+                "totalTokenCount": 14,
+            },
+        }
+    )
+
+    translated = translator.translate_response(chat_response, source, target)
+
+    assert translated.body["model"] == "gemini-2.5-pro"
+    assert translated.body["choices"][0]["message"]["content"] == "Hello from Gemini"
+    assert translated.body["choices"][0]["finish_reason"] == "stop"
+    assert translated.body["usage"]["prompt_tokens"] == 9
+
+
+def test_translate_response_gemini_genai_model_dump_shape_to_openai(translator):
+    """google.genai model_dump uses snake_case (usage_metadata, *_token_count)."""
+    source = Model(name="gemini-2.5-flash-lite", api_type=ModelApiType.GEMINI)
+    target = Model(name="gpt-4.1-mini", api_type=ModelApiType.COMPLETIONS)
+    chat_response = ChatResponse(
+        body={
+            "responseId": "gem_resp_dump",
+            "modelVersion": "gemini-2.5-flash-lite",
+            "candidates": [
+                {
+                    "content": {"role": "model", "parts": [{"text": "Hello"}]},
+                    "finish_reason": "STOP",
+                }
+            ],
+            "usage_metadata": {
+                "prompt_token_count": 3,
+                "candidates_token_count": 7,
+                "total_token_count": 10,
+                "prompt_tokens_details": [
+                    {"modality": "TEXT", "token_count": 3},
+                ],
+            },
+        }
+    )
+
+    translated = translator.translate_response(chat_response, source, target)
+
+    assert translated.body["usage"]["prompt_tokens"] == 3
+    assert translated.body["usage"]["completion_tokens"] == 7
+    assert translated.body["usage"]["total_tokens"] == 10
+    ptd = translated.body["usage"]["prompt_tokens_details"]
+    assert ptd["modalities"][0]["modality"] == "TEXT"
+    assert ptd["modalities"][0]["token_count"] == 3
+    assert translated.body["choices"][0]["finish_reason"] == "stop"
+
+
+def test_translate_response_gemini_native_to_gemini_native(translator):
+    source = Model(name="gemini-2.5-pro", api_type=ModelApiType.GEMINI)
+    target = Model(name="gemini-2.5-pro", api_type=ModelApiType.GEMINI)
+    chat_response = ChatResponse(
+        body={
+            "responseId": "gem_resp_1",
+            "modelVersion": "gemini-2.5-pro",
+            "candidates": [
+                {
+                    "index": 0,
+                    "content": {
+                        "role": "model",
+                        "parts": [{"text": "Hello from Gemini"}],
+                    },
+                    "finishReason": "STOP",
+                }
+            ],
+        }
+    )
+
+    translated = translator.translate_response(chat_response, source, target)
+
+    assert translated == chat_response
 
 
 def validate_curated_response(inputs: list[str], translator: ChatTranslator):

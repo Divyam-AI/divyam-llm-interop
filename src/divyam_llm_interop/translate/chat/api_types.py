@@ -7,6 +7,7 @@ from enum import Enum
 class ModelApiType(str, Enum):
     COMPLETIONS = "COMPLETIONS"
     RESPONSES = "RESPONSES"
+    GEMINI = "GEMINI"
 
     def __repr__(self):
         return self.value
