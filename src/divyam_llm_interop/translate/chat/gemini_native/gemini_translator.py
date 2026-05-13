@@ -394,7 +394,9 @@ class GeminiTranslator(Translator):
 
     @staticmethod
     def _extract_parts_text(parts: List[Dict[str, Any]]) -> Optional[str]:
-        text_parts = [str(part.get("text")) for part in parts if part.get("text") is not None]
+        text_parts = [
+            str(part.get("text")) for part in parts if part.get("text") is not None
+        ]
         if not text_parts:
             return None
         return "\n".join(text_parts)
@@ -409,7 +411,9 @@ class GeminiTranslator(Translator):
             return {"value": content}
 
     @staticmethod
-    def _extract_function_declarations(tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _extract_function_declarations(
+        tools: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
         declarations: List[Dict[str, Any]] = []
         for tool in tools:
             declarations.extend(tool.get("functionDeclarations", []))
@@ -466,7 +470,9 @@ class GeminiTranslator(Translator):
         return None
 
     @staticmethod
-    def _extract_tool_calls_from_parts(parts: List[Dict[str, Any]]) -> List[UnifiedToolCall]:
+    def _extract_tool_calls_from_parts(
+        parts: List[Dict[str, Any]],
+    ) -> List[UnifiedToolCall]:
         tool_calls: List[UnifiedToolCall] = []
         for idx, part in enumerate(parts):
             function_call = part.get("functionCall")
@@ -541,7 +547,9 @@ class GeminiTranslator(Translator):
         return details
 
     @staticmethod
-    def _openai_usage_from_gemini_body(body: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _openai_usage_from_gemini_body(
+        body: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
         """Build OpenAI-style ``usage`` from a Gemini response body.
 
         Supports both REST-style keys (``usageMetadata``, ``promptTokenCount``) and

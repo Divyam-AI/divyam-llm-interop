@@ -714,7 +714,9 @@ class TestModelRegistryIntegration:
         capabilities = ModelCapabilities(supported_api_types=[ModelApiType.COMPLETIONS])
         mock_get_model_capabilities_map.return_value = {
             Model(name="foo-1", api_type=ModelApiType.COMPLETIONS): capabilities,
-            Model(name="foo-1-instruct", api_type=ModelApiType.COMPLETIONS): capabilities,
+            Model(
+                name="foo-1-instruct", api_type=ModelApiType.COMPLETIONS
+            ): capabilities,
         }
 
         registry = ModelRegistry()

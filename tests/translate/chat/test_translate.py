@@ -235,7 +235,10 @@ def test_translate_response_gemini_native_to_openai(translator):
             "candidates": [
                 {
                     "index": 0,
-                    "content": {"role": "model", "parts": [{"text": "Hello from Gemini"}]},
+                    "content": {
+                        "role": "model",
+                        "parts": [{"text": "Hello from Gemini"}],
+                    },
                     "finishReason": "STOP",
                 }
             ],
@@ -301,7 +304,10 @@ def test_translate_response_gemini_native_to_gemini_native(translator):
             "candidates": [
                 {
                     "index": 0,
-                    "content": {"role": "model", "parts": [{"text": "Hello from Gemini"}]},
+                    "content": {
+                        "role": "model",
+                        "parts": [{"text": "Hello from Gemini"}],
+                    },
                     "finishReason": "STOP",
                 }
             ],

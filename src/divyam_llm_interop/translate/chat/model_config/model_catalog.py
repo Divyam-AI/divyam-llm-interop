@@ -74,7 +74,9 @@ class ModelCatalogEntry:
             if isinstance(patterns, str):
                 patterns = [patterns]
             if not isinstance(patterns, list) or not patterns:
-                raise ValueError("name_match.regex must be a non-empty string or list of strings")
+                raise ValueError(
+                    "name_match.regex must be a non-empty string or list of strings"
+                )
             if not all(isinstance(p, str) for p in patterns):
                 raise ValueError("name_match.regex patterns must all be strings")
             name_match_patterns = tuple(patterns)
