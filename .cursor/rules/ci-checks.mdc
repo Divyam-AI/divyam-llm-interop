@@ -1,0 +1,22 @@
+---
+description: Run repo CI checks before finishing Python changes
+globs: "**/*.py"
+alwaysApply: false
+---
+
+# CI checks for Python changes
+
+Canonical instructions: [AGENTS.md](../../AGENTS.md).
+
+Before marking Python work complete, run from the repository root:
+
+```bash
+poetry run ruff check .
+poetry run ruff format --check .
+poetry run pyright .
+poetry run pytest
+```
+
+Fix all failures before committing. This matches `.github/workflows/lint.yml` and `test.yml`.
+
+For quick fixes: `poetry run ruff format .` and `poetry run ruff check --fix .`, then re-run the checks above.

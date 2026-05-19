@@ -10,6 +10,10 @@ from divyam_llm_interop.translate.chat.base.translation_utils import (
     drop_null_values_top_level,
 )
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
+from divyam_llm_interop.translate.chat.gemini_native.gemini_translator import (
+    GeminiTranslator,
+)
+from divyam_llm_interop.translate.chat.model_config.model_registry import ModelRegistry
 from divyam_llm_interop.translate.chat.translate import (
     ChatTranslator,
     ChatTranslateConfig,
@@ -153,6 +157,57 @@ def test_translate_request_gemini_native_to_openai(translator):
     assert translated.body["max_tokens"] == 1000
 
 
+def test_gemini_native_roundtrip_preserves_seed_and_function_schema():
+    gemini_model = Model(name="gemini-2.5-pro", api_type=ModelApiType.GEMINI)
+    gemini_translator = GeminiTranslator(model_registry=ModelRegistry())
+    chat_request = ChatRequest(
+        body={
+            "model": "gemini-2.5-pro",
+            "contents": [{"role": "user", "parts": [{"text": "hello"}]}],
+            "tools": [
+                {
+                    "functionDeclarations": [
+                        {
+                            "name": "get_capital_info",
+                            "description": "Return capital information for a country.",
+                            "parameters_json_schema": {
+                                "type": "object",
+                                "properties": {"country": {"type": "string"}},
+                                "required": ["country"],
+                            },
+                        }
+                    ]
+                }
+            ],
+            "toolConfig": {
+                "functionCallingConfig": {
+                    "mode": "ANY",
+                    "allowedFunctionNames": ["get_capital_info"],
+                }
+            },
+            "generationConfig": {
+                "temperature": 0.0,
+                "maxOutputTokens": 128,
+                "seed": 42,
+            },
+        }
+    )
+
+    unified_request = gemini_translator.request_to_unified(
+        chat_request=chat_request,
+        source=gemini_model,
+    )
+    translated = gemini_translator.request_from_unified(
+        from_request=unified_request,
+        target=gemini_model,
+    )
+
+    assert translated.body["generationConfig"]["seed"] == 42
+    function_decl = translated.body["tools"][0]["functionDeclarations"][0]
+    assert "parameters" not in function_decl
+    assert function_decl["parameters_json_schema"]["required"] == ["country"]
+
+
 def test_translate_request_gemini_native_to_gemini_native(translator):
     source = Model(name="gemini-2.5-pro", api_type=ModelApiType.GEMINI)
     target = Model(name="gemini-2.5-pro", api_type=ModelApiType.GEMINI)
@@ -292,6 +347,204 @@ def test_translate_response_gemini_genai_model_dump_shape_to_openai(translator):
     assert ptd["modalities"][0]["modality"] == "TEXT"
     assert ptd["modalities"][0]["token_count"] == 3
     assert translated.body["choices"][0]["finish_reason"] == "stop"
+
+
+def test_translate_response_gemini_preserves_finish_message_and_function_call():
+    gemini_model = Model(name="gemini-2.5-flash-lite", api_type=ModelApiType.GEMINI)
+    gemini_translator = GeminiTranslator(model_registry=ModelRegistry())
+    chat_response = ChatResponse(
+        body={
+            "responseId": "ZA4MarnkCr_-4-EPzPzN-Ac",
+            "modelVersion": "gemini-2.5-flash-lite",
+            "candidates": [
+                {
+                    "index": 0,
+                    "content": {
+                        "role": "model",
+                        "parts": [
+                            {
+                                "functionCall": {
+                                    "name": "get_capital_info",
+                                    "args": {"country": "France"},
+                                }
+                            }
+                        ],
+                    },
+                    "finishReason": "STOP",
+                    "finishMessage": "Model generated function call(s).",
+                }
+            ],
+            "usageMetadata": {
+                "promptTokenCount": 67,
+                "candidatesTokenCount": 17,
+                "totalTokenCount": 84,
+            },
+        }
+    )
+
+    translated = gemini_translator.response_from_unified(
+        gemini_translator.response_to_unified(chat_response, gemini_model),
+        gemini_model,
+    )
+
+    candidate = translated.body["candidates"][0]
+    assert candidate["finishReason"] == "STOP"
+    assert candidate["finishMessage"] == "Model generated function call(s)."
+    assert candidate["content"]["parts"][0]["functionCall"]["args"] == {
+        "country": "France"
+    }
+
+
+def test_translate_response_gemini_malformed_function_call_roundtrip():
+    gemini_model = Model(name="gemini-2.5-flash-lite", api_type=ModelApiType.GEMINI)
+    gemini_translator = GeminiTranslator(model_registry=ModelRegistry())
+    chat_response = ChatResponse(
+        body={
+            "responseId": "Zg4MatnOI_yH4-EPitijiQw",
+            "modelVersion": "gemini-2.5-flash-lite",
+            "candidates": [
+                {
+                    "finishReason": "MALFORMED_FUNCTION_CALL",
+                    "index": 0,
+                    "finishMessage": (
+                        "Malformed function call: print(default_api.get_capital_info"
+                        '(country="France))'
+                    ),
+                }
+            ],
+            "usageMetadata": {
+                "promptTokenCount": 113,
+                "totalTokenCount": 113,
+                "promptTokensDetails": [
+                    {"modality": "TEXT", "tokenCount": 113},
+                ],
+                "serviceTier": "standard",
+            },
+        }
+    )
+
+    translated = gemini_translator.response_from_unified(
+        gemini_translator.response_to_unified(chat_response, gemini_model),
+        gemini_model,
+    )
+
+    candidate = translated.body["candidates"][0]
+    assert candidate["finishReason"] == "MALFORMED_FUNCTION_CALL"
+    assert "Malformed function call" in candidate["finishMessage"]
+    assert "content" not in candidate
+    assert translated.body["usageMetadata"]["promptTokensDetails"] == [
+        {"modality": "TEXT", "tokenCount": 113}
+    ]
+    assert translated.body["usageMetadata"]["serviceTier"] == "standard"
+
+
+def test_translate_response_gemini_model_dump_shape_preserves_usage_details():
+    translator = ChatTranslator()
+    model = Model(name="gemini-2.5-flash-lite", api_type=ModelApiType.GEMINI)
+    dumped_body = {
+        "response_id": "5Q8MaryWAqT6juMPgtuv0Qo",
+        "model_version": "gemini-2.5-flash-lite",
+        "candidates": [
+            {
+                "finish_reason": "MALFORMED_FUNCTION_CALL",
+                "index": 0,
+                "finish_message": "Malformed function call: print(...)",
+            }
+        ],
+        "usage_metadata": {
+            "prompt_token_count": 113,
+            "total_token_count": 113,
+            "prompt_tokens_details": [{"modality": "TEXT", "token_count": 113}],
+            "service_tier": "standard",
+        },
+    }
+    translated = translator.translate_response(
+        ChatResponse(body=dumped_body), model, model
+    )
+    assert translated.body["responseId"] == "5Q8MaryWAqT6juMPgtuv0Qo"
+    assert translated.body["candidates"][0]["finishReason"] == "MALFORMED_FUNCTION_CALL"
+    assert (
+        translated.body["candidates"][0]["finishMessage"]
+        == "Malformed function call: print(...)"
+    )
+    assert translated.body["usageMetadata"]["promptTokensDetails"] == [
+        {"modality": "TEXT", "tokenCount": 113}
+    ]
+    assert translated.body["usageMetadata"]["serviceTier"] == "standard"
+
+
+def test_translate_response_gemini_via_chat_translator_preserves_all_fields():
+    translator = ChatTranslator()
+    model = Model(name="gemini-2.5-flash-lite", api_type=ModelApiType.GEMINI)
+    provider_body = {
+        "responseId": "5Q8MaryWAqT6juMPgtuv0Qo",
+        "modelVersion": "gemini-2.5-flash-lite",
+        "candidates": [
+            {
+                "finishReason": "MALFORMED_FUNCTION_CALL",
+                "index": 0,
+                "finishMessage": "Malformed function call: print(...)",
+            }
+        ],
+        "usageMetadata": {
+            "promptTokenCount": 113,
+            "totalTokenCount": 113,
+            "promptTokensDetails": [{"modality": "TEXT", "tokenCount": 113}],
+            "serviceTier": "standard",
+        },
+    }
+    translated = translator.translate_response(
+        ChatResponse(body=provider_body), model, model
+    )
+    assert translated.body == provider_body
+
+
+def test_translate_response_gemini_snake_case_function_call_roundtrip():
+    gemini_model = Model(name="gemini-2.5-flash-lite", api_type=ModelApiType.GEMINI)
+    gemini_translator = GeminiTranslator(model_registry=ModelRegistry())
+    chat_response = ChatResponse(
+        body={
+            "response_id": "EA0MavquHsmojuMPjo7mmQc",
+            "model_version": "gemini-2.5-flash-lite",
+            "candidates": [
+                {
+                    "index": 0,
+                    "content": {
+                        "role": "model",
+                        "parts": [
+                            {
+                                "function_call": {
+                                    "name": "get_capital_info",
+                                    "args": {"country": "France"},
+                                }
+                            }
+                        ],
+                    },
+                    "finish_reason": "STOP",
+                }
+            ],
+            "usage_metadata": {
+                "prompt_token_count": 67,
+                "candidates_token_count": 17,
+                "total_token_count": 84,
+            },
+        }
+    )
+
+    unified_response = gemini_translator.response_to_unified(
+        chat_response=chat_response,
+        source=gemini_model,
+    )
+    translated = gemini_translator.response_from_unified(
+        from_response=unified_response,
+        _=gemini_model,
+    )
+
+    assert translated.body["responseId"] == "EA0MavquHsmojuMPjo7mmQc"
+    assert translated.body["modelVersion"] == "gemini-2.5-flash-lite"
+    function_part = translated.body["candidates"][0]["content"]["parts"][0]
+    assert function_part["functionCall"]["name"] == "get_capital_info"
+    assert function_part["functionCall"]["args"] == {"country": "France"}
 
 
 def test_translate_response_gemini_native_to_gemini_native(translator):
