@@ -91,7 +91,9 @@ class GeminiTranslator(Translator):
                     function_call = part.get("function_call")
                 if function_call:
                     call_name = function_call.get("name", "unknown_function")
-                    arguments = function_call.get("args", function_call.get("arguments", {}))
+                    arguments = function_call.get(
+                        "args", function_call.get("arguments", {})
+                    )
                     tool_calls.append(
                         {
                             "id": f"call_{content_index}_{part_index}_{call_name}",
@@ -661,7 +663,9 @@ class GeminiTranslator(Translator):
         # Gemini SDK request payloads often use `parameters_json_schema`; unified
         # tools expect `parameters`. Keep both for round-trip fidelity.
         params_json_schema = normalized.get("parameters_json_schema")
-        if normalized.get("parameters") is None and isinstance(params_json_schema, dict):
+        if normalized.get("parameters") is None and isinstance(
+            params_json_schema, dict
+        ):
             normalized["parameters"] = params_json_schema
         return normalized
 
@@ -746,7 +750,9 @@ class GeminiTranslator(Translator):
                 function_call = part.get("function_call")
             if not function_call:
                 continue
-            function_args = function_call.get("args", function_call.get("arguments", {}))
+            function_args = function_call.get(
+                "args", function_call.get("arguments", {})
+            )
             tool_calls.append(
                 UnifiedToolCall.from_dict(
                     {

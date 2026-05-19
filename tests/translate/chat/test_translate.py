@@ -10,7 +10,9 @@ from divyam_llm_interop.translate.chat.base.translation_utils import (
     drop_null_values_top_level,
 )
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
-from divyam_llm_interop.translate.chat.gemini_native.gemini_translator import GeminiTranslator
+from divyam_llm_interop.translate.chat.gemini_native.gemini_translator import (
+    GeminiTranslator,
+)
 from divyam_llm_interop.translate.chat.model_config.model_registry import ModelRegistry
 from divyam_llm_interop.translate.chat.translate import (
     ChatTranslator,
@@ -183,7 +185,11 @@ def test_gemini_native_roundtrip_preserves_seed_and_function_schema():
                     "allowedFunctionNames": ["get_capital_info"],
                 }
             },
-            "generationConfig": {"temperature": 0.0, "maxOutputTokens": 128, "seed": 42},
+            "generationConfig": {
+                "temperature": 0.0,
+                "maxOutputTokens": 128,
+                "seed": 42,
+            },
         }
     )
 
@@ -401,7 +407,7 @@ def test_translate_response_gemini_malformed_function_call_roundtrip():
                     "finishReason": "MALFORMED_FUNCTION_CALL",
                     "index": 0,
                     "finishMessage": (
-                        'Malformed function call: print(default_api.get_capital_info'
+                        "Malformed function call: print(default_api.get_capital_info"
                         '(country="France))'
                     ),
                 }
@@ -457,7 +463,10 @@ def test_translate_response_gemini_model_dump_shape_preserves_usage_details():
     )
     assert translated.body["responseId"] == "5Q8MaryWAqT6juMPgtuv0Qo"
     assert translated.body["candidates"][0]["finishReason"] == "MALFORMED_FUNCTION_CALL"
-    assert translated.body["candidates"][0]["finishMessage"] == "Malformed function call: print(...)"
+    assert (
+        translated.body["candidates"][0]["finishMessage"]
+        == "Malformed function call: print(...)"
+    )
     assert translated.body["usageMetadata"]["promptTokensDetails"] == [
         {"modality": "TEXT", "tokenCount": 113}
     ]
