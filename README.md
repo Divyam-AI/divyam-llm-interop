@@ -207,7 +207,11 @@ If you're unsure about a change, feel free to open a discussion or draft PR.
 
 ### Code Quality Checks
 
-Before submitting your PR, make sure the code passes all checks:
+Before submitting your PR, make sure the code passes all checks.
+
+For in-editor linting, formatting, and type checking, open the repo in VS Code or Cursor and install the recommended extensions (`.vscode/extensions.json`). Settings use `pyproject.toml` (ruff) and `pyrightconfig.json` (types).
+
+Agent instructions for any AI tool: see [AGENTS.md](AGENTS.md).
 
 #### Format code
 

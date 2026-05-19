@@ -1,3 +1,6 @@
+# Copyright 2025 Divyam.ai
+# SPDX-License-Identifier: Apache-2.0
+
 import copy
 import json
 import time
