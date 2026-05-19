@@ -1,3 +1,4 @@
+import copy
 import json
 import time
 from typing import Any, Dict, List, Optional
@@ -86,9 +87,11 @@ class GeminiTranslator(Translator):
                     continue
 
                 function_call = part.get("functionCall")
+                if function_call is None:
+                    function_call = part.get("function_call")
                 if function_call:
                     call_name = function_call.get("name", "unknown_function")
-                    arguments = function_call.get("args", {})
+                    arguments = function_call.get("args", function_call.get("arguments", {}))
                     tool_calls.append(
                         {
                             "id": f"call_{content_index}_{part_index}_{call_name}",
@@ -145,6 +148,8 @@ class GeminiTranslator(Translator):
             # Unified schema does not have top_k as a first-class field, preserve as
             # unknown for round-trips back into Gemini.
             unified_request_dict["top_k"] = generation_config["topK"]
+        if generation_config.get("seed") is not None:
+            unified_request_dict["seed"] = generation_config["seed"]
 
         tool_declarations = self._extract_function_declarations(body.get("tools", []))
         if tool_declarations:
@@ -251,6 +256,8 @@ class GeminiTranslator(Translator):
             generation_config["frequencyPenalty"] = unified.frequency_penalty
         if unified.unknowns.get("top_k") is not None:
             generation_config["topK"] = unified.unknowns.get("top_k")
+        if unified.seed is not None:
+            generation_config["seed"] = unified.seed
 
         if generation_config:
             request_body["generationConfig"] = generation_config
@@ -259,11 +266,7 @@ class GeminiTranslator(Translator):
             request_body["tools"] = [
                 {
                     "functionDeclarations": [
-                        {
-                            "name": tool.function.name,
-                            "description": tool.function.description,
-                            "parameters": tool.function.parameters.to_dict(),
-                        }
+                        self._build_function_declaration(tool.function.to_dict())
                         for tool in unified.tools
                     ]
                 }
@@ -285,10 +288,10 @@ class GeminiTranslator(Translator):
 
     @override
     def are_responses_compatible(self, source: Model, target: Model) -> bool:
-        return (
-            source.api_type == ModelApiType.GEMINI
-            and target.api_type == ModelApiType.GEMINI
-        )
+        # Always run response_to_unified/response_from_unified so native Gemini fields
+        # (finishMessage, promptTokensDetails, serviceTier, etc.) are preserved.
+        _ = source, target
+        return False
 
     @override
     def response_to_unified(
@@ -299,35 +302,50 @@ class GeminiTranslator(Translator):
 
         choices = []
         for index, candidate in enumerate(candidates):
-            content = candidate.get("content", {})
-            text = self._extract_parts_text(content.get("parts", []))
-            tool_calls = self._extract_tool_calls_from_parts(content.get("parts", []))
+            content = candidate.get("content") or {}
+            parts = content.get("parts", []) if isinstance(content, dict) else []
+            text = self._extract_parts_text(parts)
+            tool_calls = self._extract_tool_calls_from_parts(parts)
             message: Dict[str, Any] = {"role": "assistant"}
             if text:
                 message["content"] = text
             if tool_calls:
                 message["tool_calls"] = [tc.to_dict() for tc in tool_calls]
 
-            finish = candidate.get("finishReason") or candidate.get("finish_reason")
-            choices.append(
-                {
-                    "index": index,
-                    "message": message,
-                    "finish_reason": self._map_finish_reason_to_openai(finish),
-                }
+            finish = GeminiTranslator._candidate_field(
+                candidate, "finishReason", "finish_reason"
             )
+            finish_message = GeminiTranslator._candidate_field(
+                candidate, "finishMessage", "finish_message"
+            )
+            choice_entry: Dict[str, Any] = {
+                "index": candidate.get("index", index),
+                "message": message,
+                "finish_reason": self._map_finish_reason_to_openai(finish),
+            }
+            gemini_finish = GeminiTranslator._finish_reason_str(finish)
+            if gemini_finish:
+                choice_entry["gemini_finish_reason"] = gemini_finish
+            if finish_message is not None:
+                choice_entry["gemini_finish_message"] = finish_message
+            choices.append(choice_entry)
 
         usage = self._openai_usage_from_gemini_body(body)
 
         completion_body = {
-            "id": body.get("responseId", f"gemini_{int(time.time() * 1000)}"),
+            "id": body.get(
+                "responseId",
+                body.get("response_id", f"gemini_{int(time.time() * 1000)}"),
+            ),
             "object": "chat.completion",
             "created": int(time.time()),
-            "model": body.get("modelVersion", source.name),
+            "model": body.get("modelVersion", body.get("model_version", source.name)),
             "choices": choices,
         }
         if usage is not None:
             completion_body["usage"] = usage
+
+        completion_body["gemini_response_raw"] = copy.deepcopy(body)
 
         return translation_utils.as_is_response_to_unified(
             ChatResponse(body=completion_body, headers=chat_response.headers)
@@ -337,6 +355,15 @@ class GeminiTranslator(Translator):
     def response_from_unified(
         self, from_response: UnifiedChatCompletionsResponse, _: Model
     ) -> ChatResponse:
+        raw_body = from_response.body.unknowns.get("gemini_response_raw")
+        if isinstance(raw_body, dict):
+            body = self._normalize_gemini_response_body(
+                raw_body,
+                response_id=from_response.body.id,
+                model_version=from_response.body.model,
+            )
+            return ChatResponse(body=body, headers=from_response.headers)
+
         candidates = []
         for choice in from_response.body.choices:
             parts: List[Dict[str, Any]] = []
@@ -355,15 +382,21 @@ class GeminiTranslator(Translator):
                         }
                     )
 
-            candidates.append(
-                {
-                    "index": choice.index,
-                    "content": {"role": "model", "parts": parts},
-                    "finishReason": self._map_finish_reason_to_gemini(
-                        choice.finish_reason
-                    ),
-                }
-            )
+            finish_reason = choice.unknowns.get("gemini_finish_reason")
+            if not finish_reason:
+                finish_reason = self._map_finish_reason_to_gemini(choice.finish_reason)
+
+            candidate: Dict[str, Any] = {
+                "index": choice.index,
+                "finishReason": finish_reason,
+            }
+            finish_message = choice.unknowns.get("gemini_finish_message")
+            if finish_message is not None:
+                candidate["finishMessage"] = finish_message
+            if parts:
+                candidate["content"] = {"role": "model", "parts": parts}
+
+            candidates.append(candidate)
 
         body: Dict[str, Any] = {
             "responseId": from_response.body.id,
@@ -393,6 +426,206 @@ class GeminiTranslator(Translator):
         return translation_utils.as_is_unifed_stream_to_response_stream(from_response)
 
     @staticmethod
+    def _normalize_gemini_response_body(
+        raw: Dict[str, Any],
+        *,
+        response_id: Optional[str] = None,
+        model_version: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        body: Dict[str, Any] = {}
+
+        rid = response_id or raw.get("responseId") or raw.get("response_id")
+        if rid is not None:
+            body["responseId"] = rid
+
+        model = model_version or raw.get("modelVersion") or raw.get("model_version")
+        if model is not None:
+            body["modelVersion"] = model
+
+        candidates_raw = raw.get("candidates")
+        if isinstance(candidates_raw, list):
+            body["candidates"] = [
+                GeminiTranslator._normalize_gemini_candidate(candidate)
+                for candidate in candidates_raw
+                if isinstance(candidate, dict)
+            ]
+
+        usage_raw = raw.get("usageMetadata") or raw.get("usage_metadata")
+        if isinstance(usage_raw, dict):
+            body["usageMetadata"] = GeminiTranslator._normalize_gemini_usage_metadata(
+                usage_raw
+            )
+
+        return body
+
+    @staticmethod
+    def _normalize_gemini_candidate(candidate: Dict[str, Any]) -> Dict[str, Any]:
+        normalized: Dict[str, Any] = {}
+
+        if "index" in candidate:
+            normalized["index"] = candidate["index"]
+
+        finish = GeminiTranslator._candidate_field(
+            candidate, "finishReason", "finish_reason"
+        )
+        if finish is not None:
+            normalized["finishReason"] = GeminiTranslator._finish_reason_str(finish)
+
+        finish_message = GeminiTranslator._candidate_field(
+            candidate, "finishMessage", "finish_message"
+        )
+        if finish_message is not None:
+            normalized["finishMessage"] = finish_message
+
+        content = candidate.get("content")
+        if isinstance(content, dict) and content:
+            normalized["content"] = GeminiTranslator._normalize_gemini_content(content)
+
+        reserved = {
+            "index",
+            "finishReason",
+            "finish_reason",
+            "finishMessage",
+            "finish_message",
+            "content",
+        }
+        for key, value in candidate.items():
+            if key in reserved or value is None:
+                continue
+            normalized[key] = value
+
+        return normalized
+
+    @staticmethod
+    def _normalize_gemini_content(content: Dict[str, Any]) -> Dict[str, Any]:
+        normalized: Dict[str, Any] = {}
+        role = content.get("role")
+        if role is not None:
+            normalized["role"] = role
+
+        parts_raw = content.get("parts")
+        if isinstance(parts_raw, list):
+            normalized["parts"] = [
+                GeminiTranslator._normalize_gemini_part(part)
+                for part in parts_raw
+                if isinstance(part, dict)
+            ]
+
+        for key, value in content.items():
+            if key in ("role", "parts") or value is None:
+                continue
+            normalized[key] = value
+
+        return normalized
+
+    @staticmethod
+    def _normalize_gemini_part(part: Dict[str, Any]) -> Dict[str, Any]:
+        if "text" in part:
+            return {"text": part["text"]}
+
+        function_call = part.get("functionCall") or part.get("function_call")
+        if isinstance(function_call, dict):
+            args = function_call.get("args", function_call.get("arguments", {}))
+            return {
+                "functionCall": {
+                    "name": function_call.get("name"),
+                    "args": args,
+                }
+            }
+
+        function_response = part.get("functionResponse") or part.get(
+            "function_response"
+        )
+        if isinstance(function_response, dict):
+            return {
+                "functionResponse": {
+                    "name": function_response.get("name"),
+                    "response": function_response.get("response", {}),
+                }
+            }
+
+        return dict(part)
+
+    @staticmethod
+    def _normalize_gemini_usage_metadata(meta: Dict[str, Any]) -> Dict[str, Any]:
+        normalized: Dict[str, Any] = {}
+
+        for camel, snake in (
+            ("promptTokenCount", "prompt_token_count"),
+            ("candidatesTokenCount", "candidates_token_count"),
+            ("totalTokenCount", "total_token_count"),
+            ("cachedContentTokenCount", "cached_content_token_count"),
+            ("thoughtsTokenCount", "thoughts_token_count"),
+        ):
+            value = meta.get(camel)
+            if value is None:
+                value = meta.get(snake)
+            if value is not None:
+                normalized[camel] = value
+
+        details = meta.get("promptTokensDetails") or meta.get("prompt_tokens_details")
+        if isinstance(details, list):
+            normalized["promptTokensDetails"] = [
+                GeminiTranslator._normalize_prompt_tokens_detail(row)
+                for row in details
+                if isinstance(row, dict)
+            ]
+
+        service_tier = meta.get("serviceTier") or meta.get("service_tier")
+        if service_tier is not None:
+            normalized["serviceTier"] = service_tier
+
+        reserved = set(normalized.keys()) | {
+            "prompt_token_count",
+            "candidates_token_count",
+            "total_token_count",
+            "cached_content_token_count",
+            "thoughts_token_count",
+            "prompt_tokens_details",
+            "service_tier",
+        }
+        for key, value in meta.items():
+            if key in reserved or value is None:
+                continue
+            normalized[key] = value
+
+        return normalized
+
+    @staticmethod
+    def _normalize_prompt_tokens_detail(row: Dict[str, Any]) -> Dict[str, Any]:
+        modality = row.get("modality")
+        if modality is not None and hasattr(modality, "value"):
+            modality = modality.value
+        token_count = row.get("tokenCount", row.get("token_count"))
+        detail: Dict[str, Any] = {}
+        if modality is not None:
+            detail["modality"] = modality
+        if token_count is not None:
+            detail["tokenCount"] = token_count
+        for key, value in row.items():
+            if key in ("modality", "tokenCount", "token_count") or value is None:
+                continue
+            detail[key] = value
+        return detail
+
+    @staticmethod
+    def _candidate_field(candidate: Dict[str, Any], *keys: str) -> Any:
+        for key in keys:
+            if key in candidate:
+                return candidate[key]
+        return None
+
+    @staticmethod
+    def _finish_reason_str(finish_reason: Any) -> str:
+        if finish_reason is None:
+            return ""
+        if hasattr(finish_reason, "value"):
+            finish_reason = finish_reason.value
+        if not isinstance(finish_reason, str):
+            finish_reason = str(finish_reason)
+        return finish_reason
+
+    @staticmethod
     def _extract_parts_text(parts: List[Dict[str, Any]]) -> Optional[str]:
         text_parts = [
             str(part.get("text")) for part in parts if part.get("text") is not None
@@ -416,8 +649,41 @@ class GeminiTranslator(Translator):
     ) -> List[Dict[str, Any]]:
         declarations: List[Dict[str, Any]] = []
         for tool in tools:
-            declarations.extend(tool.get("functionDeclarations", []))
+            for declaration in tool.get("functionDeclarations", []):
+                declarations.append(
+                    GeminiTranslator._normalize_function_declaration(declaration)
+                )
         return declarations
+
+    @staticmethod
+    def _normalize_function_declaration(declaration: Dict[str, Any]) -> Dict[str, Any]:
+        normalized = dict(declaration)
+        # Gemini SDK request payloads often use `parameters_json_schema`; unified
+        # tools expect `parameters`. Keep both for round-trip fidelity.
+        params_json_schema = normalized.get("parameters_json_schema")
+        if normalized.get("parameters") is None and isinstance(params_json_schema, dict):
+            normalized["parameters"] = params_json_schema
+        return normalized
+
+    @staticmethod
+    def _build_function_declaration(function_dict: Dict[str, Any]) -> Dict[str, Any]:
+        declaration: Dict[str, Any] = {
+            "name": function_dict.get("name"),
+            "description": function_dict.get("description", ""),
+        }
+        # Preserve original Gemini native shape when it existed in source payload.
+        # Gemini backend rejects requests that set both parameters and
+        # parameters_json_schema in the same declaration.
+        parameters_json_schema = function_dict.get("parameters_json_schema")
+        if isinstance(parameters_json_schema, dict):
+            declaration["parameters_json_schema"] = parameters_json_schema
+            return declaration
+
+        parameters = function_dict.get("parameters")
+        if isinstance(parameters, dict):
+            declaration["parameters"] = parameters
+
+        return declaration
 
     @staticmethod
     def _parse_tool_choice(tool_config: Optional[Dict[str, Any]]) -> Optional[Any]:
@@ -476,8 +742,11 @@ class GeminiTranslator(Translator):
         tool_calls: List[UnifiedToolCall] = []
         for idx, part in enumerate(parts):
             function_call = part.get("functionCall")
+            if function_call is None:
+                function_call = part.get("function_call")
             if not function_call:
                 continue
+            function_args = function_call.get("args", function_call.get("arguments", {}))
             tool_calls.append(
                 UnifiedToolCall.from_dict(
                     {
@@ -485,7 +754,7 @@ class GeminiTranslator(Translator):
                         "type": "function",
                         "function": {
                             "name": function_call.get("name", "tool"),
-                            "arguments": json.dumps(function_call.get("args", {})),
+                            "arguments": json.dumps(function_args),
                         },
                     }
                 )
