@@ -499,9 +499,7 @@ class GeminiTranslator(Translator):
             ),
             "object": "chat.completion.chunk",
             "created": int(time.time()),
-            "model": body.get(
-                "modelVersion", body.get("model_version", source.name)
-            ),
+            "model": body.get("modelVersion", body.get("model_version", source.name)),
             "choices": choices,
             "gemini_response_raw": copy.deepcopy(body),
         }
