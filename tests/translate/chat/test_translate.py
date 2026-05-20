@@ -18,7 +18,12 @@ from divyam_llm_interop.translate.chat.translate import (
     ChatTranslator,
     ChatTranslateConfig,
 )
-from divyam_llm_interop.translate.chat.types import ChatRequest, ChatResponse, Model
+from divyam_llm_interop.translate.chat.types import (
+    ChatRequest,
+    ChatResponse,
+    ChatResponseStreaming,
+    Model,
+)
 from tests.translate.translation_testing_utils import (
     set_values_recursively,
     list_input_json_files,
@@ -570,6 +575,116 @@ def test_translate_response_gemini_native_to_gemini_native(translator):
     translated = translator.translate_response(chat_response, source, target)
 
     assert translated == chat_response
+
+
+@pytest.mark.asyncio
+async def test_translate_response_streaming_gemini_native_tool_call_roundtrip(
+    translator,
+):
+    """Gemini stream chunks are incremental: text deltas, then tool call, then finish."""
+    source = Model(name="gemini-2.5-flash-lite", api_type=ModelApiType.GEMINI)
+    target = Model(name="gemini-2.5-flash-lite", api_type=ModelApiType.GEMINI)
+    response_id = "EA0MavquHsmojuMPjo7mmQc"
+    model_version = "gemini-2.5-flash-lite"
+    gemini_chunks = [
+        {
+            "responseId": response_id,
+            "modelVersion": model_version,
+            "candidates": [
+                {
+                    "index": 0,
+                    "content": {
+                        "role": "model",
+                        "parts": [{"text": "Let me"}],
+                    },
+                }
+            ],
+        },
+        {
+            "responseId": response_id,
+            "modelVersion": model_version,
+            "candidates": [
+                {
+                    "index": 0,
+                    "content": {
+                        "role": "model",
+                        "parts": [{"text": " look that up for you."}],
+                    },
+                }
+            ],
+        },
+        {
+            "responseId": response_id,
+            "modelVersion": model_version,
+            "candidates": [
+                {
+                    "index": 0,
+                    "content": {
+                        "role": "model",
+                        "parts": [
+                            {
+                                "functionCall": {
+                                    "name": "get_capital_info",
+                                    "args": {"country": "France"},
+                                }
+                            }
+                        ],
+                    },
+                }
+            ],
+        },
+        {
+            "responseId": response_id,
+            "modelVersion": model_version,
+            "candidates": [
+                {
+                    "index": 0,
+                    "finishReason": "STOP",
+                }
+            ],
+            "usageMetadata": {
+                "promptTokenCount": 67,
+                "candidatesTokenCount": 17,
+                "totalTokenCount": 84,
+            },
+        },
+    ]
+
+    async def _gemini_stream():
+        for chunk in gemini_chunks:
+            yield chunk
+
+    translated_streaming = translator.translate_response_streaming(
+        ChatResponseStreaming(stream=_gemini_stream(), headers={}),
+        source,
+        target,
+    )
+
+    translated_chunks: list[dict] = []
+    async for chunk in translated_streaming.stream:
+        translated_chunks.append(chunk)
+
+    assert len(translated_chunks) == len(gemini_chunks)
+
+    assert translated_chunks[0]["candidates"][0]["content"]["parts"][0] == {
+        "text": "Let me"
+    }
+    assert translated_chunks[1]["candidates"][0]["content"]["parts"][0] == {
+        "text": " look that up for you."
+    }
+
+    function_part = translated_chunks[2]["candidates"][0]["content"]["parts"][0]
+    assert function_part["functionCall"]["name"] == "get_capital_info"
+    assert function_part["functionCall"]["args"] == {"country": "France"}
+
+    final_candidate = translated_chunks[3]["candidates"][0]
+    assert "content" not in final_candidate
+    assert final_candidate["finishReason"] == "STOP"
+    assert translated_chunks[3]["usageMetadata"] == {
+        "promptTokenCount": 67,
+        "candidatesTokenCount": 17,
+        "totalTokenCount": 84,
+    }
 
 
 def validate_curated_response(inputs: list[str], translator: ChatTranslator):

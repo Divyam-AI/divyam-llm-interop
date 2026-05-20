@@ -27,6 +27,7 @@ from divyam_llm_interop.translate.chat.unified.unified_request import (
 )
 from divyam_llm_interop.translate.chat.unified.unified_response import (
     UnifiedChatCompletionsResponse,
+    UnifiedChatCompletionsStreamChunk,
     UnifiedChatResponseStreaming,
 )
 
@@ -420,15 +421,151 @@ class GeminiTranslator(Translator):
 
     @override
     def stream_response_to_unified(
-        self, chat_response: ChatResponseStreaming, _: Model
+        self, chat_response: ChatResponseStreaming, source: Model
     ) -> UnifiedChatResponseStreaming:
-        return translation_utils.as_is_response_stream_to_unified_stream(chat_response)
+        async def unified_stream():
+            async for chunk in chat_response.stream:
+                yield UnifiedChatCompletionsStreamChunk.from_dict(
+                    self._gemini_stream_chunk_to_unified_dict(chunk, source)
+                )
+
+        return UnifiedChatResponseStreaming(
+            stream=unified_stream(), headers=chat_response.headers
+        )
 
     @override
     def stream_response_from_unified(
         self, from_response: UnifiedChatResponseStreaming, _: Model
     ) -> ChatResponseStreaming:
-        return translation_utils.as_is_unifed_stream_to_response_stream(from_response)
+        async def gemini_stream():
+            async for unified_chunk in from_response.stream:
+                yield self._unified_stream_chunk_to_gemini_dict(unified_chunk)
+
+        return ChatResponseStreaming(
+            stream=gemini_stream(), headers=from_response.headers
+        )
+
+    @staticmethod
+    def _gemini_stream_chunk_to_unified_dict(
+        body: Dict[str, Any], source: Model
+    ) -> Dict[str, Any]:
+        """Map one native Gemini stream chunk to OpenAI-style stream chunk dict."""
+        candidates = body.get("candidates", [])
+        choices: List[Dict[str, Any]] = []
+        for index, candidate in enumerate(candidates):
+            content = candidate.get("content") or {}
+            parts = content.get("parts", []) if isinstance(content, dict) else []
+            text = GeminiTranslator._extract_parts_text(parts)
+            tool_calls = GeminiTranslator._extract_tool_calls_from_parts(parts)
+
+            delta: Dict[str, Any] = {}
+            if text:
+                delta["content"] = text
+            if tool_calls:
+                delta["tool_calls"] = [tc.to_dict() for tc in tool_calls]
+            if isinstance(content, dict):
+                role = content.get("role")
+                if role == "model":
+                    delta["role"] = "assistant"
+                elif role:
+                    delta["role"] = role
+
+            finish = GeminiTranslator._candidate_field(
+                candidate, "finishReason", "finish_reason"
+            )
+            finish_message = GeminiTranslator._candidate_field(
+                candidate, "finishMessage", "finish_message"
+            )
+            choice_entry: Dict[str, Any] = {
+                "index": candidate.get("index", index),
+                "delta": delta,
+            }
+            if finish is not None:
+                choice_entry["finish_reason"] = (
+                    GeminiTranslator._map_finish_reason_to_openai(finish)
+                )
+                gemini_finish = GeminiTranslator._finish_reason_str(finish)
+                if gemini_finish:
+                    choice_entry["gemini_finish_reason"] = gemini_finish
+            if finish_message is not None:
+                choice_entry["gemini_finish_message"] = finish_message
+            choices.append(choice_entry)
+
+        usage = GeminiTranslator._openai_usage_from_gemini_body(body)
+        chunk_dict: Dict[str, Any] = {
+            "id": body.get(
+                "responseId",
+                body.get("response_id", f"gemini_{int(time.time() * 1000)}"),
+            ),
+            "object": "chat.completion.chunk",
+            "created": int(time.time()),
+            "model": body.get("modelVersion", body.get("model_version", source.name)),
+            "choices": choices,
+            "gemini_response_raw": copy.deepcopy(body),
+        }
+        if usage is not None:
+            chunk_dict["usage"] = usage
+        return chunk_dict
+
+    @staticmethod
+    def _unified_stream_chunk_to_gemini_dict(
+        unified_chunk: UnifiedChatCompletionsStreamChunk,
+    ) -> Dict[str, Any]:
+        raw_body = unified_chunk.unknowns.get("gemini_response_raw")
+        if isinstance(raw_body, dict):
+            return GeminiTranslator._normalize_gemini_response_body(
+                raw_body,
+                response_id=unified_chunk.id,
+                model_version=unified_chunk.model,
+            )
+
+        candidates: List[Dict[str, Any]] = []
+        for choice in unified_chunk.choices:
+            parts: List[Dict[str, Any]] = []
+            if choice.delta.content:
+                parts.append({"text": choice.delta.content})
+            if choice.delta.tool_calls:
+                for tool_call in choice.delta.tool_calls:
+                    parts.append(
+                        {
+                            "functionCall": {
+                                "name": tool_call.function.name,
+                                "args": GeminiTranslator._safe_json_loads(
+                                    tool_call.function.arguments
+                                ),
+                            }
+                        }
+                    )
+
+            finish_reason = choice.unknowns.get("gemini_finish_reason")
+            if not finish_reason and choice.finish_reason:
+                finish_reason = GeminiTranslator._map_finish_reason_to_gemini(
+                    choice.finish_reason
+                )
+
+            candidate: Dict[str, Any] = {"index": choice.index}
+            if finish_reason:
+                candidate["finishReason"] = finish_reason
+            finish_message = choice.unknowns.get("gemini_finish_message")
+            if finish_message is not None:
+                candidate["finishMessage"] = finish_message
+            if parts:
+                candidate["content"] = {"role": "model", "parts": parts}
+            candidates.append(candidate)
+
+        body: Dict[str, Any] = {
+            "responseId": unified_chunk.id,
+            "modelVersion": unified_chunk.model,
+        }
+        if candidates:
+            body["candidates"] = candidates
+        if unified_chunk.usage:
+            body["usageMetadata"] = {
+                "promptTokenCount": unified_chunk.usage.prompt_tokens,
+                "candidatesTokenCount": unified_chunk.usage.completion_tokens,
+                "totalTokenCount": unified_chunk.usage.total_tokens,
+            }
+        return body
 
     @staticmethod
     def _normalize_gemini_response_body(
