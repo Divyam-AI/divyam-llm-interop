@@ -18,7 +18,12 @@ from divyam_llm_interop.translate.chat.translate import (
     ChatTranslator,
     ChatTranslateConfig,
 )
-from divyam_llm_interop.translate.chat.types import ChatRequest, ChatResponse, Model
+from divyam_llm_interop.translate.chat.types import (
+    ChatRequest,
+    ChatResponse,
+    ChatResponseStreaming,
+    Model,
+)
 from tests.translate.translation_testing_utils import (
     set_values_recursively,
     list_input_json_files,
@@ -570,6 +575,52 @@ def test_translate_response_gemini_native_to_gemini_native(translator):
     translated = translator.translate_response(chat_response, source, target)
 
     assert translated == chat_response
+
+
+@pytest.mark.asyncio
+async def test_translate_response_streaming_gemini_native_tool_call_roundtrip(
+    translator,
+):
+    source = Model(name="gemini-2.5-flash-lite", api_type=ModelApiType.GEMINI)
+    target = Model(name="gemini-2.5-flash-lite", api_type=ModelApiType.GEMINI)
+    gemini_chunk = {
+        "responseId": "EA0MavquHsmojuMPjo7mmQc",
+        "modelVersion": "gemini-2.5-flash-lite",
+        "candidates": [
+            {
+                "index": 0,
+                "content": {
+                    "role": "model",
+                    "parts": [
+                        {
+                            "functionCall": {
+                                "name": "get_capital_info",
+                                "args": {"country": "France"},
+                            }
+                        }
+                    ],
+                },
+            }
+        ],
+    }
+
+    async def _gemini_stream():
+        yield gemini_chunk
+
+    translated_streaming = translator.translate_response_streaming(
+        ChatResponseStreaming(stream=_gemini_stream(), headers={}),
+        source,
+        target,
+    )
+
+    translated_chunks: list[dict] = []
+    async for chunk in translated_streaming.stream:
+        translated_chunks.append(chunk)
+
+    assert len(translated_chunks) == 1
+    function_part = translated_chunks[0]["candidates"][0]["content"]["parts"][0]
+    assert function_part["functionCall"]["name"] == "get_capital_info"
+    assert function_part["functionCall"]["args"] == {"country": "France"}
 
 
 def validate_curated_response(inputs: list[str], translator: ChatTranslator):
