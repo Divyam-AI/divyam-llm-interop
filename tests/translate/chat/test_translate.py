@@ -581,6 +581,7 @@ def test_translate_response_gemini_native_to_gemini_native(translator):
 async def test_translate_response_streaming_gemini_native_tool_call_roundtrip(
     translator,
 ):
+    """Gemini stream chunks are incremental: text deltas, then tool call, then finish."""
     source = Model(name="gemini-2.5-flash-lite", api_type=ModelApiType.GEMINI)
     target = Model(name="gemini-2.5-flash-lite", api_type=ModelApiType.GEMINI)
     response_id = "EA0MavquHsmojuMPjo7mmQc"
@@ -594,7 +595,20 @@ async def test_translate_response_streaming_gemini_native_tool_call_roundtrip(
                     "index": 0,
                     "content": {
                         "role": "model",
-                        "parts": [{"functionCall": {"name": "get_capital_info"}}],
+                        "parts": [{"text": "Let me"}],
+                    },
+                }
+            ],
+        },
+        {
+            "responseId": response_id,
+            "modelVersion": model_version,
+            "candidates": [
+                {
+                    "index": 0,
+                    "content": {
+                        "role": "model",
+                        "parts": [{"text": " look that up for you."}],
                     },
                 }
             ],
@@ -625,17 +639,6 @@ async def test_translate_response_streaming_gemini_native_tool_call_roundtrip(
             "candidates": [
                 {
                     "index": 0,
-                    "content": {
-                        "role": "model",
-                        "parts": [
-                            {
-                                "functionCall": {
-                                    "name": "get_capital_info",
-                                    "args": {"country": "France"},
-                                }
-                            }
-                        ],
-                    },
                     "finishReason": "STOP",
                 }
             ],
@@ -663,20 +666,21 @@ async def test_translate_response_streaming_gemini_native_tool_call_roundtrip(
 
     assert len(translated_chunks) == len(gemini_chunks)
 
-    first_part = translated_chunks[0]["candidates"][0]["content"]["parts"][0]
-    assert first_part["functionCall"]["name"] == "get_capital_info"
-    assert first_part["functionCall"]["args"] == {}
+    assert translated_chunks[0]["candidates"][0]["content"]["parts"][0] == {
+        "text": "Let me"
+    }
+    assert translated_chunks[1]["candidates"][0]["content"]["parts"][0] == {
+        "text": " look that up for you."
+    }
 
-    for chunk in translated_chunks[1:]:
-        assert chunk["responseId"] == response_id
-        assert chunk["modelVersion"] == model_version
-        function_part = chunk["candidates"][0]["content"]["parts"][0]
-        assert function_part["functionCall"]["name"] == "get_capital_info"
-        assert function_part["functionCall"]["args"] == {"country": "France"}
+    function_part = translated_chunks[2]["candidates"][0]["content"]["parts"][0]
+    assert function_part["functionCall"]["name"] == "get_capital_info"
+    assert function_part["functionCall"]["args"] == {"country": "France"}
 
-    final_candidate = translated_chunks[-1]["candidates"][0]
+    final_candidate = translated_chunks[3]["candidates"][0]
+    assert "content" not in final_candidate
     assert final_candidate["finishReason"] == "STOP"
-    assert translated_chunks[-1]["usageMetadata"] == {
+    assert translated_chunks[3]["usageMetadata"] == {
         "promptTokenCount": 67,
         "candidatesTokenCount": 17,
         "totalTokenCount": 84,
