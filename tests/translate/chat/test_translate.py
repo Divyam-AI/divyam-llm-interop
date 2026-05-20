@@ -583,29 +583,73 @@ async def test_translate_response_streaming_gemini_native_tool_call_roundtrip(
 ):
     source = Model(name="gemini-2.5-flash-lite", api_type=ModelApiType.GEMINI)
     target = Model(name="gemini-2.5-flash-lite", api_type=ModelApiType.GEMINI)
-    gemini_chunk = {
-        "responseId": "EA0MavquHsmojuMPjo7mmQc",
-        "modelVersion": "gemini-2.5-flash-lite",
-        "candidates": [
-            {
-                "index": 0,
-                "content": {
-                    "role": "model",
-                    "parts": [
-                        {
-                            "functionCall": {
-                                "name": "get_capital_info",
-                                "args": {"country": "France"},
+    response_id = "EA0MavquHsmojuMPjo7mmQc"
+    model_version = "gemini-2.5-flash-lite"
+    gemini_chunks = [
+        {
+            "responseId": response_id,
+            "modelVersion": model_version,
+            "candidates": [
+                {
+                    "index": 0,
+                    "content": {
+                        "role": "model",
+                        "parts": [{"functionCall": {"name": "get_capital_info"}}],
+                    },
+                }
+            ],
+        },
+        {
+            "responseId": response_id,
+            "modelVersion": model_version,
+            "candidates": [
+                {
+                    "index": 0,
+                    "content": {
+                        "role": "model",
+                        "parts": [
+                            {
+                                "functionCall": {
+                                    "name": "get_capital_info",
+                                    "args": {"country": "France"},
+                                }
                             }
-                        }
-                    ],
-                },
-            }
-        ],
-    }
+                        ],
+                    },
+                }
+            ],
+        },
+        {
+            "responseId": response_id,
+            "modelVersion": model_version,
+            "candidates": [
+                {
+                    "index": 0,
+                    "content": {
+                        "role": "model",
+                        "parts": [
+                            {
+                                "functionCall": {
+                                    "name": "get_capital_info",
+                                    "args": {"country": "France"},
+                                }
+                            }
+                        ],
+                    },
+                    "finishReason": "STOP",
+                }
+            ],
+            "usageMetadata": {
+                "promptTokenCount": 67,
+                "candidatesTokenCount": 17,
+                "totalTokenCount": 84,
+            },
+        },
+    ]
 
     async def _gemini_stream():
-        yield gemini_chunk
+        for chunk in gemini_chunks:
+            yield chunk
 
     translated_streaming = translator.translate_response_streaming(
         ChatResponseStreaming(stream=_gemini_stream(), headers={}),
@@ -617,10 +661,26 @@ async def test_translate_response_streaming_gemini_native_tool_call_roundtrip(
     async for chunk in translated_streaming.stream:
         translated_chunks.append(chunk)
 
-    assert len(translated_chunks) == 1
-    function_part = translated_chunks[0]["candidates"][0]["content"]["parts"][0]
-    assert function_part["functionCall"]["name"] == "get_capital_info"
-    assert function_part["functionCall"]["args"] == {"country": "France"}
+    assert len(translated_chunks) == len(gemini_chunks)
+
+    first_part = translated_chunks[0]["candidates"][0]["content"]["parts"][0]
+    assert first_part["functionCall"]["name"] == "get_capital_info"
+    assert first_part["functionCall"]["args"] == {}
+
+    for chunk in translated_chunks[1:]:
+        assert chunk["responseId"] == response_id
+        assert chunk["modelVersion"] == model_version
+        function_part = chunk["candidates"][0]["content"]["parts"][0]
+        assert function_part["functionCall"]["name"] == "get_capital_info"
+        assert function_part["functionCall"]["args"] == {"country": "France"}
+
+    final_candidate = translated_chunks[-1]["candidates"][0]
+    assert final_candidate["finishReason"] == "STOP"
+    assert translated_chunks[-1]["usageMetadata"] == {
+        "promptTokenCount": 67,
+        "candidatesTokenCount": 17,
+        "totalTokenCount": 84,
+    }
 
 
 def validate_curated_response(inputs: list[str], translator: ChatTranslator):
