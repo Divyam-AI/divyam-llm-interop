@@ -4,9 +4,12 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from divyam_llm_interop.translate.chat.jsonschema.types import JSONSchema
 from divyam_llm_interop.translate.chat.unified.unified_request import (
     UnifiedChatCompletionsRequestBody,
+    UnifiedFunctionCall,
     UnifiedMessage,
     UnifiedFunction,
     UnifiedTool,
@@ -108,3 +111,17 @@ def test_to_and_from_dict():
 
     result = UnifiedChatCompletionsRequestBody.from_dict(data=complex_request).to_dict()
     assert result == complex_request
+
+
+def test_function_call_requires_name():
+    # A well-formed tool call round-trips and preserves its name.
+    call = UnifiedFunctionCall.from_dict({"name": "get_weather", "arguments": "{}"})
+    assert call.name == "get_weather"
+
+    # A malformed tool call without a name must be rejected rather than
+    # silently laundered into a function literally named "None".
+    with pytest.raises(ValueError):
+        UnifiedFunctionCall.from_dict({"arguments": "{}"})
+
+    with pytest.raises(ValueError):
+        UnifiedFunctionCall.from_dict({"name": None, "arguments": "{}"})
