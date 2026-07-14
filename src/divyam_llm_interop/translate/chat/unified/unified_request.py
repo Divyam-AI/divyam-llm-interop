@@ -35,8 +35,12 @@ class UnifiedFunctionCall:
         declared_fields = {f.name for f in fields(cls) if f.name != "unknowns"}
         unknowns = {k: v for k, v in data.items() if k not in declared_fields}
 
+        name = data.get("name")
+        if not isinstance(name, str) or not name:
+            raise ValueError("UnifiedFunctionCall requires a non-empty 'name'")
+
         return cls(
-            name=str(data.get("name")),
+            name=name,
             arguments=str(data.get("arguments")) if "arguments" in data else "",
             unknowns=unknowns,
         )
