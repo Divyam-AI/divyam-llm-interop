@@ -2,14 +2,14 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 
 def _transform_value(value, name, value1):
     pass
 
 
-def set_values_recursively(data: Any, values_to_replace: Dict[str, Any]) -> Any:
+def set_values_recursively(data: Any, values_to_replace: dict[str, Any]) -> Any:
     """Recursively drop null values from dictionaries and lists."""
     if isinstance(data, dict):
         result = {}
@@ -29,6 +29,6 @@ def set_values_recursively(data: Any, values_to_replace: Dict[str, Any]) -> Any:
         return data
 
 
-def list_input_json_files(directory: str, pattern: str) -> List[str]:
+def list_input_json_files(directory: str, pattern: str) -> list[str]:
     path = Path(directory)
     return [str(file) for file in path.glob(pattern)]

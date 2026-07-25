@@ -27,28 +27,27 @@ from divyam_llm_interop.translate.chat.types import ChatRequest, ChatResponse, M
 # Translate gemini-1.5-pro Chat Completions API request to a gpt-4.1
 # Responses API request
 translator = ChatTranslator()
-chat_request = ChatRequest(body={
-    "model": "gemini-1.5-pro",
-    "messages": [
-        {
-            "role": "system",
-            "content": (
-                "You are a highly knowledgeable trivia assistant. "
-                "Provide clear, accurate answers across history, geography, "
-                "science, pop culture, and general knowledge. "
-                "When explaining, keep it concise unless asked otherwise."
-            )
-        },
-        {
-            "role": "user",
-            "content": "What is the capital of India?"
-        }
-    ],
-    "temperature": 0.7,
-    "top_p": 1.0,
-    "max_tokens": 100000,
-    "presence_penalty": 0.5
-})
+chat_request = ChatRequest(
+    body={
+        "model": "gemini-1.5-pro",
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You are a highly knowledgeable trivia assistant. "
+                    "Provide clear, accurate answers across history, geography, "
+                    "science, pop culture, and general knowledge. "
+                    "When explaining, keep it concise unless asked otherwise."
+                ),
+            },
+            {"role": "user", "content": "What is the capital of India?"},
+        ],
+        "temperature": 0.7,
+        "top_p": 1.0,
+        "max_tokens": 100000,
+        "presence_penalty": 0.5,
+    }
+)
 source = Model(name="gemini-1.5-pro", api_type=ModelApiType.COMPLETIONS)
 target = Model(name="gpt-4.1", api_type=ModelApiType.RESPONSES)
 translated = translator.translate_request(chat_request, source, target)
@@ -60,37 +59,31 @@ from divyam_llm_interop.translate.chat.api_types import ModelApiType
 from divyam_llm_interop.translate.chat.translate import ChatTranslator
 from divyam_llm_interop.translate.chat.types import ChatResponse, Model
 
-# Translate Responses API response to Chat Completions API Response. 
+# Translate Responses API response to Chat Completions API Response.
 translator = ChatTranslator()
 
 # Response body most likely obtained from a LLM call.
-chat_response = ChatResponse(body={
-    "id": "resp_abc123",
-    "object": "response",
-    "model": "gpt-4.1",
-    "created": 1733400000,
-    "output": [
-        {
-            "role": "assistant",
-            "content": [
-                {
-                    "type": "output_text",
-                    "text": "The capital of India is New Delhi."
-                }
-            ]
-        }
-    ],
-    "usage": {
-        "input_tokens": 35,
-        "output_tokens": 10,
-        "total_tokens": 45
-    },
-    "metadata": {
-        "temperature": 0.7,
-        "top_p": 1.0,
-        "presence_penalty": 0.5
+chat_response = ChatResponse(
+    body={
+        "id": "resp_abc123",
+        "object": "response",
+        "model": "gpt-4.1",
+        "created": 1733400000,
+        "output": [
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "output_text",
+                        "text": "The capital of India is New Delhi.",
+                    }
+                ],
+            }
+        ],
+        "usage": {"input_tokens": 35, "output_tokens": 10, "total_tokens": 45},
+        "metadata": {"temperature": 0.7, "top_p": 1.0, "presence_penalty": 0.5},
     }
-})
+)
 
 source = Model(name="gpt-4.1", api_type=ModelApiType.RESPONSES)
 target = Model(name="gpt-4.1", api_type=ModelApiType.COMPLETIONS)
@@ -105,7 +98,7 @@ When a request model name is resolved against the catalog, matching happens in t
 2. Explicit catalog override via `name_match.regex` in model YAML.
 3. Generic best-effort fallback in code:
    - strips punctuation (`-`, `_`, `.`) for comparison,
-   - matches runtime names that extend a known catalog name’s canonical form (longest match wins).
+   - matches runtime names that extend a known catalog name's canonical form (longest match wins).
 
 Runtime names that include `-instruct` in the segment you care about (for example
 `llama-3.2-3b-instruct-ft-v1`) align with the `*-instruct` catalog entry; a name
@@ -147,42 +140,35 @@ Use override regex when:
 
 ## Development Environment Setup
 
-### Create a virtual environment
+This project uses [uv](https://docs.astral.sh/uv/) to manage Python, the
+virtual environment, and all dependencies. You do not need to install Python
+or create a virtual environment manually — uv handles all of that.
 
-With Python virtualenv:
-
-```shell
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-```
-
-With conda:
+### Quick start
 
 ```shell
-conda create -n .venv python=3.10 -y
-conda activate .venv
+./scripts/setup-dev.sh
 ```
 
-**Note**: Make sure to activate the virtual environment before running any
-commands.
+This will install uv (if not present), find or install a compatible Python
+(>=3.10), sync all dependency groups (dev, test, lint), and create a `.venv`
+in the project root.
 
-### Install poetry
+To upgrade all dependencies and regenerate the lock file:
 
 ```shell
-pip install poetry
-poetry self update 
+./scripts/setup-dev.sh --upgrade
 ```
 
-### Install dependencies
-For the first time, or when dependencies in [pyproject.toml](./pyproject.toml) 
-change, regenerate the poetry lock file.
-```shell
-poetry lock
+After setup, point your IDE's Python interpreter at:
+
+```
+<project-root>/.venv/bin/python
 ```
 
-```shell
-poetry install
-```
+Manage dependencies via `uv add` / `uv remove` or by editing `pyproject.toml`
+and running `uv sync --all-groups` — do not use your IDE's built-in package
+manager.
 
 ## Contributing
 
@@ -209,56 +195,70 @@ If you're unsure about a change, feel free to open a discussion or draft PR.
 
 Before submitting your PR, make sure the code passes all checks.
 
-For in-editor linting, formatting, and type checking, open the repo in VS Code or Cursor and install the recommended extensions (`.vscode/extensions.json`). Settings use `pyproject.toml` (ruff) and `pyrightconfig.json` (types).
+For in-editor linting, formatting, and type checking, open the repo in VS Code
+or Cursor and install the recommended extensions (`.vscode/extensions.json`).
+Settings use `pyproject.toml` (ruff) and `pyrightconfig.json` (types).
 
 Agent instructions for any AI tool: see [AGENTS.md](AGENTS.md).
-
-#### Format code
-
-```shell
-poetry run ruff format .
-```
-
-#### Check formatting (without modifying files)
-
-```shell
-poetry run ruff format --check .
-```
-
-#### Lint code
-
-```shell
-poetry run ruff check .
-```
-
-#### Auto-fix linting issues (where possible)
-
-```shell
-poetry run ruff check --fix .
-```
-
-#### Type check
-
-```shell
-poetry run pyright .
-```
 
 #### Run all checks at once
 
 ```shell
-poetry run ruff format . && poetry run ruff check . && poetry run pyright .
+./scripts/lint.sh
+```
+
+#### Auto-fix formatting and lint issues
+
+```shell
+./scripts/lint.sh --fix
+```
+
+#### Run individual checks
+
+```shell
+# Format code
+uv run ruff format .
+
+# Check formatting (without modifying files)
+uv run ruff format --check .
+
+# Lint code
+uv run ruff check .
+
+# Auto-fix linting issues (where possible)
+uv run ruff check --fix .
+
+# Type check
+uv run pyright .
 ```
 
 ### Running Tests
 
 ```shell
-poetry run pytest
+./scripts/test.sh
 ```
 
 With coverage report:
 
 ```shell
-poetry run pytest --cov=. --cov-report=term-missing
+./scripts/test.sh --coverage
+```
+
+Or manually:
+
+```shell
+uv run pytest
+uv run pytest --cov=src --cov-report=term-missing
+```
+
+## Publishing to PyPI
+
+> **Note:** Publishing should typically be done through CI/build scripts.
+
+```shell
+rm -rf dist/
+uv build
+uv publish
 ```
 
 ## License

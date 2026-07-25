@@ -5,25 +5,22 @@ Portable instructions for AI coding agents (Cursor, Copilot, Codex, Claude Code,
 ## Environment
 
 - Python 3.10+
-- [Poetry](https://python-poetry.org/) for dependencies: `poetry install`
-- Virtualenv at `.venv` (created by Poetry)
+- [uv](https://docs.astral.sh/uv/) for dependencies: `./scripts/setup-dev.sh`
+- Virtualenv at `.venv` (created by uv)
 
 ## Before committing Python changes
 
 Run from the repository root (matches `.github/workflows/lint.yml` and `test.yml`):
 
 ```bash
-poetry run ruff check .
-poetry run ruff format --check .
-poetry run pyright .
-poetry run pytest
+./scripts/lint.sh
+./scripts/test.sh
 ```
 
 To auto-fix formatting and fixable lint issues before re-running:
 
 ```bash
-poetry run ruff format .
-poetry run ruff check --fix .
+./scripts/lint.sh --fix
 ```
 
 ## Code layout
@@ -36,4 +33,4 @@ poetry run ruff check --fix .
 
 - Match existing style; do not drive-by refactor unrelated code.
 - Add or update tests for behavior changes.
-- Ensure all four commands above pass before opening a PR.
+- Ensure lint and test scripts pass before opening a PR.

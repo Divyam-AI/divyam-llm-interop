@@ -3,12 +3,12 @@
 
 import dataclasses
 from functools import cmp_to_key, partial
-from typing import Dict, Any, Optional, List
+from typing import Any, Optional
 
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
 from divyam_llm_interop.translate.chat.base.translation_utils import (
-    recursive_merge_list_append,
     drop_null_values_recursively,
+    recursive_merge_list_append,
 )
 from divyam_llm_interop.translate.chat.model_config.model_capabilities import (
     ModelCapabilities,
@@ -27,7 +27,7 @@ class ModelConfig:
     capabilities: ModelCapabilities
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]):
+    def from_dict(cls, data: dict[str, Any]):
         """
         Parse a dictionary into a ModelConfig instance.
 
@@ -79,14 +79,14 @@ class ModelConfig:
 
     @classmethod
     def merge_configs(
-        cls, model_catalog_entry: ModelCatalogEntry, configs: List["ModelConfig"]
+        cls, model_catalog_entry: ModelCatalogEntry, configs: list["ModelConfig"]
     ) -> ModelCapabilities:
         if not configs:
             # Return default instance.
             return ModelCapabilities()
 
         sorted_configs = cls._sort_configs_by_specificity(configs, model_catalog_entry)
-        merged: Dict[str, Any] = {}
+        merged: dict[str, Any] = {}
         for config in sorted_configs:
             capabilities_dict = config.capabilities.to_dict()
             if not capabilities_dict.get("supported_api_types"):

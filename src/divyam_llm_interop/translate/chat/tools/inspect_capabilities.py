@@ -1,10 +1,9 @@
-#!/usr/bin/env python3
-
 # Copyright 2025 Divyam.ai
 # SPDX-License-Identifier: Apache-2.0
 
 import argparse
 import sys
+
 import yaml
 
 from divyam_llm_interop.translate.chat.model_config.model_catalog_loader import (
@@ -21,7 +20,7 @@ def load_capabilities():
 
 
 def find_model(model_name, capabilities):
-    for model in capabilities.keys():
+    for model in capabilities:
         if model.name.lower() == model_name.lower():
             return model
     return None
@@ -47,7 +46,7 @@ def main():
 
     args = parser.parse_args()
 
-    model_catalog, capabilities = load_capabilities()
+    _model_catalog, capabilities = load_capabilities()
 
     # --- no model: print all ---
     if not args.model:

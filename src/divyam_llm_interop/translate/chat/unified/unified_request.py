@@ -1,8 +1,8 @@
 # Copyright 2025 Divyam.ai
 # SPDX-License-Identifier: Apache-2.0
 
-from dataclasses import dataclass, fields, field
-from typing import List, Optional, Dict, Union, Any
+from dataclasses import dataclass, field, fields
+from typing import Any
 
 from divyam_llm_interop.translate.chat.jsonschema.types import JSONSchema
 
@@ -13,9 +13,9 @@ class UnifiedFunctionCall:
 
     name: str
     arguments: str
-    unknowns: Dict[str, Any] = field(default_factory=dict)
+    unknowns: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert UnifiedFunctionCall to dictionary dynamically."""
         result = {}
         for f in fields(self):
@@ -29,7 +29,7 @@ class UnifiedFunctionCall:
         return result
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "UnifiedFunctionCall":
+    def from_dict(cls, data: dict[str, Any]) -> "UnifiedFunctionCall":
         """Create UnifiedFunctionCall from dictionary dynamically."""
         # Get all declared field names except `unknowns`
         declared_fields = {f.name for f in fields(cls) if f.name != "unknowns"}
@@ -53,9 +53,9 @@ class UnifiedToolCall:
     id: str
     function: UnifiedFunctionCall
     type: str = "function"
-    unknowns: Dict[str, Any] = field(default_factory=dict)
+    unknowns: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert UnifiedToolCall to dictionary dynamically."""
         result = {}
         for f in fields(self):
@@ -71,7 +71,7 @@ class UnifiedToolCall:
         return result
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "UnifiedToolCall":
+    def from_dict(cls, data: dict[str, Any]) -> "UnifiedToolCall":
         """Create UnifiedToolCall from dictionary dynamically."""
         init_kwargs = {}
         for f in fields(cls):
@@ -89,18 +89,18 @@ class UnifiedMessage:
     """Represents a single message in the chat."""
 
     role: str  # 'system', 'user', 'tool', or 'assistant'
-    content: Optional[str] = None
+    content: str | None = None
 
     # Optional: name of the user or system role
-    name: Optional[str] = None
-    tool_calls: Optional[List[UnifiedToolCall]] = None
-    tool_call_id: Optional[str] = None
+    name: str | None = None
+    tool_calls: list[UnifiedToolCall] | None = None
+    tool_call_id: str | None = None
 
     # If the model refused to respond, this contains the refusal message
-    refusal: Optional[str] = None
+    refusal: str | None = None
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "UnifiedMessage":
+    def from_dict(cls, data: dict[str, Any]) -> "UnifiedMessage":
         """Create UnifiedMessage from dictionary."""
         tool_calls = None
         if data.get("tool_calls"):
@@ -108,16 +108,16 @@ class UnifiedMessage:
 
         return cls(
             role=data["role"],
-            content=data["content"] if "content" in data else None,
+            content=data.get("content"),
             name=data.get("name"),
             tool_calls=tool_calls,
             tool_call_id=data.get("tool_call_id"),
             refusal=data.get("refusal"),
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert UnifiedMessage to dictionary."""
-        result: Dict[str, Any] = {"role": self.role}
+        result: dict[str, Any] = {"role": self.role}
 
         # Only include optional fields if they have values
         if self.content is not None:
@@ -141,10 +141,10 @@ class UnifiedFunction:
     name: str  # Name of the function
     description: str  # Description of what the function does
     parameters: JSONSchema  # Function parameters
-    unknowns: Dict[str, Any] = field(default_factory=dict)
+    unknowns: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "UnifiedFunction":
+    def from_dict(cls, data: dict[str, Any]) -> "UnifiedFunction":
         """Create UnifiedFunction from dictionary."""
         # Get all declared field names except `unknowns`
         declared_fields = {f.name for f in fields(cls) if f.name != "unknowns"}
@@ -158,9 +158,9 @@ class UnifiedFunction:
             unknowns=unknowns,
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert UnifiedFunction to dictionary."""
-        result: Dict[str, Any] = {
+        result: dict[str, Any] = {
             "name": self.name,
             "description": self.description,
             "parameters": self.parameters.to_dict(),
@@ -179,14 +179,14 @@ class UnifiedTool:
     type: str = "function"
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "UnifiedTool":
+    def from_dict(cls, data: dict[str, Any]) -> "UnifiedTool":
         """Create UnifiedTool from dictionary."""
         return cls(
             type=data.get("type", "function"),
             function=UnifiedFunction.from_dict(data["function"]),
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert UnifiedTool to dictionary."""
         return {"type": self.type, "function": self.function.to_dict()}
 
@@ -197,10 +197,10 @@ class UnifiedResponseFormatJsonSchema:
 
     name: str
     schema: "JSONSchema"  # Assuming JSONSchema has from_dict and to_dict methods
-    unknowns: Dict[str, Any] = field(default_factory=dict)
+    unknowns: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "UnifiedResponseFormatJsonSchema":
+    def from_dict(cls, data: dict[str, Any]) -> "UnifiedResponseFormatJsonSchema":
         # Get all declared field names except `unknowns`
         declared_fields = {f.name for f in fields(cls) if f.name != "unknowns"}
         unknowns = {k: v for k, v in data.items() if k not in declared_fields}
@@ -215,8 +215,8 @@ class UnifiedResponseFormatJsonSchema:
             unknowns=unknowns,
         )
 
-    def to_dict(self) -> Dict[str, Any]:
-        result: Dict[str, Any] = {
+    def to_dict(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
             "name": self.name,
             "schema": (
                 self.schema.to_dict()
@@ -233,11 +233,11 @@ class UnifiedResponseFormat:
     """Represents the response format specification."""
 
     type: str  # "text", "json_object", "json_schema"
-    json_schema: Optional[UnifiedResponseFormatJsonSchema] = None
-    unknowns: Dict[str, Any] = field(default_factory=dict)
+    json_schema: UnifiedResponseFormatJsonSchema | None = None
+    unknowns: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "UnifiedResponseFormat":
+    def from_dict(cls, data: dict[str, Any]) -> "UnifiedResponseFormat":
         declared_fields = {f.name for f in fields(cls) if f.name != "unknowns"}
         unknowns = {k: v for k, v in data.items() if k not in declared_fields}
 
@@ -251,8 +251,8 @@ class UnifiedResponseFormat:
             unknowns=unknowns,
         )
 
-    def to_dict(self) -> Dict[str, Any]:
-        result: Dict[str, Any] = {"type": self.type}
+    def to_dict(self) -> dict[str, Any]:
+        result: dict[str, Any] = {"type": self.type}
         if self.json_schema is not None:
             result["json_schema"] = self.json_schema.to_dict()
         result.update(self.unknowns)
@@ -267,11 +267,11 @@ class UnifiedAudioConfig:
     format: str  # Audio format (e.g., "mp3", "opus", "aac", "flac")
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "UnifiedAudioConfig":
+    def from_dict(cls, data: dict[str, Any]) -> "UnifiedAudioConfig":
         """Create UnifiedAudioConfig from dictionary."""
         return cls(voice=data["voice"], format=data["format"])
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert UnifiedAudioConfig to dictionary."""
         return {"voice": self.voice, "format": self.format}
 
@@ -283,15 +283,15 @@ class UnifiedReasoning:
     Only supported in gpt-5 and o-series models.
     """
 
-    effort: Optional[str] = None
-    generate_summary: Optional[str] = None  # Deprecated, use summary instead
-    summary: Optional[str] = None
+    effort: str | None = None
+    generate_summary: str | None = None  # Deprecated, use summary instead
+    summary: str | None = None
 
     # Placeholder for unknown fields
-    unknowns: Dict[str, Any] = field(default_factory=dict)
+    unknowns: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
-        data: Dict[str, Any] = {}
+    def to_dict(self) -> dict[str, Any]:
+        data: dict[str, Any] = {}
 
         if self.effort is not None:
             data["effort"] = self.effort
@@ -305,7 +305,7 @@ class UnifiedReasoning:
         return data
 
     @classmethod
-    def from_dict(cls, obj: Dict[str, Any]) -> "UnifiedReasoning":
+    def from_dict(cls, obj: dict[str, Any]) -> "UnifiedReasoning":
         known_fields = {"effort", "generate_summary", "summary"}
         unknowns = {k: v for k, v in obj.items() if k not in known_fields}
 
@@ -333,100 +333,100 @@ class UnifiedChatCompletionsRequestBody:
     model: str
 
     # List of messages exchanged in the chat
-    messages: List[UnifiedMessage]
+    messages: list[UnifiedMessage]
 
     # Controls randomness (0.0 to 2.0)
-    temperature: Optional[float] = None
+    temperature: float | None = None
 
     # Nucleus sampling probability (0.0 to 1.0)
-    top_p: Optional[float] = None
+    top_p: float | None = None
 
     # Number of completions to generate
-    n: Optional[int] = None
+    n: int | None = None
 
     # Whether to stream responses
-    stream: Optional[bool] = None
+    stream: bool | None = None
 
     # List of stop sequences (up to 4 sequences)
-    stop: Optional[Union[str, List[str]]] = None
+    stop: str | list[str] | None = None
 
     # Max number of tokens to generate (deprecated, use max_completion_tokens)
-    max_tokens: Optional[int] = None
+    max_tokens: int | None = None
 
     # Max number of completion tokens to generate (preferred over max_tokens)
-    max_completion_tokens: Optional[int] = None
+    max_completion_tokens: int | None = None
 
     # Penalty for repeating phrases (-2.0 to 2.0)
-    presence_penalty: Optional[float] = None
+    presence_penalty: float | None = None
 
     # Penalty for frequent tokens (-2.0 to 2.0)
-    frequency_penalty: Optional[float] = None
+    frequency_penalty: float | None = None
 
     # Modify likelihood of specific tokens
-    logit_bias: Optional[Dict[str, int]] = None
+    logit_bias: dict[str, int] | None = None
 
     # Optional: unique user identifier
-    user: Optional[str] = None
+    user: str | None = None
 
     # The number of logprobs to return (0-20)
-    logprobs: Optional[int] = None
+    logprobs: int | None = None
 
     # Number of most likely tokens to return at each position (0-20)
-    top_logprobs: Optional[int] = None
+    top_logprobs: int | None = None
 
     # Modern tool calling (replaces functions)
-    tools: Optional[List[UnifiedTool]] = None
+    tools: list[UnifiedTool] | None = None
 
     # Tool choice specification (replaces function_call)
-    tool_choice: Optional[Union[str, Dict[str, Any]]] = None
+    tool_choice: str | dict[str, Any] | None = None
 
     # Whether to enable parallel function calling
-    parallel_tool_calls: Optional[bool] = None
+    parallel_tool_calls: bool | None = None
 
     # Response format specification
-    response_format: Optional[UnifiedResponseFormat] = None
+    response_format: UnifiedResponseFormat | None = None
 
     # Seed for deterministic outputs
-    seed: Optional[int] = None
+    seed: int | None = None
 
     # Service tier selection
-    service_tier: Optional[str] = None
+    service_tier: str | None = None
 
     # Input/output modalities
-    modalities: Optional[List[str]] = None
+    modalities: list[str] | None = None
 
     # Predicted outputs for reduced latency
-    prediction: Optional[Dict[str, Any]] = None
+    prediction: dict[str, Any] | None = None
 
     # Audio configuration
-    audio: Optional[UnifiedAudioConfig] = None
+    audio: UnifiedAudioConfig | None = None
 
     # Whether to store the conversation
-    store: Optional[bool] = None
+    store: bool | None = None
 
     # Additional metadata
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: dict[str, Any] | None = None
 
     # Reasoning
-    reasoning: Optional[UnifiedReasoning] = None
+    reasoning: UnifiedReasoning | None = None
 
     # Reasoning effort. Not supported by all models
-    reasoning_effort: Optional[str] = None
+    reasoning_effort: str | None = None
 
     # System fingerprint
-    system_fingerprint: Optional[str] = None
+    system_fingerprint: str | None = None
 
     # Legacy fields (kept from original - echo and best_of are from Completions API)
-    echo: Optional[bool] = None
-    best_of: Optional[int] = None
-    functions: Optional[List[UnifiedFunction]] = None
-    function_call: Optional[Union[str, Dict[str, str]]] = None
+    echo: bool | None = None
+    best_of: int | None = None
+    functions: list[UnifiedFunction] | None = None
+    function_call: str | dict[str, str] | None = None
 
     # Values that do not have fields
-    unknowns: Dict[str, Any] = field(default_factory=dict)
+    unknowns: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "UnifiedChatCompletionsRequestBody":
+    def from_dict(cls, data: dict[str, Any]) -> "UnifiedChatCompletionsRequestBody":
         """Create UnifiedChatCompletionsRequest from dictionary."""
 
         # Preserve unknown fields
@@ -508,9 +508,9 @@ class UnifiedChatCompletionsRequestBody:
             unknowns=unknowns,
         )
 
-    def to_dict(self, keep_unknowns: bool = False) -> Dict[str, Any]:
+    def to_dict(self, keep_unknowns: bool = False) -> dict[str, Any]:
         """Convert UnifiedChatCompletionsRequest to dictionary."""
-        result: Dict[str, Any] = {
+        result: dict[str, Any] = {
             "model": self.model,
             "messages": [msg.to_dict() for msg in self.messages],
         }
@@ -576,6 +576,6 @@ class UnifiedChatCompletionsRequestBody:
 @dataclass
 class UnifiedChatCompletionsRequest:
     body: UnifiedChatCompletionsRequestBody
-    headers: Optional[Dict[str, str]] = None
-    query_parameters: Optional[Dict[str, str]] = None
-    path_parameters: Optional[Dict[str, str]] = None
+    headers: dict[str, str] | None = None
+    query_parameters: dict[str, str] | None = None
+    path_parameters: dict[str, str] | None = None

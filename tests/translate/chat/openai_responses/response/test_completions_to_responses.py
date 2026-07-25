@@ -4,7 +4,7 @@
 import time
 import uuid
 from copy import deepcopy
-from typing import Any, Dict
+from typing import Any
 
 import pytest
 
@@ -500,7 +500,7 @@ def test_completions_to_responses_round_trip():
 def test_vllm_response_simple():
     # Ids are random, created time varies and status is optional so ignore
     # them in verification.
-    values_to_replace: Dict[str, Any] = {
+    values_to_replace: dict[str, Any] = {
         "id": "static_id",
         "item_id": "static_id",
         "created_at": 0,

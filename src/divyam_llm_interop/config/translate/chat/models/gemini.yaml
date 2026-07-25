@@ -1,4 +1,15 @@
-# Gemini 3 Generation (Current Flagship)
+# Gemini 3.6 Generation (Latest Stable)
+- name: gemini-3.6-flash
+
+# Gemini 3.5 Generation
+- name: gemini-3.5-flash
+- name: gemini-3.5-flash-lite
+
+# Gemini 3.1 Generation
+- name: gemini-3.1-pro
+- name: gemini-3.1-flash-lite
+
+# Gemini 3 Generation
 - name: gemini-3-pro
 - name: gemini-3-flash
 - name: gemini-3-deep-think

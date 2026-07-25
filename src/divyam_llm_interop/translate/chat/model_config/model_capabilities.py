@@ -1,10 +1,17 @@
 # Copyright 2025 Divyam.ai
 # SPDX-License-Identifier: Apache-2.0
 
-from dataclasses import dataclass
-from dataclasses import field, asdict, fields
-from typing import Iterable, get_type_hints, get_origin, Union, get_args, ClassVar
-from typing import List, Optional, Dict, Any
+from collections.abc import Iterable
+from dataclasses import asdict, dataclass, field, fields
+from typing import (
+    Any,
+    ClassVar,
+    Optional,
+    Union,
+    get_args,
+    get_origin,
+    get_type_hints,
+)
 
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
 from divyam_llm_interop.translate.chat.unified.unified_request import (
@@ -44,7 +51,7 @@ class RangeConfig:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]):
+    def from_dict(cls, data: dict[str, Any]):
         return cls(**data)
 
     def fit_to_range(self, value: Optional[float]) -> Optional[float]:
@@ -62,7 +69,7 @@ class RangeConfig:
 
 @dataclass(eq=True, frozen=True)
 class ReasoningEffortConfig:
-    options: List[str]
+    options: list[str]
     default: Optional[str] = None
 
     def to_dict(self) -> dict:
@@ -72,7 +79,7 @@ class ReasoningEffortConfig:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]):
+    def from_dict(cls, data: dict[str, Any]):
         return cls(
             options=data.get("options", []),
             default=data.get("default"),
@@ -82,11 +89,11 @@ class ReasoningEffortConfig:
 @dataclass(eq=True, frozen=True)
 class ApiTypeSpecificRules:
     # Capabilities/rules specific to API type.
-    rename_fields: Optional[Dict[str, str]] = None
-    drop_fields: Optional[List[str]] = None
+    rename_fields: Optional[dict[str, str]] = None
+    drop_fields: Optional[list[str]] = None
 
-    def to_dict(self) -> Dict[str, Any]:
-        result: Dict[str, Any] = {}
+    def to_dict(self) -> dict[str, Any]:
+        result: dict[str, Any] = {}
 
         # collapse empty dict to None and skip
         if self.rename_fields:
@@ -99,7 +106,7 @@ class ApiTypeSpecificRules:
         return result
 
     @classmethod
-    def from_dict(cls, data: Optional[Dict[str, Any]]):
+    def from_dict(cls, data: Optional[dict[str, Any]]):
         if not data:
             return cls()
 
@@ -158,7 +165,7 @@ class ModelCapabilities:
     strict_completions_compatibility: Optional[bool] = None
 
     # Default support to only completions.
-    supported_api_types: List[ModelApiType] = field(default_factory=lambda: [])
+    supported_api_types: list[ModelApiType] = field(default_factory=list)
 
     # Optional Range-based configurations
     max_tokens: Optional[RangeConfig] = None
@@ -184,7 +191,7 @@ class ModelCapabilities:
     supports_google_extra_body: Optional[bool] = None
 
     # Optional api specific field mapping rules
-    api_capabilities: Dict[ModelApiType, ApiTypeSpecificRules] = field(
+    api_capabilities: dict[ModelApiType, ApiTypeSpecificRules] = field(
         default_factory=dict
     )
 
@@ -192,7 +199,7 @@ class ModelCapabilities:
     reasoning_effort: Optional[ReasoningEffortConfig] = None
 
     # Unknown fields preserved here
-    extra: Dict[str, Any] = field(default_factory=dict)
+    extra: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
         for api_type in ModelApiType:
@@ -208,10 +215,10 @@ class ModelCapabilities:
         raise TypeError(f"Invalid API type: {value}")
 
     @classmethod
-    def _parse_api_type_list(cls, raw_list: Iterable) -> List[ModelApiType]:
+    def _parse_api_type_list(cls, raw_list: Iterable) -> list[ModelApiType]:
         return [cls._parse_api_type(v) for v in raw_list]
 
-    def rename_fields_in_place(self, body: Dict[str, Any], api_type: ModelApiType):
+    def rename_fields_in_place(self, body: dict[str, Any], api_type: ModelApiType):
         rename_fields = self.api_capabilities[api_type].rename_fields
         if not rename_fields:
             return
@@ -222,7 +229,7 @@ class ModelCapabilities:
                 body.pop(old, None)
 
     def drop_unsupported_fields_in_place(
-        self, body: Dict[str, Any], api_type: ModelApiType
+        self, body: dict[str, Any], api_type: ModelApiType
     ):
         drop_fields = self.api_capabilities[api_type].drop_fields
         if drop_fields:
@@ -234,13 +241,9 @@ class ModelCapabilities:
             body.pop("stop", None)
 
         if not self.supports_reasoning:
-            # noinspection PyBroadException
-            try:
-                reasoning_fields = ModelCapabilities._REASONING_FIELDS_MAP[api_type]
-                for field_name in reasoning_fields:
-                    body.pop(field_name, None)
-            except Exception:
-                pass
+            reasoning_fields = ModelCapabilities._REASONING_FIELDS_MAP.get(api_type, [])
+            for field_name in reasoning_fields:
+                body.pop(field_name, None)
 
         if not self.supports_google_extra_body and api_type == ModelApiType.COMPLETIONS:
             # Remove extra body
@@ -259,7 +262,6 @@ class ModelCapabilities:
                 range_config = getattr(self, field_name)
                 if not range_config or not isinstance(range_config, RangeConfig):
                     continue
-                range_config = range_config
 
                 fitted_value = range_config.fit_to_range(value)
 
@@ -271,7 +273,7 @@ class ModelCapabilities:
                 pass
 
     @classmethod
-    def from_dict(cls, raw: Dict[str, Any]):
+    def from_dict(cls, raw: dict[str, Any]):
         data = raw.copy()
 
         kwargs = {}
@@ -299,7 +301,7 @@ class ModelCapabilities:
                 kwargs[name] = value
 
         raw_caps = data.pop("api_capabilities", {}) or {}
-        overrides: Dict[ModelApiType, ApiTypeSpecificRules] = {}
+        overrides: dict[ModelApiType, ApiTypeSpecificRules] = {}
 
         supported = set(kwargs.get("supported_api_types", []))
 

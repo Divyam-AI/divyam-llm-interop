@@ -226,15 +226,17 @@ class TestModelRegistryGetModelCapabilitiesMap:
 
         config = Mock(spec=ModelConfig)
 
-        with patch.object(
-            ModelRegistry,
-            "_map_models_to_config",
-            return_value={catalog_entry: [config]},
+        with (
+            patch.object(
+                ModelRegistry,
+                "_map_models_to_config",
+                return_value={catalog_entry: [config]},
+            ),
+            patch.object(ModelConfig, "merge_configs", return_value=capabilities),
         ):
-            with patch.object(ModelConfig, "merge_configs", return_value=capabilities):
-                result = ModelRegistry._get_model_capabilities_map(
-                    [catalog_entry], [config]
-                )
+            result = ModelRegistry._get_model_capabilities_map(
+                [catalog_entry], [config]
+            )
 
         assert len(result) == 1
 
@@ -262,15 +264,17 @@ class TestModelRegistryGetModelCapabilitiesMap:
 
         config = Mock(spec=ModelConfig)
 
-        with patch.object(
-            ModelRegistry,
-            "_map_models_to_config",
-            return_value={catalog_entry: [config]},
+        with (
+            patch.object(
+                ModelRegistry,
+                "_map_models_to_config",
+                return_value={catalog_entry: [config]},
+            ),
+            patch.object(ModelConfig, "merge_configs", return_value=capabilities),
         ):
-            with patch.object(ModelConfig, "merge_configs", return_value=capabilities):
-                result = ModelRegistry._get_model_capabilities_map(
-                    [catalog_entry], [config]
-                )
+            result = ModelRegistry._get_model_capabilities_map(
+                [catalog_entry], [config]
+            )
 
         assert len(result) == 2
 
@@ -313,17 +317,19 @@ class TestModelRegistryGetModelCapabilitiesMap:
         config1 = Mock(spec=ModelConfig)
         config2 = Mock(spec=ModelConfig)
 
-        with patch.object(
-            ModelRegistry,
-            "_map_models_to_config",
-            return_value={catalog_entry1: [config1], catalog_entry2: [config2]},
-        ):
-            with patch.object(
+        with (
+            patch.object(
+                ModelRegistry,
+                "_map_models_to_config",
+                return_value={catalog_entry1: [config1], catalog_entry2: [config2]},
+            ),
+            patch.object(
                 ModelConfig, "merge_configs", side_effect=[capabilities1, capabilities2]
-            ):
-                result = ModelRegistry._get_model_capabilities_map(
-                    [catalog_entry1, catalog_entry2], [config1, config2]
-                )
+            ),
+        ):
+            result = ModelRegistry._get_model_capabilities_map(
+                [catalog_entry1, catalog_entry2], [config1, config2]
+            )
 
         assert len(result) == 2
 
@@ -340,20 +346,22 @@ class TestModelRegistryGetModelCapabilitiesMap:
         capabilities = Mock(spec=ModelCapabilities)
         capabilities.supported_api_types = [ModelApiType.COMPLETIONS]
 
-        with patch.object(
-            ModelRegistry,
-            "_map_models_to_config",
-            return_value={catalog_entry: [config1, config2]},
-        ):
-            with patch.object(
+        with (
+            patch.object(
+                ModelRegistry,
+                "_map_models_to_config",
+                return_value={catalog_entry: [config1, config2]},
+            ),
+            patch.object(
                 ModelConfig, "merge_configs", return_value=capabilities
-            ) as mock_merge:
-                result = ModelRegistry._get_model_capabilities_map(
-                    [catalog_entry], [config1, config2]
-                )
-                assert result
+            ) as mock_merge,
+        ):
+            result = ModelRegistry._get_model_capabilities_map(
+                [catalog_entry], [config1, config2]
+            )
+            assert result
 
-                mock_merge.assert_called_once_with(catalog_entry, [config1, config2])
+            mock_merge.assert_called_once_with(catalog_entry, [config1, config2])
 
     def test_get_model_capabilities_map_empty_catalog(self):
         """Test capabilities map with empty catalog"""
@@ -372,14 +380,16 @@ class TestModelRegistryGetModelCapabilitiesMap:
         capabilities = Mock(spec=ModelCapabilities)
         capabilities.supported_api_types = [ModelApiType.COMPLETIONS]
 
-        with patch.object(
-            ModelRegistry, "_map_models_to_config", return_value={catalog_entry: []}
+        with (
+            patch.object(
+                ModelRegistry, "_map_models_to_config", return_value={catalog_entry: []}
+            ),
+            patch.object(ModelConfig, "merge_configs", return_value=capabilities),
         ):
-            with patch.object(ModelConfig, "merge_configs", return_value=capabilities):
-                result = ModelRegistry._get_model_capabilities_map([catalog_entry], [])
+            result = ModelRegistry._get_model_capabilities_map([catalog_entry], [])
 
-                # Should still create entries with merged capabilities (empty list)
-                assert len(result) == 1
+            # Should still create entries with merged capabilities (empty list)
+            assert len(result) == 1
 
     def test_get_model_capabilities_map_preserves_all_model_attributes(self):
         """Test that all model attributes are correctly set"""
@@ -393,17 +403,19 @@ class TestModelRegistryGetModelCapabilitiesMap:
 
         config = Mock(spec=ModelConfig)
 
-        with patch.object(
-            ModelRegistry,
-            "_map_models_to_config",
-            return_value={catalog_entry: [config]},
+        with (
+            patch.object(
+                ModelRegistry,
+                "_map_models_to_config",
+                return_value={catalog_entry: [config]},
+            ),
+            patch.object(ModelConfig, "merge_configs", return_value=capabilities),
         ):
-            with patch.object(ModelConfig, "merge_configs", return_value=capabilities):
-                result = ModelRegistry._get_model_capabilities_map(
-                    [catalog_entry], [config]
-                )
+            result = ModelRegistry._get_model_capabilities_map(
+                [catalog_entry], [config]
+            )
 
-        model = list(result.keys())[0]
+        model = next(iter(result))
         assert model.name == "custom-model"
         assert model.version == "2.5.1"
         assert model.provider == "custom-provider"
@@ -769,7 +781,7 @@ class TestModelRegistryDataclass:
         with patch.object(ModelConfig, "merge_configs", return_value=capabilities):
             registry = ModelRegistry()
 
-            for key in registry._model_capabilities.keys():
+            for key in registry._model_capabilities:
                 assert isinstance(key, Model)
 
     @patch.object(ModelCatalogLoader, "load_models")

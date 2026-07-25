@@ -4,7 +4,7 @@
 import json
 import os
 import uuid
-from typing import Any, Dict, List
+from typing import Any
 
 from divyam_llm_interop.translate.chat.base.translation_utils import (
     drop_null_values_top_level,
@@ -12,8 +12,8 @@ from divyam_llm_interop.translate.chat.base.translation_utils import (
 
 
 def convert_completion_request_to_responses_request(
-    completion_request: Dict[str, Any],
-) -> Dict[str, Any]:
+    completion_request: dict[str, Any],
+) -> dict[str, Any]:
     # vLLM is missing passing function calls and hence failing to match
     # function call outputs. See https://github.com/vllm-project/vllm/pull/24158/files
     # TODO: Remove this once vLLM bug is fixed.
@@ -42,7 +42,7 @@ def convert_completion_request_to_responses_request(
     seed = completion_request.get("seed")
     reasoning = completion_request.get("reasoning")
     reasoning_effort = completion_request.get("reasoning_effort")
-    responses_request: Dict[str, Any] = {"model": model}
+    responses_request: dict[str, Any] = {"model": model}
 
     # Split system and non-system messages
     system_messages = [msg for msg in messages if msg.get("role") == "system"]
@@ -54,7 +54,7 @@ def convert_completion_request_to_responses_request(
 
     # Combine system messages into instructions
     if system_messages:
-        instr_parts: List[str] = []
+        instr_parts: list[str] = []
         for msg in system_messages:
             c = msg.get("content")
             if isinstance(c, str):
@@ -72,7 +72,7 @@ def convert_completion_request_to_responses_request(
             responses_request["instructions"] = instructions
 
     # Keep track of assistant tool_calls by ID for attaching results
-    tool_call_results: Dict[str, List[Dict[str, Any]]] = {}
+    tool_call_results: dict[str, list[dict[str, Any]]] = {}
 
     # First pass: gather tool outputs
     for msg in non_system_messages:
@@ -80,7 +80,7 @@ def convert_completion_request_to_responses_request(
             tool_call_id = msg.get("tool_call_id")
             if not tool_call_id:
                 continue
-            tool_content_parts: List[Dict[str, Any]] = []
+            tool_content_parts: list[dict[str, Any]] = []
             content = msg.get("content")
             if isinstance(content, str):
                 tool_content_parts.append({"type": "output_text", "text": content})
@@ -91,7 +91,7 @@ def convert_completion_request_to_responses_request(
             tool_call_results[tool_call_id] = tool_content_parts
 
     # Second pass: convert user and assistant messages
-    input_items: List[Dict[str, Any]] = []
+    input_items: list[dict[str, Any]] = []
 
     for msg in non_system_messages:
         role = msg.get("role")
@@ -101,7 +101,7 @@ def convert_completion_request_to_responses_request(
         content = msg.get("content")
         tool_calls = msg.get("tool_calls")
 
-        def _convert_part(part: Dict[str, Any], role_for_type: str) -> Dict[str, Any]:
+        def _convert_part(part: dict[str, Any], role_for_type: str) -> dict[str, Any]:
             ptype = part.get("type")
             if ptype == "text":
                 return {
@@ -130,8 +130,8 @@ def convert_completion_request_to_responses_request(
                 "text": str(part),
             }
 
-        message_item: Dict[str, Any] = {"role": role}
-        content_parts: List[Dict[str, Any]] = []
+        message_item: dict[str, Any] = {"role": role}
+        content_parts: list[dict[str, Any]] = []
 
         if isinstance(content, str):
             content_parts.append(
@@ -154,7 +154,7 @@ def convert_completion_request_to_responses_request(
 
         # Attach tool_calls and store output references
         if tool_calls:
-            tc_list: List[Dict[str, Any]] = []
+            tc_list: list[dict[str, Any]] = []
             for tc in tool_calls:
                 function_obj = tc.get("function")
                 if isinstance(function_obj, dict):
@@ -167,7 +167,7 @@ def convert_completion_request_to_responses_request(
                 call_id = tc.get("id") or f"call_{uuid.uuid4().hex[:24]}"
                 call_type = tc.get("type") or "function"
 
-                tc_entry: Dict[str, Any] = {
+                tc_entry: dict[str, Any] = {
                     "id": call_id,
                     "type": call_type,
                     "name": func_name,
@@ -235,7 +235,7 @@ def convert_completion_request_to_responses_request(
 
     # Flatten tools
     if tools:
-        converted_tools: List[Dict[str, Any]] = []
+        converted_tools: list[dict[str, Any]] = []
         for tool in tools:
             ttype = tool.get("type") or "function"
             if ttype == "function":
@@ -251,7 +251,7 @@ def convert_completion_request_to_responses_request(
                     parameters = tool.get("parameters")
                     strict_val = tool.get("strict", None)
 
-                entry: Dict[str, Any] = {
+                entry: dict[str, Any] = {
                     "type": "function",
                     "name": name,
                     "description": description,
@@ -285,7 +285,7 @@ def convert_completion_request_to_responses_request(
         responses_request["reasoning"] = {"effort": reasoning_effort}
 
     # Store unsupported parameters in metadata
-    metadata: Dict[str, Any] = {}
+    metadata: dict[str, Any] = {}
     if frequency_penalty is not None:
         metadata["frequency_penalty"] = str(frequency_penalty)
     if presence_penalty is not None:

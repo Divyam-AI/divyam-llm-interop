@@ -1,8 +1,9 @@
 # Copyright 2025 Divyam.ai
 # SPDX-License-Identifier: Apache-2.0
 
-from dataclasses import dataclass, fields, field
-from typing import List, Optional, Dict, Any, AsyncGenerator
+from collections.abc import AsyncGenerator
+from dataclasses import dataclass, field, fields
+from typing import Any, Optional
 
 from divyam_llm_interop.translate.chat.unified.unified_request import (
     UnifiedMessage,
@@ -20,10 +21,10 @@ class UnifiedCompletionTokensDetails:
     audio_tokens: Optional[int] = None
 
     # Unknown fields
-    unknowns: Dict[str, Any] = field(default_factory=dict)
+    unknowns: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "UnifiedCompletionTokensDetails":
+    def from_dict(cls, data: dict[str, Any]) -> "UnifiedCompletionTokensDetails":
         """Create from dictionary."""
         declared_fields = {f.name for f in fields(cls) if f.name != "unknowns"}
         unknowns = {k: v for k, v in data.items() if k not in declared_fields}
@@ -36,9 +37,9 @@ class UnifiedCompletionTokensDetails:
             unknowns=unknowns,
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
-        result: Dict[str, Any] = {}
+        result: dict[str, Any] = {}
 
         if self.reasoning_tokens is not None:
             result["reasoning_tokens"] = self.reasoning_tokens
@@ -61,10 +62,10 @@ class UnifiedPromptTokensDetails:
     audio_tokens: Optional[int] = None
 
     # Unknown fields
-    unknowns: Dict[str, Any] = field(default_factory=dict)
+    unknowns: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "UnifiedPromptTokensDetails":
+    def from_dict(cls, data: dict[str, Any]) -> "UnifiedPromptTokensDetails":
         """Create from dictionary."""
         declared_fields = {f.name for f in fields(cls) if f.name != "unknowns"}
         unknowns = {k: v for k, v in data.items() if k not in declared_fields}
@@ -75,9 +76,9 @@ class UnifiedPromptTokensDetails:
             unknowns=unknowns,
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
-        result: Dict[str, Any] = {}
+        result: dict[str, Any] = {}
 
         if self.cached_tokens is not None:
             result["cached_tokens"] = self.cached_tokens
@@ -101,10 +102,10 @@ class UnifiedUsage:
     prompt_tokens_details: Optional[UnifiedPromptTokensDetails] = None
 
     # Unknown fields
-    unknowns: Dict[str, Any] = field(default_factory=dict)
+    unknowns: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "UnifiedUsage":
+    def from_dict(cls, data: dict[str, Any]) -> "UnifiedUsage":
         """Create from dictionary."""
         declared_fields = {f.name for f in fields(cls) if f.name != "unknowns"}
         unknowns = {k: v for k, v in data.items() if k not in declared_fields}
@@ -130,9 +131,9 @@ class UnifiedUsage:
             unknowns=unknowns,
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
-        result: Dict[str, Any] = {
+        result: dict[str, Any] = {
             "prompt_tokens": self.prompt_tokens,
             "completion_tokens": self.completion_tokens,
             "total_tokens": self.total_tokens,
@@ -155,14 +156,14 @@ class UnifiedLogProbContent:
 
     token: str
     logprob: float
-    bytes: Optional[List[int]] = None
-    top_logprobs: Optional[List[Dict[str, Any]]] = None
+    bytes: Optional[list[int]] = None
+    top_logprobs: Optional[list[dict[str, Any]]] = None
 
     # Unknown fields
-    unknowns: Dict[str, Any] = field(default_factory=dict)
+    unknowns: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "UnifiedLogProbContent":
+    def from_dict(cls, data: dict[str, Any]) -> "UnifiedLogProbContent":
         """Create from dictionary."""
         declared_fields = {f.name for f in fields(cls) if f.name != "unknowns"}
         unknowns = {k: v for k, v in data.items() if k not in declared_fields}
@@ -175,9 +176,9 @@ class UnifiedLogProbContent:
             unknowns=unknowns,
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
-        result: Dict[str, Any] = {
+        result: dict[str, Any] = {
             "token": self.token,
             "logprob": self.logprob,
         }
@@ -195,14 +196,14 @@ class UnifiedLogProbContent:
 class UnifiedLogProbs:
     """Log probability information."""
 
-    content: Optional[List[UnifiedLogProbContent]] = None
-    refusal: Optional[List[UnifiedLogProbContent]] = None
+    content: Optional[list[UnifiedLogProbContent]] = None
+    refusal: Optional[list[UnifiedLogProbContent]] = None
 
     # Unknown fields
-    unknowns: Dict[str, Any] = field(default_factory=dict)
+    unknowns: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "UnifiedLogProbs":
+    def from_dict(cls, data: dict[str, Any]) -> "UnifiedLogProbs":
         """Create from dictionary."""
         declared_fields = {f.name for f in fields(cls) if f.name != "unknowns"}
         unknowns = {k: v for k, v in data.items() if k not in declared_fields}
@@ -225,9 +226,9 @@ class UnifiedLogProbs:
             unknowns=unknowns,
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
-        result: Dict[str, Any] = {}
+        result: dict[str, Any] = {}
 
         if self.content is not None:
             result["content"] = [item.to_dict() for item in self.content]
@@ -250,10 +251,10 @@ class UnifiedChoice:
     logprobs: Optional[UnifiedLogProbs] = None
 
     # Unknown fields
-    unknowns: Dict[str, Any] = field(default_factory=dict)
+    unknowns: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "UnifiedChoice":
+    def from_dict(cls, data: dict[str, Any]) -> "UnifiedChoice":
         """Create from dictionary."""
 
         declared_fields = {f.name for f in fields(cls) if f.name != "unknowns"}
@@ -273,9 +274,9 @@ class UnifiedChoice:
             unknowns=unknowns,
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
-        result: Dict[str, Any] = {
+        result: dict[str, Any] = {
             "index": self.index,
             "message": self.message.to_dict(),
         }
@@ -300,7 +301,7 @@ class UnifiedChatCompletionsResponseBody:
     object: str  # Always "chat.completion"
     created: int  # Unix timestamp of when the completion was created
     model: str  # Model used for completion
-    choices: List[UnifiedChoice]  # List of completion choices
+    choices: list[UnifiedChoice]  # List of completion choices
 
     # Token usage information
     usage: Optional[UnifiedUsage] = None
@@ -312,10 +313,10 @@ class UnifiedChatCompletionsResponseBody:
     service_tier: Optional[str] = None
 
     # Unknown fields
-    unknowns: Dict[str, Any] = field(default_factory=dict)
+    unknowns: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "UnifiedChatCompletionsResponseBody":
+    def from_dict(cls, data: dict[str, Any]) -> "UnifiedChatCompletionsResponseBody":
         """Create from dictionary."""
         declared_fields = {f.name for f in fields(cls) if f.name != "unknowns"}
         unknowns = {k: v for k, v in data.items() if k not in declared_fields}
@@ -338,9 +339,9 @@ class UnifiedChatCompletionsResponseBody:
             unknowns=unknowns,
         )
 
-    def to_dict(self, keep_unknowns: bool = False) -> Dict[str, Any]:
+    def to_dict(self, keep_unknowns: bool = False) -> dict[str, Any]:
         """Convert to dictionary."""
-        result: Dict[str, Any] = {
+        result: dict[str, Any] = {
             "id": self.id,
             "object": self.object,
             "created": self.created,
@@ -366,14 +367,14 @@ class UnifiedChatCompletionsResponse:
     """Complete response object including body, headers, and status."""
 
     body: UnifiedChatCompletionsResponseBody
-    headers: Optional[Dict[str, str]] = None
+    headers: Optional[dict[str, str]] = None
     status_code: int = 200
 
     @classmethod
     def from_dict(
         cls,
-        data: Dict[str, Any],
-        headers: Optional[Dict[str, str]] = None,
+        data: dict[str, Any],
+        headers: Optional[dict[str, str]] = None,
         status_code: int = 200,
     ) -> "UnifiedChatCompletionsResponse":
         """Create from dictionary."""
@@ -384,7 +385,7 @@ class UnifiedChatCompletionsResponse:
         )
         return cls(body=body, headers=headers, status_code=status_code)
 
-    def to_dict(self, keep_unknowns: bool = False) -> Dict[str, Any]:
+    def to_dict(self, keep_unknowns: bool = False) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "body": self.body.to_dict(keep_unknowns=keep_unknowns),
@@ -400,14 +401,14 @@ class UnifiedChoiceDelta:
 
     role: Optional[str] = None
     content: Optional[str] = None
-    tool_calls: Optional[List["UnifiedToolCall"]] = None  # Import from request module
+    tool_calls: Optional[list["UnifiedToolCall"]] = None  # Import from request module
     refusal: Optional[str] = None
 
     # Unknown fields
-    unknowns: Dict[str, Any] = field(default_factory=dict)
+    unknowns: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "UnifiedChoiceDelta":
+    def from_dict(cls, data: dict[str, Any]) -> "UnifiedChoiceDelta":
         """Create from dictionary."""
         declared_fields = {f.name for f in fields(cls) if f.name != "unknowns"}
         # TODO: Skip null unknowns?
@@ -427,9 +428,9 @@ class UnifiedChoiceDelta:
             unknowns=unknowns,
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
-        result: Dict[str, Any] = {}
+        result: dict[str, Any] = {}
 
         if self.role is not None:
             result["role"] = self.role
@@ -454,10 +455,10 @@ class UnifiedStreamChoice:
     logprobs: Optional[UnifiedLogProbs] = None
 
     # Unknown fields
-    unknowns: Dict[str, Any] = field(default_factory=dict)
+    unknowns: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "UnifiedStreamChoice":
+    def from_dict(cls, data: dict[str, Any]) -> "UnifiedStreamChoice":
         """Create from dictionary."""
         declared_fields = {f.name for f in fields(cls) if f.name != "unknowns"}
         unknowns = {k: v for k, v in data.items() if k not in declared_fields}
@@ -476,9 +477,9 @@ class UnifiedStreamChoice:
             unknowns=unknowns,
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
-        result: Dict[str, Any] = {
+        result: dict[str, Any] = {
             "index": self.index,
             "delta": self.delta.to_dict(),
         }
@@ -500,7 +501,7 @@ class UnifiedChatCompletionsStreamChunk:
     object: str  # Always "chat.completion.chunk"
     created: int
     model: str
-    choices: List[UnifiedStreamChoice]
+    choices: list[UnifiedStreamChoice]
 
     # Usage info (only in final chunk with stream_options.include_usage=true)
     usage: Optional[UnifiedUsage] = None
@@ -509,10 +510,10 @@ class UnifiedChatCompletionsStreamChunk:
     service_tier: Optional[str] = None
 
     # Unknown fields
-    unknowns: Dict[str, Any] = field(default_factory=dict)
+    unknowns: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "UnifiedChatCompletionsStreamChunk":
+    def from_dict(cls, data: dict[str, Any]) -> "UnifiedChatCompletionsStreamChunk":
         """Create from dictionary."""
         declared_fields = {f.name for f in fields(cls) if f.name != "unknowns"}
         unknowns = {k: v for k, v in data.items() if k not in declared_fields}
@@ -539,9 +540,9 @@ class UnifiedChatCompletionsStreamChunk:
             unknowns=unknowns,
         )
 
-    def to_dict(self, keep_unknowns: bool = False) -> Dict[str, Any]:
+    def to_dict(self, keep_unknowns: bool = False) -> dict[str, Any]:
         """Convert to dictionary."""
-        result: Dict[str, Any] = {
+        result: dict[str, Any] = {
             "id": self.id,
             "object": self.object,
             "created": self.created,
@@ -571,4 +572,4 @@ class UnifiedChatResponseStreaming:
     """
 
     stream: AsyncGenerator[UnifiedChatCompletionsStreamChunk, None]
-    headers: Optional[Dict[str, str]] = None
+    headers: Optional[dict[str, str]] = None

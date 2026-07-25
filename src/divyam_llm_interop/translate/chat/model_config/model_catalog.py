@@ -2,19 +2,19 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from dataclasses import dataclass
-from typing import Optional, Dict, Any, Tuple
+from typing import Any
 
 
 @dataclass(frozen=True, eq=True)
 class ModelCatalogEntry:
     name: str
-    version: Optional[str] = None
-    provider: Optional[str] = None
+    version: str | None = None
+    provider: str | None = None
     # Optional regex patterns (full match on normalize_model_name output) that map
     # runtime model names to this catalog entry without listing every snapshot ID.
-    name_match_patterns: Tuple[str, ...] = ()
+    name_match_patterns: tuple[str, ...] = ()
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """
         Convert the dataclass to a dictionary, excluding None values.
         """
@@ -34,7 +34,7 @@ class ModelCatalogEntry:
         return data
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ModelCatalogEntry":
+    def from_dict(cls, data: dict[str, Any]) -> "ModelCatalogEntry":
         """
         Validate and create ModelCatalogEntry from dict.
         Raises ValueError if required fields are missing or invalid.
@@ -44,7 +44,7 @@ class ModelCatalogEntry:
 
         # Optional type validation
         if not isinstance(data["name"], str):
-            raise ValueError(
+            raise TypeError(
                 f"'name' must be a string, got {type(data['name']).__name__}"
             )
 
@@ -61,7 +61,7 @@ class ModelCatalogEntry:
                 f"'provider' must be a string or None, got {type(provider).__name__}"
             )
 
-        name_match_patterns: Tuple[str, ...] = ()
+        name_match_patterns: tuple[str, ...] = ()
         name_match_raw = data.get("name_match")
         if name_match_raw is not None:
             if not isinstance(name_match_raw, dict):
