@@ -4,7 +4,7 @@
 import re
 import sys
 from dataclasses import dataclass
-from typing import Optional, Union, Dict, Any
+from typing import Any, Optional, Union
 
 from divyam_llm_interop.translate.chat.base.regex_specificity import specificity_score
 from divyam_llm_interop.translate.chat.model_config.model_catalog import (
@@ -43,12 +43,11 @@ class SelectorRegex:
         for c in self._compiled:
             if c.fullmatch(value):
                 score = specificity_score(c.pattern)
-                if score > best_score:
-                    best_score = score
+                best_score = max(best_score, score)
         return best_score
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "SelectorRegex":
+    def from_dict(cls, data: dict[str, Any]) -> "SelectorRegex":
         if "regex" not in data:
             raise ValueError(f"Invalid regex selector: {data}")
 
@@ -57,7 +56,7 @@ class SelectorRegex:
         # backward-compat: allow string or list
         return cls(patterns)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {"regex": self.patterns}
 
     def __repr__(self):
@@ -81,13 +80,12 @@ class ModelSelector:
             return None
         if isinstance(raw, str):
             return raw
-        if isinstance(raw, dict):
-            if "regex" in raw:
-                return SelectorRegex.from_dict(raw)
+        if isinstance(raw, dict) and "regex" in raw:
+            return SelectorRegex.from_dict(raw)
         raise ValueError(f"Invalid selector format: {raw}")
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ModelSelector":
+    def from_dict(cls, data: dict[str, Any]) -> "ModelSelector":
         """
         Construct a ModelSelector from a Python dict.
         """
@@ -107,7 +105,7 @@ class ModelSelector:
             return value.to_dict()
         raise TypeError(f"Invalid selector type: {value}")
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """
         Convert this selector to a dict.
         """

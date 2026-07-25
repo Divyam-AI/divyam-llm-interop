@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
-from typing import Dict, Any, List
+from typing import Any
 
 from divyam_llm_interop.translate.chat.base.translation_utils import (
     drop_null_values_top_level,
@@ -10,15 +10,15 @@ from divyam_llm_interop.translate.chat.base.translation_utils import (
 
 
 def convert_responses_to_completions_request(
-    responses_request: Dict[str, Any],
-) -> Dict[str, Any]:
+    responses_request: dict[str, Any],
+) -> dict[str, Any]:
     """
     Converts a Responses API request (dict) to a Chat Completions API request (dict),
     including previous conversation history with assistant tool call suggestions and tool outputs.
     """
 
-    completion_request: Dict[str, Any] = {"model": responses_request.get("model")}
-    messages: List[Dict[str, Any]] = []
+    completion_request: dict[str, Any] = {"model": responses_request.get("model")}
+    messages: list[dict[str, Any]] = []
 
     # Include instructions as a system message
     instructions = responses_request.get("instructions")
@@ -40,7 +40,7 @@ def convert_responses_to_completions_request(
                 # handle function_call_output first
                 if item.get("type") == "function_call_output":
                     output = item.get("output")
-                    content_parts: List[str] = []
+                    content_parts: list[str] = []
 
                     if isinstance(output, str):
                         content_parts.append(output)
@@ -61,7 +61,7 @@ def convert_responses_to_completions_request(
                 role = item.get("role")
                 content = item.get("content", [])
 
-                msg: Dict[str, Any] = {"role": role}
+                msg: dict[str, Any] = {"role": role}
 
                 # Convert structured content
                 if isinstance(content, str):

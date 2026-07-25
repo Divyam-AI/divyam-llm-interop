@@ -3,7 +3,7 @@
 
 import time
 import uuid
-from typing import Dict, Any, List
+from typing import Any
 
 from divyam_llm_interop.interop_logging import logger
 from divyam_llm_interop.translate.chat.base.translation_utils import (
@@ -12,8 +12,8 @@ from divyam_llm_interop.translate.chat.base.translation_utils import (
 
 
 def convert_completions_to_responses_response(
-    completion_dict: Dict[str, Any],
-) -> Dict[str, Any]:
+    completion_dict: dict[str, Any],
+) -> dict[str, Any]:
     """
     Convert a non-streaming Chat Completions API response (dict)
     into a Responses API response (dict).
@@ -31,12 +31,12 @@ def convert_completions_to_responses_response(
     completion_id = str(completion_dict.get("id", f"chatcmpl-{uuid.uuid4().hex[:29]}"))
     created = completion_dict.get("created", time.time())
     model = completion_dict.get("model", "gpt-4o")
-    choices: List[Dict[str, Any]] = completion_dict.get("choices", [])
+    choices: list[dict[str, Any]] = completion_dict.get("choices", [])
     usage = completion_dict.get("usage", {})
     system_fingerprint = completion_dict.get("system_fingerprint")
 
     # Initialize Responses structure
-    responses_response: Dict[str, Any] = {
+    responses_response: dict[str, Any] = {
         "id": (
             completion_id.replace("chatcmpl-", "resp_")
             if completion_id.startswith("chatcmpl-")
@@ -239,7 +239,7 @@ def convert_completions_to_responses_response(
 
     # Convert token usage (Completions → Responses)
     if usage:
-        usage_out: Dict[str, Any] = {
+        usage_out: dict[str, Any] = {
             "input_tokens": usage.get("prompt_tokens", 0),
             "input_tokens_details": {"cached_tokens": 0},
             "output_tokens": usage.get("completion_tokens", 0),
@@ -256,7 +256,7 @@ def convert_completions_to_responses_response(
 
         # Handle output details (reasoning, tool output, etc.)
         completion_details = usage.get("completion_tokens_details", {})
-        output_tokens_details: Dict[str, Any] = {}
+        output_tokens_details: dict[str, Any] = {}
         if completion_details:
             if "reasoning_tokens" in completion_details:
                 output_tokens_details["reasoning_tokens"] = completion_details[

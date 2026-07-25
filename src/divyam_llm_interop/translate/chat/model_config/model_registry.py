@@ -3,7 +3,6 @@
 
 import dataclasses
 import re
-from typing import List, Dict, Tuple
 
 from divyam_llm_interop.translate.chat.base.translation_utils import (
     normalize_model_name,
@@ -29,7 +28,7 @@ from divyam_llm_interop.translate.chat.types import Model
 class ModelRegistry:
     """Model repository with models and their capabilities."""
 
-    _model_capabilities: Dict[Model, ModelCapabilities]
+    _model_capabilities: dict[Model, ModelCapabilities]
 
     def __init__(self):
         model_catalog = ModelCatalogLoader().load_models()
@@ -37,14 +36,14 @@ class ModelRegistry:
         self._model_capabilities = self._get_model_capabilities_map(
             model_catalog, model_configs
         )
-        self._normalized_name_to_model_map: Dict[str, List[Model]] = {}
-        for model in self._model_capabilities.keys():
+        self._normalized_name_to_model_map: dict[str, list[Model]] = {}
+        for model in self._model_capabilities:
             normalized_name = normalize_model_name(model.name)
             matches = self._normalized_name_to_model_map.get(normalized_name, [])
             matches.append(model)
             self._normalized_name_to_model_map[normalized_name] = matches
 
-        self._name_pattern_index: List[Tuple[SelectorRegex, Model]] = []
+        self._name_pattern_index: list[tuple[SelectorRegex, Model]] = []
         for entry in model_catalog:
             patterns = getattr(entry, "name_match_patterns", ())
             if not isinstance(patterns, tuple) or not patterns:
@@ -58,13 +57,13 @@ class ModelRegistry:
                 ):
                     self._name_pattern_index.append((selector_regex, registered))
 
-    def list_models(self) -> List[Model]:
+    def list_models(self) -> list[Model]:
         """List all models registered in this registry. There will be one
         entry per api type the model supports."""
 
         return list(self._model_capabilities.keys())
 
-    def find_models_by_name(self, model_name: str) -> List[Model]:
+    def find_models_by_name(self, model_name: str) -> list[Model]:
         """List all models registered in this registry having the given name"""
         normalized_name = normalize_model_name(model_name)
         return self._normalized_name_to_model_map.get(normalized_name, [])
@@ -100,14 +99,14 @@ class ModelRegistry:
 
         return best_candidate
 
-    def _find_models_by_name_pattern(self, model: Model) -> List[Model]:
+    def _find_models_by_name_pattern(self, model: Model) -> list[Model]:
         """Resolve catalog models via explicit catalog-level name_match regex.
 
         This method only applies configured regex overrides. Generic runtime
         variant matching is handled separately by _find_models_by_name_best_effort.
         """
         normalized = normalize_model_name(model.name)
-        matches: List[Model] = []
+        matches: list[Model] = []
         for selector_regex, registered in self._name_pattern_index:
             if registered.api_type != model.api_type:
                 continue
@@ -115,7 +114,7 @@ class ModelRegistry:
                 matches.append(registered)
         return matches
 
-    def _find_models_by_name_best_effort(self, model: Model) -> List[Model]:
+    def _find_models_by_name_best_effort(self, model: Model) -> list[Model]:
         """Best-effort fallback for runtime fine-tuned names.
 
         This is intentionally lower-priority than explicit name_match config so
@@ -126,7 +125,7 @@ class ModelRegistry:
         if not requested:
             return []
 
-        scored_matches: List[Tuple[int, Model]] = []
+        scored_matches: list[tuple[int, Model]] = []
         for candidate in self._model_capabilities:
             if candidate.api_type != model.api_type:
                 continue
@@ -171,10 +170,10 @@ class ModelRegistry:
 
     @classmethod
     def _map_models_to_config(
-        cls, model_catalog: List[ModelCatalogEntry], model_configs: List[ModelConfig]
-    ) -> Dict[ModelCatalogEntry, List[ModelConfig]]:
+        cls, model_catalog: list[ModelCatalogEntry], model_configs: list[ModelConfig]
+    ) -> dict[ModelCatalogEntry, list[ModelConfig]]:
         """Map model names to their matching capabilities configuration."""
-        result: Dict[ModelCatalogEntry, List[ModelConfig]] = {}
+        result: dict[ModelCatalogEntry, list[ModelConfig]] = {}
         for model_catalog_entry in model_catalog:
             result[model_catalog_entry] = []
             for model_config in model_configs:
@@ -187,13 +186,13 @@ class ModelRegistry:
 
     @classmethod
     def _get_model_capabilities_map(
-        cls, model_catalog: List[ModelCatalogEntry], model_configs: List[ModelConfig]
-    ) -> Dict[Model, ModelCapabilities]:
+        cls, model_catalog: list[ModelCatalogEntry], model_configs: list[ModelConfig]
+    ) -> dict[Model, ModelCapabilities]:
         # Map models to their configurations
         model_catalog_to_config = cls._map_models_to_config(
             model_catalog, model_configs
         )
-        model_capabilities: Dict[Model, ModelCapabilities] = {}
+        model_capabilities: dict[Model, ModelCapabilities] = {}
 
         for model_catalog_entry, configs in model_catalog_to_config.items():
             merged_capabilities = ModelConfig.merge_configs(

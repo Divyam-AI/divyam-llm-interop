@@ -3,23 +3,23 @@
 
 import copy
 import json
-from typing import Dict, Any, List
+from typing import Any
 
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
 from divyam_llm_interop.translate.chat.types import (
-    Model,
     ChatRequest,
     ChatResponse,
     ChatResponseStreaming,
+    Model,
 )
 from divyam_llm_interop.translate.chat.unified.unified_request import (
-    UnifiedChatCompletionsRequestBody,
     UnifiedChatCompletionsRequest,
+    UnifiedChatCompletionsRequestBody,
 )
 from divyam_llm_interop.translate.chat.unified.unified_response import (
     UnifiedChatCompletionsResponse,
-    UnifiedChatResponseStreaming,
     UnifiedChatCompletionsStreamChunk,
+    UnifiedChatResponseStreaming,
 )
 
 
@@ -52,8 +52,8 @@ def drop_null_values_recursively(data: Any) -> Any:
 def translate_fields_with_range(
     target: Model,
     unified: UnifiedChatCompletionsRequestBody,
-    min_max_rage_fields: List[str],
-    model_configs: Dict[str, Any],
+    min_max_rage_fields: list[str],
+    model_configs: dict[str, Any],
 ):
     for field in min_max_rage_fields:
         try:
@@ -64,10 +64,8 @@ def translate_fields_with_range(
             config = get_model_config(model_configs, target)
             if not config or not config.get(field):
                 continue
-            if value > config[field]["max"]:
-                value = config[field]["max"]
-            if value < config[field]["min"]:
-                value = config[field]["min"]
+            value = min(value, config[field]["max"])
+            value = max(value, config[field]["min"])
 
             setattr(unified, field, value)
         except AttributeError:
@@ -75,7 +73,7 @@ def translate_fields_with_range(
 
 
 def rename_fields_in_place(
-    body: Dict[str, Any], target: Model, model_configs: Dict[str, Any]
+    body: dict[str, Any], target: Model, model_configs: dict[str, Any]
 ):
     config = get_model_config(model_configs, target)
     if not config or not config.get("rename_fields"):
@@ -85,11 +83,10 @@ def rename_fields_in_place(
             # noinspection PyTypeChecker
             body[new] = body[old]
             del body[old]
-    pass
 
 
 def drop_unsupported_fields_in_place(
-    body: Dict[str, Any], target: Model, model_configs: Dict[str, Any]
+    body: dict[str, Any], target: Model, model_configs: dict[str, Any]
 ):
     # TODO: Log / generate metrics
     config = get_model_config(model_configs, target)
@@ -98,7 +95,6 @@ def drop_unsupported_fields_in_place(
     for field in config["drop_fields"]:
         if body.get(field) is not None:
             del body[field]
-    pass
 
 
 def get_model_config(model_configs: dict[str, Any], target: Model) -> Any | None:
@@ -170,7 +166,7 @@ def as_is_unifed_stream_to_response_stream(
     )
 
 
-def detect_request_api_type(request_payload: Dict[str, Any]) -> ModelApiType:
+def detect_request_api_type(request_payload: dict[str, Any]) -> ModelApiType:
     """
     Detect whether a request payload is for Chat Completions API or Responses
     API.
@@ -219,7 +215,7 @@ def detect_request_api_type(request_payload: Dict[str, Any]) -> ModelApiType:
     raise ValueError(f"Unknown API type for {json.dumps(request_payload)}")
 
 
-def detect_response_api_type(response_payload: Dict[str, Any]) -> ModelApiType:
+def detect_response_api_type(response_payload: dict[str, Any]) -> ModelApiType:
     """
     Detect whether a response payload is from Chat Completions API or Responses API.
 
@@ -242,10 +238,10 @@ def detect_response_api_type(response_payload: Dict[str, Any]) -> ModelApiType:
 
 
 def recursive_merge_list_append(
-    base: Dict[str, Any],
-    override: Dict[str, Any],
+    base: dict[str, Any],
+    override: dict[str, Any],
     list_fields_to_overwrite=None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Recursively merge dicts while merging list and dict sub values.:
     - If both values are dicts: merge recursively

@@ -12,10 +12,8 @@ description: >-
 From the repository root, after Python edits, run:
 
 ```bash
-poetry run ruff check .
-poetry run ruff format --check .
-poetry run pyright .
-poetry run pytest
+./scripts/lint.sh
+./scripts/test.sh
 ```
 
 Do not commit until these pass. Do not duplicate commands in this skill; update `AGENTS.md` if CI changes.

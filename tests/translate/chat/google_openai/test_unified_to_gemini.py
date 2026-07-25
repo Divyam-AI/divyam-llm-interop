@@ -3,7 +3,6 @@
 
 import json
 from pathlib import Path
-from typing import List
 
 import pytest
 
@@ -16,8 +15,8 @@ from divyam_llm_interop.translate.chat.openai_completions.unified_to_completions
 )
 from divyam_llm_interop.translate.chat.types import Model
 from divyam_llm_interop.translate.chat.unified.unified_request import (
-    UnifiedChatCompletionsRequestBody,
     UnifiedChatCompletionsRequest,
+    UnifiedChatCompletionsRequestBody,
 )
 
 
@@ -127,6 +126,6 @@ def test_unified_to_gemini_curated_inputs(translator):
         assert expected_dict == converted_body
 
 
-def list_input_json_files(directory: str, pattern: str) -> List[str]:
+def list_input_json_files(directory: str, pattern: str) -> list[str]:
     path = Path(directory)
     return [str(file) for file in path.glob(pattern)]

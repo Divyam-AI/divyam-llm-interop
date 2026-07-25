@@ -4,7 +4,7 @@
 import copy
 import json
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from typing_extensions import override
 
@@ -44,7 +44,7 @@ class GeminiTranslator(Translator):
         ]
 
     @override
-    def models(self) -> List[Model]:
+    def models(self) -> list[Model]:
         return self._models
 
     @override
@@ -59,7 +59,7 @@ class GeminiTranslator(Translator):
         self, chat_request: ChatRequest, source: Model
     ) -> UnifiedChatCompletionsRequest:
         body = chat_request.body
-        unified_request_dict: Dict[str, Any] = {
+        unified_request_dict: dict[str, Any] = {
             "model": body.get("model", source.name),
             "messages": [],
         }
@@ -80,9 +80,9 @@ class GeminiTranslator(Translator):
             elif role not in ("user", "assistant"):
                 role = "user"
 
-            message: Dict[str, Any] = {"role": role}
-            text_parts: List[str] = []
-            tool_calls: List[Dict[str, Any]] = []
+            message: dict[str, Any] = {"role": role}
+            text_parts: list[str] = []
+            tool_calls: list[dict[str, Any]] = []
 
             for part_index, part in enumerate(content.get("parts", [])):
                 text = part.get("text")
@@ -185,7 +185,7 @@ class GeminiTranslator(Translator):
         unified = UnifiedChatCompletionsRequestBody.from_dict(
             from_request.body.to_dict(keep_unknowns=True)
         )
-        request_body: Dict[str, Any] = {"model": target.name}
+        request_body: dict[str, Any] = {"model": target.name}
 
         system_messages = [
             message.content
@@ -197,7 +197,7 @@ class GeminiTranslator(Translator):
                 "parts": [{"text": "\n".join(system_messages)}]
             }
 
-        contents: List[Dict[str, Any]] = []
+        contents: list[dict[str, Any]] = []
         for message in unified.messages:
             if message.role == "system":
                 continue
@@ -219,7 +219,7 @@ class GeminiTranslator(Translator):
                 continue
 
             role = "model" if message.role == "assistant" else "user"
-            parts: List[Dict[str, Any]] = []
+            parts: list[dict[str, Any]] = []
 
             if message.content:
                 parts.append({"text": message.content})
@@ -241,7 +241,7 @@ class GeminiTranslator(Translator):
 
         request_body["contents"] = contents
 
-        generation_config: Dict[str, Any] = {}
+        generation_config: dict[str, Any] = {}
         if unified.temperature is not None:
             generation_config["temperature"] = unified.temperature
         if unified.top_p is not None:
@@ -312,7 +312,7 @@ class GeminiTranslator(Translator):
             parts = content.get("parts", []) if isinstance(content, dict) else []
             text = self._extract_parts_text(parts)
             tool_calls = self._extract_tool_calls_from_parts(parts)
-            message: Dict[str, Any] = {"role": "assistant"}
+            message: dict[str, Any] = {"role": "assistant"}
             if text:
                 message["content"] = text
             if tool_calls:
@@ -324,7 +324,7 @@ class GeminiTranslator(Translator):
             finish_message = GeminiTranslator._candidate_field(
                 candidate, "finishMessage", "finish_message"
             )
-            choice_entry: Dict[str, Any] = {
+            choice_entry: dict[str, Any] = {
                 "index": candidate.get("index", index),
                 "message": message,
                 "finish_reason": self._map_finish_reason_to_openai(finish),
@@ -372,7 +372,7 @@ class GeminiTranslator(Translator):
 
         candidates = []
         for choice in from_response.body.choices:
-            parts: List[Dict[str, Any]] = []
+            parts: list[dict[str, Any]] = []
             if choice.message.content:
                 parts.append({"text": choice.message.content})
             if choice.message.tool_calls:
@@ -392,7 +392,7 @@ class GeminiTranslator(Translator):
             if not finish_reason:
                 finish_reason = self._map_finish_reason_to_gemini(choice.finish_reason)
 
-            candidate: Dict[str, Any] = {
+            candidate: dict[str, Any] = {
                 "index": choice.index,
                 "finishReason": finish_reason,
             }
@@ -404,7 +404,7 @@ class GeminiTranslator(Translator):
 
             candidates.append(candidate)
 
-        body: Dict[str, Any] = {
+        body: dict[str, Any] = {
             "responseId": from_response.body.id,
             "modelVersion": from_response.body.model,
             "candidates": candidates,
@@ -447,18 +447,18 @@ class GeminiTranslator(Translator):
 
     @staticmethod
     def _gemini_stream_chunk_to_unified_dict(
-        body: Dict[str, Any], source: Model
-    ) -> Dict[str, Any]:
+        body: dict[str, Any], source: Model
+    ) -> dict[str, Any]:
         """Map one native Gemini stream chunk to OpenAI-style stream chunk dict."""
         candidates = body.get("candidates", [])
-        choices: List[Dict[str, Any]] = []
+        choices: list[dict[str, Any]] = []
         for index, candidate in enumerate(candidates):
             content = candidate.get("content") or {}
             parts = content.get("parts", []) if isinstance(content, dict) else []
             text = GeminiTranslator._extract_parts_text(parts)
             tool_calls = GeminiTranslator._extract_tool_calls_from_parts(parts)
 
-            delta: Dict[str, Any] = {}
+            delta: dict[str, Any] = {}
             if text:
                 delta["content"] = text
             if tool_calls:
@@ -476,7 +476,7 @@ class GeminiTranslator(Translator):
             finish_message = GeminiTranslator._candidate_field(
                 candidate, "finishMessage", "finish_message"
             )
-            choice_entry: Dict[str, Any] = {
+            choice_entry: dict[str, Any] = {
                 "index": candidate.get("index", index),
                 "delta": delta,
             }
@@ -492,7 +492,7 @@ class GeminiTranslator(Translator):
             choices.append(choice_entry)
 
         usage = GeminiTranslator._openai_usage_from_gemini_body(body)
-        chunk_dict: Dict[str, Any] = {
+        chunk_dict: dict[str, Any] = {
             "id": body.get(
                 "responseId",
                 body.get("response_id", f"gemini_{int(time.time() * 1000)}"),
@@ -510,7 +510,7 @@ class GeminiTranslator(Translator):
     @staticmethod
     def _unified_stream_chunk_to_gemini_dict(
         unified_chunk: UnifiedChatCompletionsStreamChunk,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         raw_body = unified_chunk.unknowns.get("gemini_response_raw")
         if isinstance(raw_body, dict):
             return GeminiTranslator._normalize_gemini_response_body(
@@ -519,9 +519,9 @@ class GeminiTranslator(Translator):
                 model_version=unified_chunk.model,
             )
 
-        candidates: List[Dict[str, Any]] = []
+        candidates: list[dict[str, Any]] = []
         for choice in unified_chunk.choices:
-            parts: List[Dict[str, Any]] = []
+            parts: list[dict[str, Any]] = []
             if choice.delta.content:
                 parts.append({"text": choice.delta.content})
             if choice.delta.tool_calls:
@@ -543,7 +543,7 @@ class GeminiTranslator(Translator):
                     choice.finish_reason
                 )
 
-            candidate: Dict[str, Any] = {"index": choice.index}
+            candidate: dict[str, Any] = {"index": choice.index}
             if finish_reason:
                 candidate["finishReason"] = finish_reason
             finish_message = choice.unknowns.get("gemini_finish_message")
@@ -553,7 +553,7 @@ class GeminiTranslator(Translator):
                 candidate["content"] = {"role": "model", "parts": parts}
             candidates.append(candidate)
 
-        body: Dict[str, Any] = {
+        body: dict[str, Any] = {
             "responseId": unified_chunk.id,
             "modelVersion": unified_chunk.model,
         }
@@ -569,12 +569,12 @@ class GeminiTranslator(Translator):
 
     @staticmethod
     def _normalize_gemini_response_body(
-        raw: Dict[str, Any],
+        raw: dict[str, Any],
         *,
-        response_id: Optional[str] = None,
-        model_version: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        body: Dict[str, Any] = {}
+        response_id: str | None = None,
+        model_version: str | None = None,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {}
 
         rid = response_id or raw.get("responseId") or raw.get("response_id")
         if rid is not None:
@@ -601,8 +601,8 @@ class GeminiTranslator(Translator):
         return body
 
     @staticmethod
-    def _normalize_gemini_candidate(candidate: Dict[str, Any]) -> Dict[str, Any]:
-        normalized: Dict[str, Any] = {}
+    def _normalize_gemini_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
+        normalized: dict[str, Any] = {}
 
         if "index" in candidate:
             normalized["index"] = candidate["index"]
@@ -639,8 +639,8 @@ class GeminiTranslator(Translator):
         return normalized
 
     @staticmethod
-    def _normalize_gemini_content(content: Dict[str, Any]) -> Dict[str, Any]:
-        normalized: Dict[str, Any] = {}
+    def _normalize_gemini_content(content: dict[str, Any]) -> dict[str, Any]:
+        normalized: dict[str, Any] = {}
         role = content.get("role")
         if role is not None:
             normalized["role"] = role
@@ -661,7 +661,7 @@ class GeminiTranslator(Translator):
         return normalized
 
     @staticmethod
-    def _normalize_gemini_part(part: Dict[str, Any]) -> Dict[str, Any]:
+    def _normalize_gemini_part(part: dict[str, Any]) -> dict[str, Any]:
         if "text" in part:
             return {"text": part["text"]}
 
@@ -689,8 +689,8 @@ class GeminiTranslator(Translator):
         return dict(part)
 
     @staticmethod
-    def _normalize_gemini_usage_metadata(meta: Dict[str, Any]) -> Dict[str, Any]:
-        normalized: Dict[str, Any] = {}
+    def _normalize_gemini_usage_metadata(meta: dict[str, Any]) -> dict[str, Any]:
+        normalized: dict[str, Any] = {}
 
         for camel, snake in (
             ("promptTokenCount", "prompt_token_count"),
@@ -734,12 +734,12 @@ class GeminiTranslator(Translator):
         return normalized
 
     @staticmethod
-    def _normalize_prompt_tokens_detail(row: Dict[str, Any]) -> Dict[str, Any]:
+    def _normalize_prompt_tokens_detail(row: dict[str, Any]) -> dict[str, Any]:
         modality = row.get("modality")
         if modality is not None and hasattr(modality, "value"):
             modality = modality.value
         token_count = row.get("tokenCount", row.get("token_count"))
-        detail: Dict[str, Any] = {}
+        detail: dict[str, Any] = {}
         if modality is not None:
             detail["modality"] = modality
         if token_count is not None:
@@ -751,7 +751,7 @@ class GeminiTranslator(Translator):
         return detail
 
     @staticmethod
-    def _candidate_field(candidate: Dict[str, Any], *keys: str) -> Any:
+    def _candidate_field(candidate: dict[str, Any], *keys: str) -> Any:
         for key in keys:
             if key in candidate:
                 return candidate[key]
@@ -768,7 +768,7 @@ class GeminiTranslator(Translator):
         return finish_reason
 
     @staticmethod
-    def _extract_parts_text(parts: List[Dict[str, Any]]) -> Optional[str]:
+    def _extract_parts_text(parts: list[dict[str, Any]]) -> str | None:
         text_parts = [
             str(part.get("text")) for part in parts if part.get("text") is not None
         ]
@@ -777,19 +777,19 @@ class GeminiTranslator(Translator):
         return "\n".join(text_parts)
 
     @staticmethod
-    def _safe_json_loads(content: Optional[str]) -> Any:
+    def _safe_json_loads(content: str | None) -> Any:
         if not content:
             return {}
         try:
             return json.loads(content)
-        except Exception:
+        except (json.JSONDecodeError, ValueError, TypeError):
             return {"value": content}
 
     @staticmethod
     def _extract_function_declarations(
-        tools: List[Dict[str, Any]],
-    ) -> List[Dict[str, Any]]:
-        declarations: List[Dict[str, Any]] = []
+        tools: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        declarations: list[dict[str, Any]] = []
         for tool in tools:
             for declaration in tool.get("functionDeclarations", []):
                 declarations.append(
@@ -798,7 +798,7 @@ class GeminiTranslator(Translator):
         return declarations
 
     @staticmethod
-    def _normalize_function_declaration(declaration: Dict[str, Any]) -> Dict[str, Any]:
+    def _normalize_function_declaration(declaration: dict[str, Any]) -> dict[str, Any]:
         normalized = dict(declaration)
         # Gemini SDK request payloads often use `parameters_json_schema`; unified
         # tools expect `parameters`. Keep both for round-trip fidelity.
@@ -810,8 +810,8 @@ class GeminiTranslator(Translator):
         return normalized
 
     @staticmethod
-    def _build_function_declaration(function_dict: Dict[str, Any]) -> Dict[str, Any]:
-        declaration: Dict[str, Any] = {
+    def _build_function_declaration(function_dict: dict[str, Any]) -> dict[str, Any]:
+        declaration: dict[str, Any] = {
             "name": function_dict.get("name"),
             "description": function_dict.get("description", ""),
         }
@@ -830,7 +830,7 @@ class GeminiTranslator(Translator):
         return declaration
 
     @staticmethod
-    def _parse_tool_choice(tool_config: Optional[Dict[str, Any]]) -> Optional[Any]:
+    def _parse_tool_choice(tool_config: dict[str, Any] | None) -> Any | None:
         if not tool_config:
             return None
 
@@ -850,7 +850,7 @@ class GeminiTranslator(Translator):
         return None
 
     @staticmethod
-    def _build_tool_config(tool_choice: Optional[Any]) -> Optional[Dict[str, Any]]:
+    def _build_tool_config(tool_choice: Any | None) -> dict[str, Any] | None:
         if tool_choice is None:
             return None
 
@@ -881,9 +881,9 @@ class GeminiTranslator(Translator):
 
     @staticmethod
     def _extract_tool_calls_from_parts(
-        parts: List[Dict[str, Any]],
-    ) -> List[UnifiedToolCall]:
-        tool_calls: List[UnifiedToolCall] = []
+        parts: list[dict[str, Any]],
+    ) -> list[UnifiedToolCall]:
+        tool_calls: list[UnifiedToolCall] = []
         for idx, part in enumerate(parts):
             function_call = part.get("functionCall")
             if function_call is None:
@@ -918,8 +918,8 @@ class GeminiTranslator(Translator):
 
     @staticmethod
     def _openai_prompt_tokens_details_from_gemini_usage(
-        meta: Dict[str, Any],
-    ) -> Optional[Dict[str, Any]]:
+        meta: dict[str, Any],
+    ) -> dict[str, Any] | None:
         """Map Gemini per-modality prompt counts into OpenAI ``prompt_tokens_details``.
 
         OpenAI's schema only defines ``audio_tokens`` and ``cached_tokens``; the full
@@ -930,7 +930,7 @@ class GeminiTranslator(Translator):
         if not isinstance(rows, list) or not rows:
             return None
 
-        modalities: List[Dict[str, Any]] = []
+        modalities: list[dict[str, Any]] = []
         audio_tokens = 0
         cached_tokens = 0
         for row in rows:
@@ -954,7 +954,7 @@ class GeminiTranslator(Translator):
                 except (TypeError, ValueError):
                     pass
 
-        details: Dict[str, Any] = {"modalities": modalities}
+        details: dict[str, Any] = {"modalities": modalities}
         if audio_tokens > 0:
             details["audio_tokens"] = audio_tokens
         if cached_tokens > 0:
@@ -963,8 +963,8 @@ class GeminiTranslator(Translator):
 
     @staticmethod
     def _openai_usage_from_gemini_body(
-        body: Dict[str, Any],
-    ) -> Optional[Dict[str, Any]]:
+        body: dict[str, Any],
+    ) -> dict[str, Any] | None:
         """Build OpenAI-style ``usage`` from a Gemini response body.
 
         Supports both REST-style keys (``usageMetadata``, ``promptTokenCount``) and
@@ -983,7 +983,7 @@ class GeminiTranslator(Translator):
             except (TypeError, ValueError):
                 return 0
 
-        usage: Dict[str, Any] = {
+        usage: dict[str, Any] = {
             "prompt_tokens": _as_int(
                 meta.get("promptTokenCount", meta.get("prompt_token_count"))
             ),
@@ -1023,7 +1023,7 @@ class GeminiTranslator(Translator):
         return "stop"
 
     @staticmethod
-    def _map_finish_reason_to_gemini(finish_reason: Optional[str]) -> str:
+    def _map_finish_reason_to_gemini(finish_reason: str | None) -> str:
         if finish_reason == "length":
             return "MAX_TOKENS"
         if finish_reason == "content_filter":

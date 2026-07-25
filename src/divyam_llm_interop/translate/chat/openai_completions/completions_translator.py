@@ -1,7 +1,6 @@
 # Copyright 2025 Divyam.ai
 # SPDX-License-Identifier: Apache-2.0
 
-from typing import List
 
 from typing_extensions import override
 
@@ -18,10 +17,10 @@ from divyam_llm_interop.translate.chat.openai_completions.unified_to_completions
     UnifiedToCompletionsTranslator,
 )
 from divyam_llm_interop.translate.chat.types import (
-    Model,
     ChatRequest,
     ChatResponse,
     ChatResponseStreaming,
+    Model,
 )
 from divyam_llm_interop.translate.chat.unified.unified_request import (
     UnifiedChatCompletionsRequest,
@@ -48,7 +47,7 @@ class CompletionsTranslator(Translator):
         ]
 
     @override
-    def models(self) -> List[Model]:
+    def models(self) -> list[Model]:
         return self._models
 
     @override
@@ -97,13 +96,11 @@ class CompletionsTranslator(Translator):
 
     @override
     def are_responses_compatible(self, source: Model, target: Model) -> bool:
-        if (
+        # The responses seem to require no translation across models.
+        return (
             source.api_type == target.api_type
             and source.api_type == ModelApiType.RESPONSES
-        ):
-            # The responses seem to require no translation across models.
-            return True
-        return False
+        )
 
     @override
     def stream_response_to_unified(

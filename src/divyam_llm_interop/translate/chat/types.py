@@ -1,8 +1,9 @@
 # Copyright 2025 Divyam.ai
 # SPDX-License-Identifier: Apache-2.0
 
-from dataclasses import dataclass, asdict
-from typing import Dict, Optional, Any, AsyncGenerator
+from collections.abc import AsyncGenerator
+from dataclasses import asdict, dataclass
+from typing import Any, Optional
 
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
 
@@ -18,7 +19,7 @@ class Model:
     version: Optional[str] = None
     provider: Optional[str] = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "api_type": self.api_type.value,  # export enum as string
@@ -27,7 +28,7 @@ class Model:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "Model":
+    def from_dict(cls, data: dict[str, Any]) -> "Model":
         api_raw = data.get("api_type")
 
         # allow string or enum
@@ -52,10 +53,10 @@ class ChatRequest:
     A data class that represents a request to the chat API.
     """
 
-    body: Dict[str, Any]
-    headers: Optional[Dict[str, str]] = None
-    query_parameters: Optional[Dict[str, str]] = None
-    path_parameters: Optional[Dict[str, str]] = None
+    body: dict[str, Any]
+    headers: Optional[dict[str, str]] = None
+    query_parameters: Optional[dict[str, str]] = None
+    path_parameters: Optional[dict[str, str]] = None
 
 
 @dataclass
@@ -64,15 +65,15 @@ class ChatResponse:
     A data class that represents a response for chat API.
     """
 
-    body: Dict[str, Any]
-    headers: Optional[Dict[str, str]] = None
+    body: dict[str, Any]
+    headers: Optional[dict[str, str]] = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert the ChatResponse instance to a dictionary."""
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ChatResponse":
+    def from_dict(cls, data: dict[str, Any]) -> "ChatResponse":
         """Create a ChatResponse instance from a dictionary."""
         return cls(body=data.get("body", {}), headers=data.get("headers"))
 
@@ -83,5 +84,5 @@ class ChatResponseStreaming:
     A data class that represents a streaming response for chat API.
     """
 
-    stream: AsyncGenerator[Dict[str, Any], None]
-    headers: Optional[Dict[str, str]] = None
+    stream: AsyncGenerator[dict[str, Any], None]
+    headers: Optional[dict[str, str]] = None

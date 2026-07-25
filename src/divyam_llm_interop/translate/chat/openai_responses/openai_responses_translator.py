@@ -1,7 +1,7 @@
 # Copyright 2025 Divyam.ai
 # SPDX-License-Identifier: Apache-2.0
 
-from typing import List
+from typing import ClassVar
 
 from typing_extensions import override
 
@@ -36,18 +36,18 @@ from divyam_llm_interop.translate.chat.openai_responses.response.responses_to_co
     ResponsesToCompletionsStreamConverter,
 )
 from divyam_llm_interop.translate.chat.types import (
-    Model,
     ChatRequest,
     ChatResponse,
     ChatResponseStreaming,
+    Model,
 )
 from divyam_llm_interop.translate.chat.unified.unified_request import (
     UnifiedChatCompletionsRequest,
 )
 from divyam_llm_interop.translate.chat.unified.unified_response import (
     UnifiedChatCompletionsResponse,
-    UnifiedChatResponseStreaming,
     UnifiedChatCompletionsStreamChunk,
+    UnifiedChatResponseStreaming,
 )
 
 
@@ -56,7 +56,7 @@ class OpenAiResponsesTranslator(Translator):
 
     # TODO: Assumes parameters are not compatible.
     #  Identify models that are compatible.
-    compatible_prefixes = []
+    compatible_prefixes: ClassVar[list[str]] = []
 
     def __init__(self, model_registry: ModelRegistry):
         super().__init__(model_registry)
@@ -71,7 +71,7 @@ class OpenAiResponsesTranslator(Translator):
         ]
 
     @override
-    def models(self) -> List[Model]:
+    def models(self) -> list[Model]:
         return self._models
 
     @override
@@ -129,13 +129,8 @@ class OpenAiResponsesTranslator(Translator):
 
     @override
     def are_responses_compatible(self, source: Model, target: Model) -> bool:
-        if (
-            source.api_type == target.api_type
-            and source.api_type == ModelApiType.RESPONSES
-        ):
-            # The responses seem to require no translation across models.
-            return True
-        return False
+        # The responses seem to require no translation across models.
+        return source.api_type == target.api_type
 
     @override
     def response_to_unified(

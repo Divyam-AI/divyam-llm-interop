@@ -3,8 +3,9 @@
 
 import time
 import uuid
+from collections.abc import AsyncGenerator
 from copy import deepcopy
-from typing import Dict, Any, Optional, AsyncGenerator, List
+from typing import Any, Optional
 
 from divyam_llm_interop.interop_logging import logger
 
@@ -12,19 +13,19 @@ from divyam_llm_interop.interop_logging import logger
 class CompletionsToResponsesStreamConverter:
     async def convert(
         self,
-        completion_stream: AsyncGenerator[Dict[str, Any], None],
+        completion_stream: AsyncGenerator[dict[str, Any], None],
         model_name: str,
         instructions: Optional[str] = None,
-        tools: Optional[List[Dict[str, Any]]] = None,
-    ) -> AsyncGenerator[Dict[str, Any], None]:
+        tools: Optional[list[dict[str, Any]]] = None,
+    ) -> AsyncGenerator[dict[str, Any], None]:
         response_id = f"resp_{uuid.uuid4().hex}"
         sequence_number = 0
         output_index = 0
         timestamp = time.time()
         message_id = ""
         is_first_chunk = True
-        tool_calls_buffer: Dict[int, Dict[str, Any]] = {}
-        accumulated_content: List[Dict[str, Any]] = []
+        tool_calls_buffer: dict[int, dict[str, Any]] = {}
+        accumulated_content: list[dict[str, Any]] = []
 
         has_text_delta = False
 
@@ -273,10 +274,10 @@ class CompletionsToResponsesStreamConverter:
 
     def process_content_delta(
         self,
-        content_delta: Dict[str, Any],
-        accumulated_content: List[Dict[str, Any]],
+        content_delta: dict[str, Any],
+        accumulated_content: list[dict[str, Any]],
         message_id: str,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> Optional[dict[str, Any]]:
         """Convert a single delta piece into structured accumulator entry and stream delta."""
         ctype = content_delta.get("type")
 

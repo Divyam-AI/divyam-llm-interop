@@ -3,7 +3,8 @@
 
 import time
 import uuid
-from typing import AsyncGenerator, Dict, Any
+from collections.abc import AsyncGenerator
+from typing import Any
 
 from divyam_llm_interop.interop_logging import logger
 
@@ -44,8 +45,8 @@ class ResponsesToCompletionsStreamConverter:
         }
 
     async def convert(
-        self, responses_stream: AsyncGenerator[Dict[str, Any], None]
-    ) -> AsyncGenerator[Dict[str, Any], None]:
+        self, responses_stream: AsyncGenerator[dict[str, Any], None]
+    ) -> AsyncGenerator[dict[str, Any], None]:
         """Main generator that performs the conversion."""
         try:
             async for event in responses_stream:
@@ -130,11 +131,10 @@ class ResponsesToCompletionsStreamConverter:
                         yield chunk
 
                 # response.output_text.done: Text complete (no chunk needed)
-                elif event_type == "response.output_text.done":
-                    continue
-
-                # response.function_call_arguments.done: Args complete (no chunk)
-                elif event_type == "response.function_call_arguments.done":
+                elif (
+                    event_type == "response.output_text.done"
+                    or event_type == "response.function_call_arguments.done"
+                ):
                     continue
 
                 # response.done: Final chunk with finish_reason
@@ -203,7 +203,7 @@ class ResponsesToCompletionsStreamConverter:
                     yield chunk
 
                     # Optionally raise exception
-                    raise Exception(f"Responses API Error: {error_message}")
+                    raise RuntimeError(f"Responses API Error: {error_message}")
 
                 # response.cancelled: Treat as stopped
                 elif event_type == "response.cancelled":
@@ -213,8 +213,8 @@ class ResponsesToCompletionsStreamConverter:
                     yield chunk
                     break
 
-        except Exception as e:
-            error_message = f"Stream conversion error: {str(e)}"
+        except (RuntimeError, KeyError, ValueError, TypeError) as e:
+            error_message = f"Stream conversion error: {e!s}"
             logger.warning(f"ERROR: {error_message}")
 
             # Yield final error chunk

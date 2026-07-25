@@ -1,9 +1,8 @@
 # Copyright 2025 Divyam.ai
 # SPDX-License-Identifier: Apache-2.0
 
-from typing import List
-from importlib import resources
 import logging
+from importlib import resources
 
 import yaml
 
@@ -17,8 +16,8 @@ logger = logging.getLogger(__name__)
 class ModelCatalogLoader:
     MODEL_PATH = "divyam_llm_interop.config.translate.chat.models"
 
-    def load_models(self) -> List[ModelCatalogEntry]:
-        models: List[ModelCatalogEntry] = []
+    def load_models(self) -> list[ModelCatalogEntry]:
+        models: list[ModelCatalogEntry] = []
         models_dir = resources.files(self.MODEL_PATH)
         for entry in models_dir.iterdir():
             if entry.is_file() and entry.name.endswith(".yaml"):

@@ -39,23 +39,43 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: actions/setup-python@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
         with:
-          python-version: "3.11"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
 
-      - uses: snok/install-poetry@v1
-        with:
-          version: latest
+      - name: Set up Python
+        run: uv python install 3.11
 
       - name: Resolve publishable version
         id: resolve_version
         run: |
           set -euo pipefail
 
-          PACKAGE_NAME=$(grep -E '^name = ' pyproject.toml | sed -E 's/name = "(.*)"/\1/')
+          # --- helpers ---
+          get_version() {
+            grep -E '^version = ' pyproject.toml | head -1 | sed -E 's/version = "(.*)"/\1/'
+          }
+
+          set_version() {
+            sed -i -E "s/^version = \".*\"/version = \"$1\"/" pyproject.toml
+          }
+
+          bump_patch() {
+            local ver
+            ver=$(get_version)
+            local major minor patch
+            IFS='.' read -r major minor patch <<< "$ver"
+            patch=$((patch + 1))
+            set_version "${major}.${minor}.${patch}"
+          }
+
+          # --- resolve target version ---
+          PACKAGE_NAME=$(grep -E '^name = ' pyproject.toml | head -1 | sed -E 's/name = "(.*)"/\1/')
 
           if [ "${{ github.event_name }}" = "push" ] && [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            poetry version "${GITHUB_REF#refs/tags/v}"
+            set_version "${GITHUB_REF#refs/tags/v}"
             PYPI_BASE="https://pypi.org/pypi"
           elif [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.test-pypi }}" = "true" ]; then
             PYPI_BASE="https://test.pypi.org/pypi"
@@ -66,7 +86,7 @@ jobs:
           MAX_ATTEMPTS=50
           attempt=0
           while [ "$attempt" -lt "$MAX_ATTEMPTS" ]; do
-            VERSION=$(grep -E '^version = ' pyproject.toml | sed -E 's/version = "(.*)"/\1/')
+            VERSION=$(get_version)
             HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${PYPI_BASE}/${PACKAGE_NAME}/${VERSION}/json")
             if [ "$HTTP_CODE" = "404" ]; then
               echo "Version ${VERSION} is not published on ${PYPI_BASE}"
@@ -74,7 +94,7 @@ jobs:
             fi
             if [ "$HTTP_CODE" = "200" ]; then
               echo "Version ${VERSION} already published; bumping patch"
-              poetry version patch
+              bump_patch
               attempt=$((attempt + 1))
               continue
             fi
@@ -89,7 +109,7 @@ jobs:
 
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "PUBLISH_VERSION=${VERSION}" >> "$GITHUB_ENV"
-          grep -E '^version = ' pyproject.toml
+          echo "Publishing version: ${VERSION}"
 
       - name: Commit version bump to main
         if: >
@@ -106,7 +126,7 @@ jobs:
           git fetch origin main
           git checkout main
 
-          poetry version "${RESOLVED_VERSION}"
+          sed -i -E "s/^version = \".*\"/version = \"${RESOLVED_VERSION}\"/" pyproject.toml
           git add pyproject.toml
 
           if git diff --staged --quiet; then
@@ -117,10 +137,10 @@ jobs:
           fi
 
       - name: Build distribution
-        run: poetry build
+        run: uv build
 
       - name: Install Twine
-        run: pip install twine
+        run: uv pip install twine --system
 
       - name: Validate distributions
         run: twine check dist/*

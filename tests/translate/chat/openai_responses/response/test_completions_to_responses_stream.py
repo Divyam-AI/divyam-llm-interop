@@ -11,8 +11,8 @@ from divyam_llm_interop.translate.chat.openai_responses.response.completions_to_
     CompletionsToResponsesStreamConverter,
 )
 from tests.translate.translation_testing_utils import (
-    set_values_recursively,
     list_input_json_files,
+    set_values_recursively,
 )
 
 
@@ -45,7 +45,7 @@ async def test_basic_text_streaming():
     assert "".join(d["delta"] for d in deltas) == "Hello world!"
 
     # Check final done event
-    done_event = [e for e in events if e["type"] == "response.completed"][0]
+    done_event = next(e for e in events if e["type"] == "response.completed")
     assert done_event["response"]["status"] == "completed"
     assert done_event["response"]["usage"]["input_tokens"] == 10
     assert done_event["response"]["usage"]["output_tokens"] == 5
@@ -122,7 +122,7 @@ async def test_finish_reason_length_and_incomplete():
     converter = CompletionsToResponsesStreamConverter()
     events = [e async for e in converter.convert(gen(), model_name="gpt-4o")]
 
-    done_event = [e for e in events if e["type"] == "response.completed"][0]
+    done_event = next(e for e in events if e["type"] == "response.completed")
     assert done_event["response"]["status"] == "incomplete"
     assert done_event["response"]["incomplete_details"]["reason"] == "max_output_tokens"
 
@@ -148,7 +148,7 @@ async def test_completions_to_responses_stream_curated_responses():
         completions = test_case["completions"]
         expected = test_case["responses"]
 
-        async def gen():
+        async def gen(completions=completions):
             for chunk in completions:
                 await asyncio.sleep(0)
                 yield chunk

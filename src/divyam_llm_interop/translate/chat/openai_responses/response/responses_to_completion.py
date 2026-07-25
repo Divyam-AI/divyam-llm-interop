@@ -3,7 +3,7 @@
 
 import time
 import uuid
-from typing import Dict, Any
+from typing import Any
 
 from divyam_llm_interop.translate.chat.base.translation_utils import (
     drop_null_values_top_level,
@@ -11,8 +11,8 @@ from divyam_llm_interop.translate.chat.base.translation_utils import (
 
 
 def convert_responses_to_completions_response(
-    response_dict: Dict[str, Any],
-) -> Dict[str, Any]:
+    response_dict: dict[str, Any],
+) -> dict[str, Any]:
     """
     Converts a non-streaming Responses API response to a Chat Completions API response,
     properly handling messages, tool calls, function call outputs, and reasoning sections.
@@ -118,7 +118,7 @@ def convert_responses_to_completions_response(
 
     # Usage
     if usage:
-        comp_usage: Dict[str, Any] = {
+        comp_usage: dict[str, Any] = {
             "prompt_tokens": usage.get("input_tokens", 0),
             "completion_tokens": usage.get("output_tokens", 0),
             "total_tokens": usage.get("total_tokens", 0),
@@ -134,7 +134,7 @@ def convert_responses_to_completions_response(
         # Map output_tokens_details -> completion_tokens_details
         out_details = usage.get("output_tokens_details")
         if isinstance(out_details, dict):
-            completion_details: Dict[str, Any] = {}
+            completion_details: dict[str, Any] = {}
             if "reasoning_tokens" in out_details:
                 completion_details["reasoning_tokens"] = out_details["reasoning_tokens"]
             if "tool_output_tokens" in out_details:

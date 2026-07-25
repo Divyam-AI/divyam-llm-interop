@@ -1,7 +1,7 @@
 # Copyright 2025 Divyam.ai
 # SPDX-License-Identifier: Apache-2.0
 
-from typing import Optional, List, Any
+from typing import Any, Optional
 
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
 from divyam_llm_interop.translate.chat.base.translation_utils import (
@@ -16,8 +16,8 @@ from divyam_llm_interop.translate.chat.model_config.model_registry import (
 )
 from divyam_llm_interop.translate.chat.types import ChatRequest, Model
 from divyam_llm_interop.translate.chat.unified.unified_request import (
-    UnifiedChatCompletionsRequestBody,
     UnifiedChatCompletionsRequest,
+    UnifiedChatCompletionsRequestBody,
     UnifiedFunction,
     UnifiedTool,
 )
@@ -97,19 +97,19 @@ class UnifiedToCompletionsTranslator:
         )
 
     def _translate_functions(
-        self, functions: Optional[List[UnifiedFunction]]
-    ) -> Optional[List[UnifiedFunction]]:
+        self, functions: Optional[list[UnifiedFunction]]
+    ) -> Optional[list[UnifiedFunction]]:
         if not functions:
             return None
         return [self._translate_function(function) for function in functions]
 
     def _translate_tools(
-        self, tools: Optional[List[UnifiedTool]]
-    ) -> Optional[List[UnifiedTool]]:
+        self, tools: Optional[list[UnifiedTool]]
+    ) -> Optional[list[UnifiedTool]]:
         if not tools:
             return None
 
-        translated: List[UnifiedTool] = []
+        translated: list[UnifiedTool] = []
         for tool in tools:
             translate_tool = UnifiedTool(
                 type=tool.type, function=self._translate_function(tool.function)
@@ -143,7 +143,7 @@ class UnifiedToCompletionsTranslator:
                 schema.properties[sub_schema_name] = self._translate_schema(sub_schema)
 
         if schema.items:
-            if isinstance(schema.items, List):
+            if isinstance(schema.items, list):
                 schema.items = [
                     self._translate_schema(schema) for schema in schema.items if schema
                 ]
@@ -155,7 +155,7 @@ class UnifiedToCompletionsTranslator:
 
         return schema
 
-    def _translate_schema_list(self, schemas: Optional[List[JSONSchema]]):
+    def _translate_schema_list(self, schemas: Optional[list[JSONSchema]]):
         if not schemas:
             return schemas
 

@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from dataclasses import dataclass, field, fields
-from typing import Union, List, Dict, Optional, Any
+from typing import Any, Optional, Union
 
-JSONTypeName = Union[str, List[str]]
+JSONTypeName = Union[str, list[str]]
 
 
 @dataclass
@@ -18,16 +18,16 @@ class JSONSchema:
 
     # Type system
     type: Optional[JSONTypeName] = None
-    enum: Optional[List[Any]] = None
+    enum: Optional[list[Any]] = None
     const: Optional[Any] = None
 
     # Object validation
-    properties: Optional[Dict[str, "JSONSchema"]] = None
-    required: Optional[List[str]] = None
+    properties: Optional[dict[str, "JSONSchema"]] = None
+    required: Optional[list[str]] = None
     additionalProperties: Optional[Union[bool, "JSONSchema"]] = None
 
     # Array validation
-    items: Optional[Union["JSONSchema", List["JSONSchema"]]] = None
+    items: Optional[Union["JSONSchema", list["JSONSchema"]]] = None
     minItems: Optional[int] = None
     maxItems: Optional[int] = None
     uniqueItems: Optional[bool] = None
@@ -46,7 +46,7 @@ class JSONSchema:
     multipleOf: Optional[float] = None
 
     # Composition
-    anyOf: Optional[List["JSONSchema"]] = None
+    anyOf: Optional[list["JSONSchema"]] = None
 
     # Probably not relevant for translation so pass the following as is.
     # allOf: Optional[List["JSONSchema"]] = None
@@ -57,7 +57,7 @@ class JSONSchema:
     nullable: Optional[bool] = None
 
     # Catch-all for unrecognized fields
-    unknowns: Dict[str, Any] = field(default_factory=dict, repr=False)
+    unknowns: dict[str, Any] = field(default_factory=dict, repr=False)
 
     def to_dict(self) -> dict:
         """Convert JSONSchema object into a JSON-serializable dictionary."""

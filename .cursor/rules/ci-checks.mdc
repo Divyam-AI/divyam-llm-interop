@@ -1,22 +1,19 @@
 ---
-description: Run repo CI checks before finishing Python changes
-globs: "**/*.py"
-alwaysApply: false
+name: verify-before-commit
+description: >-
+  Run divyam-llm-interop lint, typecheck, and tests matching GitHub CI before
+  commits or PRs. Use when editing Python in this repo or before git commit.
 ---
 
-# CI checks for Python changes
+# Verify before commit
 
-Canonical instructions: [AGENTS.md](../../AGENTS.md).
+**Canonical source:** [AGENTS.md](../../../AGENTS.md).
 
-Before marking Python work complete, run from the repository root:
+From the repository root, after Python edits, run:
 
 ```bash
-poetry run ruff check .
-poetry run ruff format --check .
-poetry run pyright .
-poetry run pytest
+./scripts/lint.sh
+./scripts/test.sh
 ```
 
-Fix all failures before committing. This matches `.github/workflows/lint.yml` and `test.yml`.
-
-For quick fixes: `poetry run ruff format .` and `poetry run ruff check --fix .`, then re-run the checks above.
+Do not commit until these pass. Do not duplicate commands in this skill; update `AGENTS.md` if CI changes.
