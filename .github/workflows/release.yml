@@ -138,18 +138,19 @@ jobs:
           (github.event_name == 'workflow_dispatch' && inputs.test-pypi == false)
         run: |
           set -euo pipefail
-
+          
           RESOLVED_VERSION="${{ steps.resolve_version.outputs.version }}"
-
+          
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
+          
+          git stash
           git fetch origin main
           git checkout main
-
+          
           sed -i -E "s/^version = \".*\"/version = \"${RESOLVED_VERSION}\"/" pyproject.toml
           git add pyproject.toml
-
+          
           if git diff --staged --quiet; then
             echo "main already at version ${RESOLVED_VERSION}"
           else
