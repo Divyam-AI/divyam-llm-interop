@@ -56,6 +56,18 @@ class Translator(ABC):
         """Indicate whether the chat responses the compatible for source and
         target, so that they can be short-circuited without translation."""
 
+    def are_streaming_responses_compatible(self, source: Model, target: Model) -> bool:
+        """Indicate whether streaming responses are compatible for source and
+        target, so that they can be short-circuited without translation.
+
+        Defaults to ``are_responses_compatible``.  Override when streaming
+        chunks are known to be in canonical wire format even though
+        non-streaming bodies may need normalisation (e.g. Gemini REST
+        streams are camelCase, but SDK ``model_dump()`` bodies are
+        snake_case).
+        """
+        return self.are_responses_compatible(source, target)
+
     @abstractmethod
     def response_to_unified(
         self, chat_response: ChatResponse, source: Model

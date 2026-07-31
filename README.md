@@ -1,9 +1,9 @@
 # Divyam LLM Interop
 
-A minimal, provider‑agnostic library for interoperable AI model requests
-and responses. Divyam LLM Interop provides a unified interface for
-interacting with models across providers while maintaining consistent request
-and response semantics.
+A minimal, provider‑agnostic library for interoperable AI model requests and
+responses. Divyam LLM Interop provides a unified interface for interacting with
+models across providers while maintaining consistent request and response
+semantics.
 
 ## Installation
 
@@ -16,13 +16,17 @@ See [PyPI](https://pypi.org/project/divyam-llm-interop/)
 
 ## Usage
 
-The primary API for text based chat request and response conversion is [ChatTranslator](./src/divyam_llm_interop/translate/chat/translate.py). 
+The primary API for text based chat request and response conversion
+is [ChatTranslator](./src/divyam_llm_interop/translate/chat/translate.py).
 
 ### Translate a chat request
+
 ```python
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
 from divyam_llm_interop.translate.chat.translate import ChatTranslator
-from divyam_llm_interop.translate.chat.types import ChatRequest, ChatResponse, Model
+from divyam_llm_interop.translate.chat.types import ChatRequest, ChatResponse,
+
+Model
 
 # Translate gemini-1.5-pro Chat Completions API request to a gpt-4.1
 # Responses API request
@@ -54,6 +58,7 @@ translated = translator.translate_request(chat_request, source, target)
 ```
 
 ### Translate chat response
+
 ```python
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
 from divyam_llm_interop.translate.chat.translate import ChatTranslator
@@ -92,18 +97,22 @@ translated = translator.translate_response(chat_response, source, target)
 
 ## Model Name Resolution and Fallback
 
-When a request model name is resolved against the catalog, matching happens in this order:
+When a request model name is resolved against the catalog, matching happens in
+this order:
 
-1. Exact normalized name match (`provider/model-name` and case differences are normalized).
+1. Exact normalized name match (`provider/model-name` and case differences are
+   normalized).
 2. Explicit catalog override via `name_match.regex` in model YAML.
 3. Generic best-effort fallback in code:
-   - strips punctuation (`-`, `_`, `.`) for comparison,
-   - matches runtime names that extend a known catalog name's canonical form (longest match wins).
+    - strips punctuation (`-`, `_`, `.`) for comparison,
+    - matches runtime names that extend a known catalog name's canonical form
+      (longest match wins).
 
-Runtime names that include `-instruct` in the segment you care about (for example
+Runtime names that include `-instruct` in the segment you care about (for
+example
 `llama-3.2-3b-instruct-ft-v1`) align with the `*-instruct` catalog entry; a name
-like `llama-3.2-3b-experiment_2026` aligns with the non-instruct base if both exist.
-Use `name_match.regex` if you need a different mapping.
+like `llama-3.2-3b-experiment_2026` aligns with the non-instruct base if both
+exist. Use `name_match.regex` if you need a different mapping.
 
 This means fine-tuned/runtime names like `gemini-2.0-flash-001`,
 `llama-3.2-3b-instruct-ft-custom-v1`, or `qwen-3-8b-adapter_x` can resolve
@@ -121,8 +130,9 @@ Example:
 - name: mymodel-4b-instruct
 ```
 
-In most cases, this is enough because fallback matching handles runtime suffixes.
-Add `name_match.regex` only when you need an explicit override or a non-standard alias.
+In most cases, this is enough because fallback matching handles runtime
+suffixes. Add `name_match.regex` only when you need an explicit override or a
+non-standard alias.
 
 Example override:
 
@@ -134,15 +144,16 @@ Example override:
 ```
 
 Use override regex when:
+
 - naming does not share a stable base with catalog names,
 - multiple catalog names could match and you must force one,
 - you need provider-specific alias behavior.
 
 ## Development Environment Setup
 
-This project uses [uv](https://docs.astral.sh/uv/) to manage Python, the
-virtual environment, and all dependencies. You do not need to install Python
-or create a virtual environment manually — uv handles all of that.
+This project uses [uv](https://docs.astral.sh/uv/) to manage Python, the virtual
+environment, and all dependencies. You do not need to install Python or create a
+virtual environment manually — uv handles all of that.
 
 ### Quick start
 
@@ -150,8 +161,8 @@ or create a virtual environment manually — uv handles all of that.
 ./scripts/setup-dev.sh
 ```
 
-This will install uv (if not present), find or install a compatible Python
-(>=3.10), sync all dependency groups (dev, test, lint), and create a `.venv`
+This will install uv (if not present), find or install a compatible Python (>
+=3.10), sync all dependency groups (dev, test, lint), and create a `.venv`
 in the project root.
 
 To upgrade all dependencies and regenerate the lock file:
@@ -232,7 +243,41 @@ uv run ruff check --fix .
 uv run pyright .
 ```
 
+#### License Headers
+
+All `.py` files must include the project license header. The `insert-license`
+pre-commit hook checks this automatically on every commit. If a file is missing
+the header, you'll see an error like:
+
+```
+insert-license..............................................................Failed
+- hook id: insert-license
+- exit code: 1
+- files were modified by this hook
+
+Fixing file: src/divyam_llm_interop/new_module.py
+```
+
+The hook inserts the missing headers for you, but the commit is aborted so you
+can review the changes. To complete the commit:
+
+```shell
+git add -u
+git commit
+```
+
+To fix all files at once (outside of a commit):
+
+```shell
+pre-commit run insert-license --all-files
+git add -u
+```
+
+The expected header is defined in `LICENSE_HEADER.txt` at the repository root.
+
 ### Running Tests
+
+Unit tests (no API keys needed):
 
 ```shell
 ./scripts/test.sh
@@ -250,6 +295,36 @@ Or manually:
 uv run pytest
 uv run pytest --cov=src --cov-report=term-missing
 ```
+
+#### Integration Tests
+
+Integration tests make live API calls to OpenAI and Google Gemini, translate
+responses across all three API formats (Completions, Responses, Gemini), and
+validate the output. They are skipped automatically when API keys are not set.
+
+```shell
+# Run all integration tests (skips providers without keys)
+OPENAI_API_KEY=sk-... GEMINI_API_KEY=... ./scripts/test.sh --integration
+
+# Or via pytest directly
+OPENAI_API_KEY=sk-... pytest -m integration
+
+# Run a subset
+pytest -m integration -k Completions        # only completions source
+pytest -m integration -k Gemini             # only gemini source
+pytest -m integration -k streaming          # only streaming tests
+pytest -m integration -k tool_call          # only tool call tests
+```
+
+| Environment variable       | Default                                            | Description                       |
+|----------------------------|----------------------------------------------------|-----------------------------------|
+| `OPENAI_API_KEY`           | —                                                  | OpenAI API key                    |
+| `OPENAI_BASE_URL`          | `https://api.openai.com/v1`                        | Override for compatible endpoints |
+| `OPENAI_COMPLETIONS_MODEL` | `gpt-4.1-mini`                                     | Model for completions calls       |
+| `OPENAI_RESPONSES_MODEL`   | `gpt-4.1-mini`                                     | Model for responses calls         |
+| `GEMINI_API_KEY`           | —                                                  | Google AI Studio API key          |
+| `GEMINI_BASE_URL`          | `https://generativelanguage.googleapis.com/v1beta` | Override for Vertex               |
+| `GEMINI_MODEL`             | `gemini-2.5-flash`                                 | Model for Gemini calls            |
 
 ## Publishing to PyPI
 

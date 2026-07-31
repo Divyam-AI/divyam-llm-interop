@@ -15,8 +15,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        os: [ ubuntu-latest, macos-latest, windows-latest ]
+        python-version: [ "3.10", "3.11", "3.12", "3.13" ]
         exclude:
           - os: windows-latest
             python-version: "3.13"
@@ -43,8 +43,18 @@ jobs:
           echo "PYTHONIOENCODING=utf-8" >> $env:GITHUB_ENV
         shell: powershell
 
+      - name: Load integration env
+        run: |
+          echo "${{ secrets.INTEROP_INTEGRATION_TEST_ENV }}" >> $GITHUB_ENV
+        shell: bash
+
       - name: Run tests
-        run: ./scripts/test.sh --coverage
+        run: |
+          if [[ -n "$GEMINI_API_KEY" ]]; then
+            ./scripts/test.sh --coverage --all
+          else
+            ./scripts/test.sh --coverage
+          fi
         shell: bash
 
       - name: Upload coverage to Codecov

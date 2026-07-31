@@ -294,10 +294,20 @@ class GeminiTranslator(Translator):
 
     @override
     def are_responses_compatible(self, source: Model, target: Model) -> bool:
-        # Always run response_to_unified/response_from_unified so native Gemini fields
-        # (finishMessage, promptTokensDetails, serviceTier, etc.) are preserved.
+        # Non-streaming Gemini responses may arrive in snake_case
+        # (e.g. google-genai SDK model_dump) and need normalisation to
+        # canonical camelCase before returning to the client.
         _ = source, target
         return False
+
+    @override
+    def are_streaming_responses_compatible(self, source: Model, target: Model) -> bool:
+        # Streaming chunks come from the provider's REST API in canonical
+        # camelCase, so they can be passed through without normalisation.
+        return (
+            source.api_type == ModelApiType.GEMINI
+            and target.api_type == ModelApiType.GEMINI
+        )
 
     @override
     def response_to_unified(
@@ -438,8 +448,93 @@ class GeminiTranslator(Translator):
         self, from_response: UnifiedChatResponseStreaming, _: Model
     ) -> ChatResponseStreaming:
         async def gemini_stream():
+            # Buffer for incremental tool call deltas.
+            # key = (choice_index, tool_call_index), value = {name, arguments}
+            tc_buffer: dict[tuple[int, int], dict[str, str]] = {}
+
             async for unified_chunk in from_response.stream:
-                yield self._unified_stream_chunk_to_gemini_dict(unified_chunk)
+                # If there's a gemini_response_raw passthrough, emit as-is.
+                raw = unified_chunk.unknowns.get("gemini_response_raw")
+                if isinstance(raw, dict):
+                    yield GeminiTranslator._normalize_gemini_response_body(
+                        raw,
+                        response_id=unified_chunk.id,
+                        model_version=unified_chunk.model,
+                    )
+                    continue
+
+                candidates: list[dict[str, Any]] = []
+                for choice in unified_chunk.choices:
+                    parts: list[dict[str, Any]] = []
+
+                    # Text passes through immediately.
+                    if choice.delta.content:
+                        parts.append({"text": choice.delta.content})
+
+                    # Buffer incremental tool call deltas.
+                    if choice.delta.tool_calls:
+                        for tc in choice.delta.tool_calls:
+                            tc_idx = tc.unknowns.get("index", 0)
+                            key = (choice.index, tc_idx)
+                            if key not in tc_buffer:
+                                tc_buffer[key] = {"name": "", "arguments": ""}
+                            if tc.function.name:
+                                tc_buffer[key]["name"] = tc.function.name
+                            tc_buffer[key]["arguments"] += tc.function.arguments
+
+                    finish_reason = choice.unknowns.get("gemini_finish_reason")
+                    if not finish_reason and choice.finish_reason:
+                        finish_reason = GeminiTranslator._map_finish_reason_to_gemini(
+                            choice.finish_reason
+                        )
+
+                    # On finish_reason, flush all buffered tool calls as
+                    # complete functionCall parts.
+                    if finish_reason:
+                        for (_ci, _ti), buf in sorted(tc_buffer.items()):
+                            if _ci != choice.index:
+                                continue
+                            parts.append(
+                                {
+                                    "functionCall": {
+                                        "name": buf["name"],
+                                        "args": GeminiTranslator._safe_json_loads(
+                                            buf["arguments"]
+                                        ),
+                                    }
+                                }
+                            )
+
+                    candidate: dict[str, Any] = {"index": choice.index}
+                    if finish_reason:
+                        candidate["finishReason"] = finish_reason
+                    finish_message = choice.unknowns.get("gemini_finish_message")
+                    if finish_message is not None:
+                        candidate["finishMessage"] = finish_message
+                    if parts:
+                        candidate["content"] = {"role": "model", "parts": parts}
+                    candidates.append(candidate)
+
+                body: dict[str, Any] = {
+                    "responseId": unified_chunk.id,
+                    "modelVersion": unified_chunk.model,
+                }
+                if candidates:
+                    body["candidates"] = candidates
+                if unified_chunk.usage:
+                    body["usageMetadata"] = {
+                        "promptTokenCount": unified_chunk.usage.prompt_tokens,
+                        "candidatesTokenCount": unified_chunk.usage.completion_tokens,
+                        "totalTokenCount": unified_chunk.usage.total_tokens,
+                    }
+
+                # Only yield chunks that carry meaningful content — skip
+                # empty intermediate tool-call delta chunks.
+                has_content = any(
+                    "content" in c or "finishReason" in c for c in candidates
+                )
+                if has_content or unified_chunk.usage:
+                    yield body
 
         return ChatResponseStreaming(
             stream=gemini_stream(), headers=from_response.headers

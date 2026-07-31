@@ -4,8 +4,6 @@
 import json
 from pathlib import Path
 
-import pytest
-
 from divyam_llm_interop.translate.chat.jsonschema.types import JSONSchema
 from divyam_llm_interop.translate.chat.unified.unified_request import (
     UnifiedChatCompletionsRequestBody,
@@ -118,10 +116,10 @@ def test_function_call_requires_name():
     call = UnifiedFunctionCall.from_dict({"name": "get_weather", "arguments": "{}"})
     assert call.name == "get_weather"
 
-    # A malformed tool call without a name must be rejected rather than
-    # silently laundered into a function literally named "None".
-    with pytest.raises(ValueError):
-        UnifiedFunctionCall.from_dict({"arguments": "{}"})
+    # In streaming mode, incremental deltas may omit name.  The unified
+    # model now defaults to empty string instead of raising.
+    delta_call = UnifiedFunctionCall.from_dict({"arguments": "{}"})
+    assert delta_call.name == ""
 
-    with pytest.raises(ValueError):
-        UnifiedFunctionCall.from_dict({"name": None, "arguments": "{}"})
+    delta_call_none = UnifiedFunctionCall.from_dict({"name": None, "arguments": "{}"})
+    assert delta_call_none.name == ""

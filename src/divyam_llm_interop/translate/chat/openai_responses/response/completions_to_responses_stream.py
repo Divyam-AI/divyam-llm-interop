@@ -7,10 +7,21 @@ from collections.abc import AsyncGenerator
 from copy import deepcopy
 from typing import Any, Optional
 
-from divyam_llm_interop.interop_logging import logger
-
 
 class CompletionsToResponsesStreamConverter:
+    """
+    Converts a Chat Completions stream into an OpenAI Responses API event
+    stream.
+
+    Emits canonical event types per the OpenAI spec:
+      response.created
+      response.output_item.added  / response.output_item.done
+      response.content_part.added / response.content_part.done
+      response.output_text.delta  / response.output_text.done
+      response.function_call_arguments.delta / response.function_call_arguments.done
+      response.completed
+    """
+
     async def convert(
         self,
         completion_stream: AsyncGenerator[dict[str, Any], None],
@@ -19,17 +30,25 @@ class CompletionsToResponsesStreamConverter:
         tools: Optional[list[dict[str, Any]]] = None,
     ) -> AsyncGenerator[dict[str, Any], None]:
         response_id = f"resp_{uuid.uuid4().hex}"
-        sequence_number = 0
-        output_index = 0
+        seq = 0
         timestamp = time.time()
+
+        # State tracking
         message_id = ""
+        message_item: dict[str, Any] = {}
+        message_output_index = -1
         is_first_chunk = True
-        tool_calls_buffer: dict[int, dict[str, Any]] = {}
+        has_text_content = False
+        content_part_open = False
+        content_index = 0
+        accumulated_text = ""
         accumulated_content: list[dict[str, Any]] = []
 
-        has_text_delta = False
+        tool_calls_buffer: dict[int, dict[str, Any]] = {}
+        tool_output_indices: dict[int, int] = {}
+        next_output_index = 0
 
-        response_obj = {
+        response_obj: dict[str, Any] = {
             "id": response_id,
             "object": "response",
             "created_at": timestamp,
@@ -45,32 +64,33 @@ class CompletionsToResponsesStreamConverter:
             "usage": None,
             "error": None,
             "incomplete_details": None,
-            "tool_choice": "none",  # required always
+            "tool_choice": "none",
             "parallel_tool_calls": False,
         }
 
-        usage_data = None
+        usage_data: dict[str, Any] | None = None
+
+        def next_seq() -> int:
+            nonlocal seq
+            seq += 1
+            return seq
 
         async for chunk in completion_stream:
             choices = chunk.get("choices", [])
             if not choices:
+                if chunk.get("usage"):
+                    usage_data = self._map_usage(chunk["usage"])
                 continue
-
-            if len(choices) > 1:
-                logger.warning(
-                    "multiple choice responses - using the first and ignoring the rest"
-                )
 
             choice = choices[0]
             delta = choice.get("delta", {})
             finish_reason = choice.get("finish_reason")
 
-            # Emit setup events once
+            # --- Bootstrap ---
             if is_first_chunk:
-                sequence_number += 1
                 yield {
                     "type": "response.created",
-                    "sequence_number": sequence_number,
+                    "sequence_number": next_seq(),
                     "response": deepcopy(response_obj),
                 }
 
@@ -82,71 +102,71 @@ class CompletionsToResponsesStreamConverter:
                     "content": [],
                     "status": "in_progress",
                 }
-
                 response_obj["output"].append(message_item)
-                sequence_number += 1
-                output_index += 1
+                message_output_index = next_output_index
+                next_output_index += 1
+
                 yield {
                     "type": "response.output_item.added",
-                    "sequence_number": sequence_number,
-                    "item": message_item.copy(),
-                    "output_index": output_index,
+                    "sequence_number": next_seq(),
+                    "output_index": message_output_index,
+                    "item": deepcopy(message_item),
                 }
-
                 is_first_chunk = False
 
-            # Handle content deltas
+            # --- Content deltas ---
             content_delta = delta.get("content")
-            if content_delta:
-                has_text_delta = True
-                if isinstance(content_delta, list):
-                    for c in content_delta:
-                        event = self.process_content_delta(
-                            c, accumulated_content, message_id
-                        )
-                        if event:
-                            sequence_number += 1
-                            event["sequence_number"] = sequence_number
-                            event["output_index"] = output_index
-                            # TODO: figure logprobs out
-                            event["logprobs"] = []
-                            # TODO: figure content index
-                            event["content_index"] = len(accumulated_content) - 1
-                            yield event
-                elif isinstance(content_delta, dict):
-                    event = self.process_content_delta(
-                        content_delta, accumulated_content, message_id
-                    )
-                    if event:
-                        sequence_number += 1
-                        event["sequence_number"] = sequence_number
-                        yield event
-                else:
-                    # plain text fallback
-                    text_piece = str(content_delta)
-                    accumulated_content.append(
-                        {"type": "output_text", "text": text_piece, "annotations": []}
-                    )
-                    sequence_number += 1
+            if content_delta is not None:
+                text_piece = self._extract_text(content_delta)
+                if text_piece:
+                    if not content_part_open:
+                        yield {
+                            "type": "response.content_part.added",
+                            "sequence_number": next_seq(),
+                            "output_index": message_output_index,
+                            "content_index": content_index,
+                            "part": {"type": "output_text", "text": ""},
+                        }
+                        content_part_open = True
+                        has_text_content = True
+
+                    accumulated_text += text_piece
                     yield {
                         "type": "response.output_text.delta",
-                        "sequence_number": sequence_number,
+                        "sequence_number": next_seq(),
+                        "output_index": message_output_index,
+                        "content_index": content_index,
                         "delta": text_piece,
                         "item_id": message_id,
-                        "output_index": output_index,
-                        # TODO: figure logprobs out
-                        "logprobs": [],
-                        "content_index": len(accumulated_content) - 1,
                     }
 
-            # Handle tool call deltas
+            # --- Tool call deltas ---
             for tool_call_delta in delta.get("tool_calls", []):
-                index = tool_call_delta.get("index", 0)
+                tc_index = tool_call_delta.get("index", 0)
 
-                if index not in tool_calls_buffer:
+                # Close text content before opening tool call items
+                if content_part_open:
+                    for evt in self._make_close_text_events(
+                        message_id,
+                        message_output_index,
+                        content_index,
+                        accumulated_text,
+                        next_seq,
+                    ):
+                        yield evt
+                    accumulated_content.append(
+                        {
+                            "type": "output_text",
+                            "text": accumulated_text,
+                            "annotations": [],
+                        }
+                    )
+                    content_part_open = False
+
+                if tc_index not in tool_calls_buffer:
                     call_id = tool_call_delta.get("id", f"call_{uuid.uuid4().hex[:24]}")
                     func = tool_call_delta.get("function", {})
-                    tool_calls_buffer[index] = {
+                    tc_item = {
                         "id": f"fc_{uuid.uuid4().hex}",
                         "call_id": call_id,
                         "name": func.get("name", ""),
@@ -154,169 +174,170 @@ class CompletionsToResponsesStreamConverter:
                         "arguments": "",
                         "status": "in_progress",
                     }
+                    tool_calls_buffer[tc_index] = tc_item
+                    response_obj["output"].append(tc_item)
+                    tc_out_idx = next_output_index
+                    tool_output_indices[tc_index] = tc_out_idx
+                    next_output_index += 1
 
-                    response_obj["output"].append(tool_calls_buffer[index])
-                    sequence_number += 1
-                    output_index += 1
                     yield {
                         "type": "response.output_item.added",
-                        "sequence_number": sequence_number,
-                        "item": tool_calls_buffer[index].copy(),
-                        "output_index": output_index,
+                        "sequence_number": next_seq(),
+                        "output_index": tc_out_idx,
+                        "item": deepcopy(tc_item),
                     }
 
-                # Process argument deltas
                 args_delta = tool_call_delta.get("function", {}).get("arguments")
                 if args_delta:
-                    if "arguments" not in tool_calls_buffer[index]:
-                        tool_calls_buffer[index]["arguments"] = ""
-
-                    tool_calls_buffer[index]["arguments"] += args_delta
-                    sequence_number += 1
+                    tool_calls_buffer[tc_index]["arguments"] += args_delta
                     yield {
                         "type": "response.function_call_arguments.delta",
-                        "sequence_number": sequence_number,
+                        "sequence_number": next_seq(),
                         "delta": args_delta,
-                        "item_id": tool_calls_buffer[index]["id"],
-                        "call_id": tool_calls_buffer[index]["call_id"],
+                        "item_id": tool_calls_buffer[tc_index]["id"],
+                        "call_id": tool_calls_buffer[tc_index]["call_id"],
+                        "output_index": tool_output_indices[tc_index],
                     }
 
-            # Handle usage for final response only
+            # --- Usage ---
             if chunk.get("usage"):
-                usage = chunk["usage"]
-                usage_data = {
-                    "input_tokens": usage.get("prompt_tokens", 0),
-                    "output_tokens": usage.get("completion_tokens", 0),
-                    "total_tokens": usage.get("total_tokens", 0),
-                }
+                usage_data = self._map_usage(chunk["usage"])
 
-            # Handle finish_reason
+            # --- Finish ---
             if finish_reason:
-                # Finalize messages
-                for item in response_obj["output"]:
-                    if item["type"] == "message":
-                        item["content"] = accumulated_content
-                        item["status"] = "completed"
-                    elif item["type"] == "function_call":
-                        item["status"] = "completed"
+                # Close open text
+                if content_part_open:
+                    for evt in self._make_close_text_events(
+                        message_id,
+                        message_output_index,
+                        content_index,
+                        accumulated_text,
+                        next_seq,
+                    ):
+                        yield evt
+                    accumulated_content.append(
+                        {
+                            "type": "output_text",
+                            "text": accumulated_text,
+                            "annotations": [],
+                        }
+                    )
+                    content_part_open = False
 
-                # Emit output_text.done if any text delta
-                if has_text_delta:
-                    sequence_number += 1
-                    yield {
-                        "type": "response.output_text.done",
-                        "sequence_number": sequence_number,
-                        "item_id": message_id,
-                        "text": "".join(
-                            [
-                                c["text"]
-                                for c in accumulated_content
-                                if c.get("type") == "output_text"
-                            ]
-                        ),
-                        # TODO: validate output index as well.
-                        "output_index": output_index,
-                        # TODO: figure logprobs out
-                        "logprobs": [],
-                        # TODO: context_index seems incorrect. Figure.
-                        "content_index": len(accumulated_content) - 1,
-                    }
-                    sequence_number += 1
+                # Close message item
+                message_item["content"] = accumulated_content
+                message_item["status"] = "completed"
+                if has_text_content or not tool_calls_buffer:
                     yield {
                         "type": "response.output_item.done",
-                        "sequence_number": sequence_number,
-                        "output_index": output_index,
-                        # TODO: verify this.
-                        "item": message_item.copy() if message_item else {},
+                        "sequence_number": next_seq(),
+                        "output_index": message_output_index,
+                        "item": deepcopy(message_item),
                     }
-                    has_text_delta = False
 
-                # After all deltas for a call, emit done only if there were deltas
-                for tool_call in tool_calls_buffer.values():
-                    if "arguments" in tool_call:
-                        sequence_number += 1
-                        yield {
-                            "type": "response.function_call_arguments.done",
-                            "sequence_number": sequence_number,
-                            "item_id": tool_call["id"],
-                            "call_id": tool_call["call_id"],
-                            "arguments": tool_call["arguments"],
-                        }
+                # Close tool call items
+                for tc_idx in sorted(tool_calls_buffer):
+                    tc = tool_calls_buffer[tc_idx]
+                    tc["status"] = "completed"
+                    tc_out_idx = tool_output_indices[tc_idx]
 
-                    # Mark the output item completed
-                    sequence_number += 1
                     yield {
-                        "type": "response.output_item.completed",
-                        "sequence_number": sequence_number,
-                        "item_id": tool_call["id"],
+                        "type": "response.function_call_arguments.done",
+                        "sequence_number": next_seq(),
+                        "item_id": tc["id"],
+                        "call_id": tc["call_id"],
+                        "arguments": tc["arguments"],
+                        "output_index": tc_out_idx,
+                    }
+                    yield {
+                        "type": "response.output_item.done",
+                        "sequence_number": next_seq(),
+                        "output_index": tc_out_idx,
+                        "item": deepcopy(tc),
                     }
 
-                # Set response status
-                response_obj["status"] = (
-                    "completed" if finish_reason == "stop" else "incomplete"
-                )
-                if finish_reason == "length":
-                    response_obj["incomplete_details"] = {"reason": "max_output_tokens"}
-                elif finish_reason == "content_filter":
-                    response_obj["incomplete_details"] = {"reason": "content_filter"}
+                # Response status
+                if finish_reason in ("stop", "tool_calls"):
+                    response_obj["status"] = "completed"
+                else:
+                    response_obj["status"] = "incomplete"
+                    if finish_reason == "length":
+                        response_obj["incomplete_details"] = {
+                            "reason": "max_output_tokens"
+                        }
+                    elif finish_reason == "content_filter":
+                        response_obj["incomplete_details"] = {
+                            "reason": "content_filter"
+                        }
 
                 if usage_data:
                     response_obj["usage"] = usage_data
 
-                # Final response.done
-                sequence_number += 1
                 yield {
                     "type": "response.completed",
-                    "sequence_number": sequence_number,
+                    "sequence_number": next_seq(),
                     "response": deepcopy(response_obj),
                 }
                 break
 
-    def process_content_delta(
-        self,
-        content_delta: dict[str, Any],
-        accumulated_content: list[dict[str, Any]],
+    @staticmethod
+    def _make_close_text_events(
         message_id: str,
-    ) -> Optional[dict[str, Any]]:
-        """Convert a single delta piece into structured accumulator entry and stream delta."""
-        ctype = content_delta.get("type")
+        output_index: int,
+        content_index: int,
+        accumulated_text: str,
+        next_seq,
+    ) -> list[dict[str, Any]]:
+        """Return output_text.done + content_part.done events."""
+        return [
+            {
+                "type": "response.output_text.done",
+                "sequence_number": next_seq(),
+                "output_index": output_index,
+                "content_index": content_index,
+                "text": accumulated_text,
+                "item_id": message_id,
+            },
+            {
+                "type": "response.content_part.done",
+                "sequence_number": next_seq(),
+                "output_index": output_index,
+                "content_index": content_index,
+                "part": {"type": "output_text", "text": accumulated_text},
+            },
+        ]
 
-        if ctype == "text":
-            text_piece = content_delta.get("text", "")
-            accumulated_content.append(
-                {"type": "output_text", "text": text_piece, "annotations": []}
+    @staticmethod
+    def _extract_text(content_delta: Any) -> str:
+        if isinstance(content_delta, str):
+            return content_delta
+        if isinstance(content_delta, dict):
+            ctype = content_delta.get("type")
+            if ctype == "text":
+                return content_delta.get("text", "")
+            if ctype == "image_url":
+                url = content_delta.get("image_url", {}).get("url", "")
+                return f"[Image: {url}]" if url else "[Image]"
+            if ctype == "file":
+                return f"[File: {content_delta.get('filename', '<file>')}]"
+            return str(content_delta)
+        if isinstance(content_delta, list):
+            return "".join(
+                CompletionsToResponsesStreamConverter._extract_text(c)
+                for c in content_delta
             )
-            return {
-                "type": "response.output_text.delta",
-                "delta": text_piece,
-                "item_id": message_id,
-            }
+        return str(content_delta)
 
-        elif ctype == "image_url":
-            url = content_delta.get("image_url", {}).get("url", "")
-            accumulated_content.append({"type": "output_image", "image_url": url})
-            return {
-                "type": "response.output_text.delta",
-                "delta": f"[Image: {url}]" if url else "[Image]",
-                "item_id": message_id,
-            }
-
-        elif ctype == "file":
-            filename = content_delta.get("filename", "<file>")
-            accumulated_content.append({"type": "output_file", "filename": filename})
-            return {
-                "type": "response.output_text.delta",
-                "delta": f"[File: {filename}]",
-                "item_id": message_id,
-            }
-
-        # Fallback
-        text_piece = str(content_delta)
-        accumulated_content.append(
-            {"type": "output_text", "text": text_piece, "annotations": []}
-        )
-        return {
-            "type": "response.output_text.delta",
-            "delta": text_piece,
-            "item_id": message_id,
+    @staticmethod
+    def _map_usage(usage: dict[str, Any]) -> dict[str, Any]:
+        mapped: dict[str, Any] = {
+            "input_tokens": usage.get("prompt_tokens", 0),
+            "output_tokens": usage.get("completion_tokens", 0),
+            "total_tokens": usage.get("total_tokens", 0),
         }
+        output_details = usage.get("completion_tokens_details")
+        if output_details:
+            reasoning = output_details.get("reasoning_tokens", 0)
+            if reasoning and reasoning > 0:
+                mapped["output_tokens_details"] = {"reasoning_tokens": reasoning}
+        return mapped

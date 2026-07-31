@@ -30,14 +30,17 @@ class UnifiedFunctionCall:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "UnifiedFunctionCall":
-        """Create UnifiedFunctionCall from dictionary dynamically."""
+        """Create UnifiedFunctionCall from dictionary dynamically.
+
+        In streaming mode, incremental tool call deltas may carry only
+        ``arguments`` without a ``name`` (the name is sent only on the
+        first delta).  We allow an empty name here to support that.
+        """
         # Get all declared field names except `unknowns`
         declared_fields = {f.name for f in fields(cls) if f.name != "unknowns"}
         unknowns = {k: v for k, v in data.items() if k not in declared_fields}
 
-        name = data.get("name")
-        if not isinstance(name, str) or not name:
-            raise ValueError("UnifiedFunctionCall requires a non-empty 'name'")
+        name = data.get("name") or ""
 
         return cls(
             name=name,
@@ -72,16 +75,23 @@ class UnifiedToolCall:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "UnifiedToolCall":
-        """Create UnifiedToolCall from dictionary dynamically."""
-        init_kwargs = {}
-        for f in fields(cls):
-            if f.name not in data:
-                continue
-            if f.name == "function":
-                init_kwargs[f.name] = UnifiedFunctionCall.from_dict(data[f.name])
-            else:
-                init_kwargs[f.name] = data[f.name]
-        return cls(**init_kwargs)
+        """Create UnifiedToolCall from dictionary dynamically.
+
+        In streaming mode, incremental deltas may omit ``id`` and ``type``
+        (sent only on the first chunk).  We default both for tolerance.
+        """
+        func_data = data.get("function", {})
+        function = UnifiedFunctionCall.from_dict(func_data)
+        return cls(
+            id=data.get("id", ""),
+            function=function,
+            type=data.get("type", "function"),
+            unknowns={
+                k: v
+                for k, v in data.items()
+                if k not in {"id", "function", "type", "unknowns"}
+            },
+        )
 
 
 @dataclass

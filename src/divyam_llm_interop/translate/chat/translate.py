@@ -117,7 +117,7 @@ class ChatTranslator:
 
         if (
             source_translator == target_translator
-            and source_translator.are_responses_compatible(source, target)
+            and source_translator.are_streaming_responses_compatible(source, target)
         ):
             # Short circuit the responses since the models are compatible.
             return chat_response
