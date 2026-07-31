@@ -104,6 +104,3 @@ if $COVERAGE; then
     log_info "Coverage report: reports/coverage-html/index.html"
   fi
 fi
-
-
-echo $OPENAI_API_KEY

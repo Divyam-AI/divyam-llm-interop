@@ -44,7 +44,6 @@ jobs:
         shell: powershell
 
       - name: Load integration env
-        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
         run: |
           echo "${{ secrets.INTEROP_INTEGRATION_TEST_ENV }}" >> $GITHUB_ENV
         shell: bash
