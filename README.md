@@ -25,7 +25,8 @@ is [ChatTranslator](./src/divyam_llm_interop/translate/chat/translate.py).
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
 from divyam_llm_interop.translate.chat.translate import ChatTranslator
 from divyam_llm_interop.translate.chat.types import ChatRequest, ChatResponse,
-    Model
+
+Model
 
 # Translate gemini-1.5-pro Chat Completions API request to a gpt-4.1
 # Responses API request
@@ -241,6 +242,38 @@ uv run ruff check --fix .
 # Type check
 uv run pyright .
 ```
+
+#### License Headers
+
+All `.py` files must include the project license header. The `insert-license`
+pre-commit hook checks this automatically on every commit. If a file is missing
+the header, you'll see an error like:
+
+```
+insert-license..............................................................Failed
+- hook id: insert-license
+- exit code: 1
+- files were modified by this hook
+
+Fixing file: src/divyam_llm_interop/new_module.py
+```
+
+The hook inserts the missing headers for you, but the commit is aborted so you
+can review the changes. To complete the commit:
+
+```shell
+git add -u
+git commit
+```
+
+To fix all files at once (outside of a commit):
+
+```shell
+pre-commit run insert-license --all-files
+git add -u
+```
+
+The expected header is defined in `LICENSE_HEADER.txt` at the repository root.
 
 ### Running Tests
 
