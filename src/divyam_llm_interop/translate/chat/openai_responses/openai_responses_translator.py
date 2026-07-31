@@ -130,7 +130,10 @@ class OpenAiResponsesTranslator(Translator):
     @override
     def are_responses_compatible(self, source: Model, target: Model) -> bool:
         # The responses seem to require no translation across models.
-        return source.api_type == target.api_type
+        return (
+            source.api_type == target.api_type
+            and source.api_type == ModelApiType.RESPONSES
+        )
 
     @override
     def response_to_unified(

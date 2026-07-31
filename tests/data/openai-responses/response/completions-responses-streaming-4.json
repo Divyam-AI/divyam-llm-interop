@@ -104,7 +104,7 @@
       ]
     },
     {
-      "type": "response.output_item.completed",
+      "type": "response.output_item.done",
       "sequence_number": 5,
       "item_id": "msg_2"
     },
@@ -123,6 +123,13 @@
     {
       "type": "response.function_call_arguments.delta",
       "sequence_number": 7,
+      "delta": "5",
+      "item_id": "fc_1",
+      "call_id": "call_sum"
+    },
+    {
+      "type": "response.function_call_arguments.delta",
+      "sequence_number": 7,
       "delta": ",10",
       "item_id": "fc_1",
       "call_id": "call_sum"
@@ -135,12 +142,12 @@
       "arguments": "5,10"
     },
     {
-      "type": "response.output_item.completed",
+      "type": "response.output_item.done",
       "sequence_number": 9,
       "item_id": "fc_1"
     },
     {
-      "type": "response.done",
+      "type": "response.completed",
       "sequence_number": 10,
       "response": {
         "id": "resp_2",

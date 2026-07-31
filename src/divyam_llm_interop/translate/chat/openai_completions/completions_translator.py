@@ -99,7 +99,7 @@ class CompletionsTranslator(Translator):
         # The responses seem to require no translation across models.
         return (
             source.api_type == target.api_type
-            and source.api_type == ModelApiType.RESPONSES
+            and source.api_type == ModelApiType.COMPLETIONS
         )
 
     @override

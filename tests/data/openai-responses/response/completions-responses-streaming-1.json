@@ -98,12 +98,12 @@
       ]
     },
     {
-      "type": "response.output_item.completed",
+      "type": "response.output_item.done",
       "sequence_number": 7,
       "item_id": "msg_1"
     },
     {
-      "type": "response.done",
+      "type": "response.completed",
       "sequence_number": 8,
       "response": {
         "id": "resp_1",
