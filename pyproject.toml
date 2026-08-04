@@ -1,6 +1,6 @@
 [project]
 name = "divyam-llm-interop"
-version = "0.2.0"
+version = "0.2.1"
 description = "A lightweight, provider-neutral library for translating LLM requests and responses across model APIs."
 authors = [{ name = "DivyamAI Technologies Private Limited" }]
 license = { text = "Apache-2.0" }
