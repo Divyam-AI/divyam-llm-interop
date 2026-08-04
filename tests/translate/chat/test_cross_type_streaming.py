@@ -637,7 +637,7 @@ class TestGeminiToResponsesStreaming:
 # Round-trip helpers
 # ===================================================================
 
-from divyam_llm_interop.translate.chat.types import ChatResponse  # noqa: E402
+from divyam_llm_interop.translate.chat.types import ChatResponse
 
 
 @dataclass
