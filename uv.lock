@@ -166,7 +166,7 @@ wheels = [
 
 [[package]]
 name = "divyam-llm-interop"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "." }
 dependencies = [
     { name = "pyyaml" },

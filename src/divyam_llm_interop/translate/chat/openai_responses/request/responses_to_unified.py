@@ -36,14 +36,56 @@ def convert_responses_to_completions_request(
             # Simple string input
             messages.append({"role": "user", "content": input_data})
         elif isinstance(input_data, list):
+            pending_function_calls: list[dict[str, Any]] = []
+
+            def flush_function_calls() -> None:
+                if not pending_function_calls:
+                    return
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "tool_calls": list(pending_function_calls),
+                    }
+                )
+                pending_function_calls.clear()
+
             for item in input_data:
+                if item.get("type") == "function_call":
+                    pending_function_calls.append(
+                        {
+                            "id": item.get("call_id") or item.get("id"),
+                            "type": "function",
+                            "function": {
+                                "name": item.get("name"),
+                                "arguments": item.get("arguments") or "{}",
+                            },
+                        }
+                    )
+                    continue
+
+                flush_function_calls()
+
                 # handle function_call_output first
                 if item.get("type") == "function_call_output":
                     output = item.get("output")
                     content_parts: list[str] = []
+                    tool_result_is_error = False
 
                     if isinstance(output, str):
-                        content_parts.append(output)
+                        try:
+                            decoded_output = json.loads(output)
+                        except json.JSONDecodeError:
+                            decoded_output = None
+                        if isinstance(decoded_output, dict) and set(decoded_output) == {
+                            "error"
+                        }:
+                            error = decoded_output["error"]
+                            content_parts.append(
+                                error if isinstance(error, str) else json.dumps(error)
+                            )
+                            tool_result_is_error = True
+                        else:
+                            content_parts.append(output)
                     elif isinstance(output, list):
                         for part in output:
                             if isinstance(part, dict):
@@ -53,6 +95,8 @@ def convert_responses_to_completions_request(
                     msg = {
                         "role": "tool",
                         "tool_call_id": item.get("call_id"),
+                        "tool_name": item.get("name"),
+                        "tool_result_is_error": tool_result_is_error,
                         "content": "\n".join(content_parts) if content_parts else "",
                     }
                     messages.append(msg)
@@ -108,6 +152,7 @@ def convert_responses_to_completions_request(
                     msg["tool_call_id"] = item["tool_call_id"]
 
                 messages.append(msg)
+            flush_function_calls()
 
     completion_request["messages"] = messages
 

@@ -5,6 +5,14 @@ responses. Divyam LLM Interop provides a unified interface for interacting with
 models across providers while maintaining consistent request and response
 semantics.
 
+The chat interop layer supports Chat Completions, OpenAI Responses, native
+Gemini, and the text/client-tool subset of Anthropic Messages. It translates
+requests, non-streaming responses, and streaming events through a shared
+semantic representation. Images, documents, native provider tools, citations,
+reasoning blocks, prompt-cache controls, Realtime/Live, batch, and token-count
+APIs are outside the supported profile and fail closed rather than being
+silently flattened.
+
 ## Installation
 
 ```shell
@@ -24,9 +32,7 @@ is [ChatTranslator](./src/divyam_llm_interop/translate/chat/translate.py).
 ```python
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
 from divyam_llm_interop.translate.chat.translate import ChatTranslator
-from divyam_llm_interop.translate.chat.types import ChatRequest, ChatResponse,
-
-Model
+from divyam_llm_interop.translate.chat.types import ChatRequest, Model
 
 # Translate gemini-1.5-pro Chat Completions API request to a gpt-4.1
 # Responses API request
@@ -56,6 +62,33 @@ source = Model(name="gemini-1.5-pro", api_type=ModelApiType.COMPLETIONS)
 target = Model(name="gpt-4.1", api_type=ModelApiType.RESPONSES)
 translated = translator.translate_request(chat_request, source, target)
 ```
+
+Anthropic Messages and Chat Completions both use `messages`, so request-body
+heuristics cannot distinguish them safely. Callers must supply the ingress API
+type explicitly:
+
+```python
+source = translator.find_request_model(
+    model_name=request_body["model"],
+    request_body=request_body,
+    api_type=ModelApiType.ANTHROPIC_MESSAGES,
+)
+```
+
+Callers that omit `api_type` keep the existing detection behavior: a
+`messages` body is treated as Chat Completions. A model name containing
+`claude` never changes protocol detection.
+
+The supported profile fails closed when a destination cannot preserve a
+requested semantic. In particular, Anthropic `stop_sequences` can map to Chat
+Completions, Gemini, or Anthropic, but not to OpenAI Responses because Responses
+has no exact stop-sequence request control.
+
+Tool continuations targeting OpenAI Responses use separate top-level
+`function_call` and `function_call_output` input items for every source
+protocol. The existing
+`DIVYAM_RESPONSES_TRANSLATOR_FLATTEN_FUNCTION_OUTPUT=True` opt-in remains for
+vLLM versions that require the legacy flattened function-output workaround.
 
 ### Translate chat response
 

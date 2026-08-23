@@ -1,9 +1,14 @@
 # Copyright 2025 Divyam.ai
 # SPDX-License-Identifier: Apache-2.0
 
+import json
+
+from divyam_llm_interop.translate.chat.api_types import ModelApiType
 from divyam_llm_interop.translate.chat.openai_responses.request.unified_to_responses import (
     convert_completion_request_to_responses_request,
 )
+from divyam_llm_interop.translate.chat.translate import ChatTranslator
+from divyam_llm_interop.translate.chat.types import ChatRequest, Model
 
 
 def test_simple_text_request():
@@ -125,6 +130,223 @@ def test_multi_turn_conversation():
         == '{"temperature": 22, "condition": "sunny"}'
     )
     assert responses_req_conv["input"][2]["call_id"] == "call_abc123"
+
+
+def test_chat_translator_emits_official_responses_tool_history():
+    completion_request = {
+        "model": "gpt-4.1-mini",
+        "messages": [
+            {"role": "user", "content": "What's the weather in Paris?"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_weather",
+                        "type": "function",
+                        "function": {
+                            "name": "get_weather",
+                            "arguments": '{"city":"Paris"}',
+                        },
+                    }
+                ],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_weather",
+                "content": '{"temperature_c":22}',
+            },
+            {"role": "user", "content": "Summarize that."},
+        ],
+        "tools": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_weather",
+                    "description": "Get the weather",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"city": {"type": "string"}},
+                        "required": ["city"],
+                    },
+                },
+            }
+        ],
+        "tool_choice": {
+            "type": "function",
+            "function": {"name": "get_weather"},
+        },
+    }
+
+    translated = ChatTranslator().translate_request(
+        ChatRequest(body=completion_request),
+        Model("gpt-4.1-mini", ModelApiType.COMPLETIONS),
+        Model("gpt-4.1-mini", ModelApiType.RESPONSES),
+    )
+
+    assert translated.body["input"] == [
+        {
+            "role": "user",
+            "content": [{"type": "input_text", "text": "What's the weather in Paris?"}],
+        },
+        {
+            "type": "function_call",
+            "call_id": "call_weather",
+            "name": "get_weather",
+            "arguments": '{"city":"Paris"}',
+        },
+        {
+            "type": "function_call_output",
+            "call_id": "call_weather",
+            "output": '{"temperature_c":22}',
+        },
+        {
+            "role": "user",
+            "content": [{"type": "input_text", "text": "Summarize that."}],
+        },
+    ]
+    assert translated.body["tool_choice"] == {
+        "type": "function",
+        "name": "get_weather",
+    }
+
+
+def test_chat_translator_retains_explicit_vllm_tool_output_workaround(monkeypatch):
+    monkeypatch.setenv("DIVYAM_RESPONSES_TRANSLATOR_FLATTEN_FUNCTION_OUTPUT", "True")
+    completion_request = {
+        "model": "gpt-4.1-mini",
+        "messages": [
+            {"role": "user", "content": "Get the weather."},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_weather",
+                        "type": "function",
+                        "function": {
+                            "name": "get_weather",
+                            "arguments": "{}",
+                        },
+                    }
+                ],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_weather",
+                "content": "sunny",
+            },
+        ],
+    }
+
+    translated = ChatTranslator().translate_request(
+        ChatRequest(body=completion_request),
+        Model("gpt-4.1-mini", ModelApiType.COMPLETIONS),
+        Model("gpt-4.1-mini", ModelApiType.RESPONSES),
+    )
+
+    assert translated.body["input"][1]["tool_calls"][0]["id"] == "call_weather"
+    assert translated.body["input"][2] == {
+        "role": "assistant",
+        "content": [
+            {
+                "type": "input_text",
+                "text": "called function get_weather and got output sunny",
+            }
+        ],
+    }
+
+
+def test_gemini_tool_history_maps_to_official_responses_items():
+    gemini_request = {
+        "model": "gemini-2.5-pro",
+        "contents": [
+            {"role": "user", "parts": [{"text": "Get the weather."}]},
+            {
+                "role": "model",
+                "parts": [
+                    {
+                        "functionCall": {
+                            "id": "call_weather",
+                            "name": "get_weather",
+                            "args": {"city": "Paris"},
+                        }
+                    }
+                ],
+            },
+            {
+                "role": "user",
+                "parts": [
+                    {
+                        "functionResponse": {
+                            "id": "call_weather",
+                            "name": "get_weather",
+                            "response": {"temperature_c": 22},
+                        }
+                    }
+                ],
+            },
+            {"role": "user", "parts": [{"text": "Summarize that."}]},
+        ],
+    }
+
+    translated = ChatTranslator().translate_request(
+        ChatRequest(body=gemini_request),
+        Model("gemini-2.5-pro", ModelApiType.GEMINI),
+        Model("gpt-4.1-mini", ModelApiType.RESPONSES),
+    )
+
+    _assert_official_responses_tool_history(translated.body)
+
+
+def test_responses_tool_history_round_trip_uses_official_items():
+    responses_request = {
+        "model": "gpt-4.1-mini",
+        "input": [
+            {
+                "role": "user",
+                "content": [{"type": "input_text", "text": "Get the weather."}],
+            },
+            {
+                "type": "function_call",
+                "call_id": "call_weather",
+                "name": "get_weather",
+                "arguments": '{"city":"Paris"}',
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_weather",
+                "output": '{"temperature_c":22}',
+            },
+            {
+                "role": "user",
+                "content": [{"type": "input_text", "text": "Summarize that."}],
+            },
+        ],
+    }
+
+    translated = ChatTranslator().translate_request(
+        ChatRequest(body=responses_request),
+        Model("gpt-4.1-mini", ModelApiType.RESPONSES),
+        Model("gpt-4.1-mini", ModelApiType.RESPONSES),
+    )
+
+    _assert_official_responses_tool_history(translated.body)
+
+
+def _assert_official_responses_tool_history(body):
+    function_call = next(
+        item for item in body["input"] if item.get("type") == "function_call"
+    )
+    function_output = next(
+        item for item in body["input"] if item.get("type") == "function_call_output"
+    )
+    assert function_call["type"] == "function_call"
+    assert function_call["call_id"] == "call_weather"
+    assert function_call["name"] == "get_weather"
+    assert json.loads(function_call["arguments"]) == {"city": "Paris"}
+    assert function_output["call_id"] == "call_weather"
+    assert all("tool_calls" not in item for item in body["input"])
 
 
 def test_vision_request():

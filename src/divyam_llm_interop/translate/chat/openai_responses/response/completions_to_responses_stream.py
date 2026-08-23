@@ -69,6 +69,7 @@ class CompletionsToResponsesStreamConverter:
         }
 
         usage_data: dict[str, Any] | None = None
+        response_finished = False
 
         def next_seq() -> int:
             nonlocal seq
@@ -76,6 +77,11 @@ class CompletionsToResponsesStreamConverter:
             return seq
 
         async for chunk in completion_stream:
+            if response_finished:
+                if chunk.get("usage"):
+                    usage_data = self._map_usage(chunk["usage"])
+                continue
+
             choices = chunk.get("choices", [])
             if not choices:
                 if chunk.get("usage"):
@@ -123,6 +129,7 @@ class CompletionsToResponsesStreamConverter:
                         yield {
                             "type": "response.content_part.added",
                             "sequence_number": next_seq(),
+                            "item_id": message_id,
                             "output_index": message_output_index,
                             "content_index": content_index,
                             "part": {"type": "output_text", "text": ""},
@@ -270,15 +277,16 @@ class CompletionsToResponsesStreamConverter:
                             "reason": "content_filter"
                         }
 
-                if usage_data:
-                    response_obj["usage"] = usage_data
+                response_finished = True
 
-                yield {
-                    "type": "response.completed",
-                    "sequence_number": next_seq(),
-                    "response": deepcopy(response_obj),
-                }
-                break
+        if response_finished:
+            if usage_data:
+                response_obj["usage"] = usage_data
+            yield {
+                "type": "response.completed",
+                "sequence_number": next_seq(),
+                "response": deepcopy(response_obj),
+            }
 
     @staticmethod
     def _make_close_text_events(
@@ -301,6 +309,7 @@ class CompletionsToResponsesStreamConverter:
             {
                 "type": "response.content_part.done",
                 "sequence_number": next_seq(),
+                "item_id": message_id,
                 "output_index": output_index,
                 "content_index": content_index,
                 "part": {"type": "output_text", "text": accumulated_text},

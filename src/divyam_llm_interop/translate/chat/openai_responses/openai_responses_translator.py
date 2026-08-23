@@ -7,6 +7,7 @@ from typing_extensions import override
 
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
 from divyam_llm_interop.translate.chat.base import translation_utils
+from divyam_llm_interop.translate.chat.base.translation_utils import close_async_stream
 from divyam_llm_interop.translate.chat.base.translator import Translator
 from divyam_llm_interop.translate.chat.model_config.model_registry import (
     ModelRegistry,
@@ -34,6 +35,9 @@ from divyam_llm_interop.translate.chat.openai_responses.response.responses_to_co
 )
 from divyam_llm_interop.translate.chat.openai_responses.response.responses_to_completions_stream import (
     ResponsesToCompletionsStreamConverter,
+)
+from divyam_llm_interop.translate.chat.translation_errors import (
+    raise_for_internal_stream_error,
 )
 from divyam_llm_interop.translate.chat.types import (
     ChatRequest,
@@ -100,7 +104,8 @@ class OpenAiResponsesTranslator(Translator):
             from_request, target
         )
         responses_request_body = convert_completion_request_to_responses_request(
-            model_specific_completions_request.body
+            model_specific_completions_request.body,
+            official_tool_items=True,
         )
         target_capabilities = self._model_registry.get_capabilities(target)
 
@@ -165,8 +170,12 @@ class OpenAiResponsesTranslator(Translator):
         converted_stream = converter.convert(responses_stream=chat_response.stream)
 
         async def chunker():
-            async for response in converted_stream:
-                yield UnifiedChatCompletionsStreamChunk.from_dict(response)
+            try:
+                async for response in converted_stream:
+                    yield UnifiedChatCompletionsStreamChunk.from_dict(response)
+            finally:
+                await close_async_stream(converted_stream)
+                await close_async_stream(chat_response.stream)
 
         return UnifiedChatResponseStreaming(chunker(), chat_response.headers)
 
@@ -178,6 +187,7 @@ class OpenAiResponsesTranslator(Translator):
 
         async def chunker():
             async for response in from_response.stream:
+                raise_for_internal_stream_error(response)
                 yield response.to_dict()
 
         # TODO worry about instructions, tool arguments etc..
@@ -185,4 +195,12 @@ class OpenAiResponsesTranslator(Translator):
             completion_stream=chunker(), model_name=target.name
         )
 
-        return ChatResponseStreaming(converted_stream, from_response.headers)
+        async def closing_stream():
+            try:
+                async for event in converted_stream:
+                    yield event
+            finally:
+                await close_async_stream(converted_stream)
+                await close_async_stream(from_response.stream)
+
+        return ChatResponseStreaming(closing_stream(), from_response.headers)

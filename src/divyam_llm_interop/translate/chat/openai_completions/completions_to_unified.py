@@ -17,6 +17,7 @@ class CompletionsToUnifiedTranslator:
     ) -> UnifiedChatCompletionsRequest:
         # OpenAi is the base for unified. Return as is.
         unified = translation_utils.as_is_request_to_unified(chat_request)
+        unified.body.unknowns.pop("stream_options", None)
         CompletionsToUnifiedTranslator._decode_tool_result_envelopes(unified)
         return unified
 

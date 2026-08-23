@@ -120,3 +120,68 @@ async def test_function_call_response():
     # assert func["function"]["name"] == "get_weather"
     # assert '{"location": "Paris"}' in func["function"]["arguments"]
     # assert finish_reason == "stop"
+
+
+@pytest.mark.asyncio
+async def test_current_function_call_events_resolve_item_id_to_call_id():
+    events = [
+        {
+            "type": "response.created",
+            "sequence_number": 0,
+            "response": {"model": "gpt-4o"},
+        },
+        {
+            "type": "response.output_item.added",
+            "sequence_number": 1,
+            "output_index": 0,
+            "item": {
+                "type": "function_call",
+                "id": "fc_weather",
+                "call_id": "call_weather",
+                "name": "get_weather",
+                "arguments": "",
+            },
+        },
+        {
+            "type": "response.function_call_arguments.delta",
+            "sequence_number": 2,
+            "item_id": "fc_weather",
+            "output_index": 0,
+            "delta": '{"city":"Benga',
+        },
+        {
+            "type": "response.function_call_arguments.delta",
+            "sequence_number": 3,
+            "item_id": "fc_weather",
+            "output_index": 0,
+            "delta": 'luru"}',
+        },
+        {
+            "type": "response.completed",
+            "sequence_number": 4,
+            "response": {"status": "completed"},
+        },
+    ]
+
+    async def current_event_stream():
+        for event in events:
+            yield event
+
+    chunks = [
+        chunk
+        async for chunk in ResponsesToCompletionsStreamConverter("gpt-4o").convert(
+            current_event_stream()
+        )
+    ]
+    tool_deltas = [
+        tool
+        for chunk in chunks
+        for tool in chunk["choices"][0]["delta"].get("tool_calls", [])
+    ]
+
+    assert tool_deltas[0]["id"] == "call_weather"
+    assert (
+        "".join(tool.get("function", {}).get("arguments", "") for tool in tool_deltas)
+        == '{"city":"Bengaluru"}'
+    )
+    assert chunks[-1]["choices"][0]["finish_reason"] == "tool_calls"

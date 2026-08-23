@@ -13,6 +13,8 @@ from divyam_llm_interop.translate.chat.base.translation_utils import (
 
 def convert_completion_request_to_responses_request(
     completion_request: dict[str, Any],
+    *,
+    official_tool_items: bool = False,
 ) -> dict[str, Any]:
     # vLLM is missing passing function calls and hence failing to match
     # function call outputs. See https://github.com/vllm-project/vllm/pull/24158/files
@@ -20,6 +22,7 @@ def convert_completion_request_to_responses_request(
     flatten_function_call_output: bool = (
         os.getenv("DIVYAM_RESPONSES_TRANSLATOR_FLATTEN_FUNCTION_OUTPUT") == "True"
     )
+    use_official_tool_items = official_tool_items and not flatten_function_call_output
     model = completion_request.get("model")
     messages = completion_request.get("messages", [])
     temperature = completion_request.get("temperature")
@@ -176,6 +179,14 @@ def convert_completion_request_to_responses_request(
                     "status": tc.get("status"),
                 }
                 tc_list.append(tc_entry)
+            if use_official_tool_items:
+                _append_official_tool_history(
+                    input_items,
+                    message_item,
+                    tc_list,
+                    tool_call_results,
+                )
+                continue
             message_item["tool_calls"] = tc_list
             input_items.append(message_item)
 
@@ -272,7 +283,10 @@ def convert_completion_request_to_responses_request(
             responses_request["tools"] = converted_tools
 
     if tool_choice is not None:
-        responses_request["tool_choice"] = tool_choice
+        responses_request["tool_choice"] = _responses_tool_choice(
+            tool_choice,
+            official_tool_items=use_official_tool_items,
+        )
     if parallel_tool_calls is not None:
         responses_request["parallel_tool_calls"] = parallel_tool_calls
     if response_format is not None:
@@ -309,3 +323,56 @@ def convert_completion_request_to_responses_request(
         responses_request["metadata"] = metadata
 
     return drop_null_values_top_level(responses_request)
+
+
+def _append_official_tool_history(
+    input_items: list[dict[str, Any]],
+    message_item: dict[str, Any],
+    tool_calls: list[dict[str, Any]],
+    tool_call_results: dict[str, list[dict[str, Any]]],
+) -> None:
+    if message_item.get("content"):
+        input_items.append(message_item)
+
+    call_ids: set[str] = set()
+    for tool_call in tool_calls:
+        call_id = tool_call["id"]
+        call_ids.add(call_id)
+        input_items.append(
+            {
+                "type": "function_call",
+                "call_id": call_id,
+                "name": tool_call["name"],
+                "arguments": tool_call["arguments"] or "{}",
+            }
+        )
+
+    for call_id, output_parts in tool_call_results.items():
+        if call_id not in call_ids:
+            continue
+        input_items.append(
+            {
+                "type": "function_call_output",
+                "call_id": call_id,
+                "output": _tool_output_text(output_parts),
+            }
+        )
+
+
+def _tool_output_text(content_parts: list[dict[str, Any]]) -> str:
+    return "\n".join(
+        part.get("text", "")
+        for part in content_parts
+        if part.get("type") == "output_text"
+    )
+
+
+def _responses_tool_choice(value: Any, *, official_tool_items: bool) -> Any:
+    if not official_tool_items or not isinstance(value, dict):
+        return value
+    if value.get("type") != "function" or not isinstance(value.get("function"), dict):
+        return value
+    return {
+        "type": "function",
+        "name": value["function"].get("name"),
+    }

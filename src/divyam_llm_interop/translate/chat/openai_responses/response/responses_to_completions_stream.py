@@ -29,6 +29,7 @@ class ResponsesToCompletionsStreamConverter:
         self.timestamp = int(time.time())
         # Track tool calls by call_id
         self.current_tool_calls: dict[str, dict[str, Any]] = {}
+        self.item_call_ids: dict[str, str] = {}
         self.tool_call_index_counter = 0
         self.is_first_chunk = True
 
@@ -67,8 +68,14 @@ class ResponsesToCompletionsStreamConverter:
                         self.is_first_chunk = False
 
                 elif item_type == "function_call":
-                    call_id = item.get("call_id")
+                    item_id = item.get("id")
+                    call_id = item.get("call_id") or item_id
                     name = item.get("name", "")
+
+                    if not isinstance(call_id, str) or not call_id:
+                        continue
+                    if isinstance(item_id, str) and item_id:
+                        self.item_call_ids[item_id] = call_id
 
                     index = self.tool_call_index_counter
                     self.current_tool_calls[call_id] = {
@@ -101,7 +108,10 @@ class ResponsesToCompletionsStreamConverter:
                     yield chunk
 
             elif event_type == "response.function_call_arguments.delta":
+                item_id = event.get("item_id")
                 call_id = event.get("call_id")
+                if not call_id and isinstance(item_id, str):
+                    call_id = self.item_call_ids.get(item_id)
                 args_delta = event.get("delta", "")
 
                 if call_id in self.current_tool_calls and args_delta:
