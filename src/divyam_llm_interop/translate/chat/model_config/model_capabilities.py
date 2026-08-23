@@ -169,6 +169,7 @@ class ModelCapabilities:
 
     # Optional Range-based configurations
     max_tokens: Optional[RangeConfig] = None
+    default_max_tokens: Optional[int] = None
     temperature: Optional[RangeConfig] = None
     top_p: Optional[RangeConfig] = None
     top_k: Optional[RangeConfig] = None
@@ -186,6 +187,7 @@ class ModelCapabilities:
     supports_function_calling: Optional[bool] = None
     supports_vision: Optional[bool] = None
     supports_reasoning: Optional[bool] = None
+    reasoning_enabled_by_default: Optional[bool] = None
     supports_code_execution: Optional[bool] = None
     supports_google_thinking_config: Optional[bool] = None
     supports_google_extra_body: Optional[bool] = None

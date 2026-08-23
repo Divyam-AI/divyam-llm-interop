@@ -2,10 +2,14 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import copy
+import inspect
 import json
 from typing import Any
 
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
+from divyam_llm_interop.translate.chat.translation_errors import (
+    raise_for_internal_stream_error,
+)
 from divyam_llm_interop.translate.chat.types import (
     ChatRequest,
     ChatResponse,
@@ -144,8 +148,11 @@ def as_is_response_stream_to_unified_stream(
     """As is conversion of response to unified with no rules."""
 
     async def async_unified_chunk_generator():
-        async for chunk in response.stream:
-            yield UnifiedChatCompletionsStreamChunk.from_dict(chunk)
+        try:
+            async for chunk in response.stream:
+                yield UnifiedChatCompletionsStreamChunk.from_dict(chunk)
+        finally:
+            await close_async_stream(response.stream)
 
     return UnifiedChatResponseStreaming(
         stream=async_unified_chunk_generator(), headers=response.headers
@@ -158,12 +165,24 @@ def as_is_unifed_stream_to_response_stream(
     """As is conversion of response to unified with no rules."""
 
     async def async_chunk_generator():
-        async for chunk in response.stream:
-            yield chunk.to_dict()
+        try:
+            async for chunk in response.stream:
+                raise_for_internal_stream_error(chunk)
+                yield chunk.to_dict()
+        finally:
+            await close_async_stream(response.stream)
 
     return ChatResponseStreaming(
         stream=async_chunk_generator(), headers=response.headers
     )
+
+
+async def close_async_stream(stream: Any) -> None:
+    close = getattr(stream, "aclose", None)
+    if callable(close):
+        result = close()
+        if inspect.isawaitable(result):
+            await result
 
 
 def detect_request_api_type(request_payload: dict[str, Any]) -> ModelApiType:
@@ -229,6 +248,10 @@ def detect_response_api_type(response_payload: dict[str, Any]) -> ModelApiType:
     # Gemini native API responses include candidates.
     if "candidates" in response_payload:
         return ModelApiType.GEMINI
+
+    # Anthropic Messages responses have a top-level message type and content blocks.
+    if response_payload.get("type") == "message" and "content" in response_payload:
+        return ModelApiType.ANTHROPIC_MESSAGES
 
     # Chat Completions API always has object == "chat.completion" and choices
     if "choices" in response_payload:

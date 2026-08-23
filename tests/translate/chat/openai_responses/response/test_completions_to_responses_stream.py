@@ -57,6 +57,13 @@ async def test_basic_text_streaming():
     assert "response.content_part.done" in types
     assert "response.output_item.done" in types
     assert types[-1] == "response.completed"
+    content_events = [
+        event
+        for event in events
+        if event["type"]
+        in {"response.content_part.added", "response.content_part.done"}
+    ]
+    assert all(event["item_id"] for event in content_events)
 
     done = events[-1]
     assert done["response"]["status"] == "completed"
@@ -203,6 +210,42 @@ async def test_content_filter():
     done = _events_by_type(events, "response.completed")
     assert done[0]["response"]["status"] == "incomplete"
     assert done[0]["response"]["incomplete_details"]["reason"] == "content_filter"
+
+
+@pytest.mark.asyncio
+async def test_usage_only_chunk_after_finish_reaches_completed_event():
+    mock_stream = [
+        {
+            "choices": [
+                {"index": 0, "delta": {"content": "Done"}, "finish_reason": None}
+            ]
+        },
+        {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+        {
+            "choices": [],
+            "usage": {
+                "prompt_tokens": 11,
+                "completion_tokens": 4,
+                "total_tokens": 15,
+            },
+        },
+    ]
+
+    converter = CompletionsToResponsesStreamConverter()
+    events = [
+        event
+        async for event in converter.convert(
+            _stream(mock_stream),
+            model_name="gpt-4o",
+        )
+    ]
+
+    assert events[-1]["type"] == "response.completed"
+    assert events[-1]["response"]["usage"] == {
+        "input_tokens": 11,
+        "output_tokens": 4,
+        "total_tokens": 15,
+    }
 
 
 @pytest.mark.asyncio

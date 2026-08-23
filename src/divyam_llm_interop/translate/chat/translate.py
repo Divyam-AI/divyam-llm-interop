@@ -4,6 +4,17 @@
 from dataclasses import dataclass
 from typing import Any
 
+from divyam_llm_interop.translate.chat.anthropic_messages import (
+    AnthropicMessagesTranslator,
+)
+from divyam_llm_interop.translate.chat.anthropic_messages.route_validation import (
+    validate_portable_target_capabilities,
+    validate_source_profile_for_anthropic_target,
+)
+from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
+    validate_anthropic_request,
+    validate_no_assistant_prefill,
+)
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
 from divyam_llm_interop.translate.chat.base import translation_utils
 from divyam_llm_interop.translate.chat.base.translation_utils import (
@@ -21,6 +32,9 @@ from divyam_llm_interop.translate.chat.openai_completions.completions_translator
 )
 from divyam_llm_interop.translate.chat.openai_responses.openai_responses_translator import (
     OpenAiResponsesTranslator,
+)
+from divyam_llm_interop.translate.chat.translation_errors import (
+    InvalidProtocolRequestError,
 )
 from divyam_llm_interop.translate.chat.types import (
     ChatRequest,
@@ -49,6 +63,9 @@ class ChatTranslator:
                 model_registry=self._model_registry
             ),
             ModelApiType.GEMINI: GeminiTranslator(model_registry=self._model_registry),
+            ModelApiType.ANTHROPIC_MESSAGES: AnthropicMessagesTranslator(
+                model_registry=self._model_registry
+            ),
         }
 
     def translate_request(
@@ -66,6 +83,12 @@ class ChatTranslator:
         target_translator = self._find_translator_for_model(model=target)
 
         if (
+            target.api_type == ModelApiType.ANTHROPIC_MESSAGES
+            and source.api_type != ModelApiType.ANTHROPIC_MESSAGES
+        ):
+            validate_source_profile_for_anthropic_target(chat_request.body, source)
+
+        if (
             source_translator == target_translator
             and source_translator.are_requests_compatible(source, target)
         ):
@@ -73,6 +96,20 @@ class ChatTranslator:
             return chat_request
 
         unified = source_translator.request_to_unified(chat_request, source)
+        if source.api_type == ModelApiType.ANTHROPIC_MESSAGES:
+            if target.api_type != ModelApiType.ANTHROPIC_MESSAGES:
+                validate_no_assistant_prefill(chat_request.body)
+            validate_portable_target_capabilities(
+                unified.body,
+                target,
+                self._model_registry,
+            )
+        elif target.api_type == ModelApiType.ANTHROPIC_MESSAGES:
+            validate_portable_target_capabilities(
+                unified.body,
+                target,
+                self._model_registry,
+            )
         translated = target_translator.request_from_unified(unified, target)
         return translated
 
@@ -127,14 +164,39 @@ class ChatTranslator:
         return translated
 
     def find_request_model(
-        self, model_name: str, request_body: dict[str, Any]
+        self,
+        model_name: str,
+        request_body: dict[str, Any],
+        api_type: ModelApiType | None = None,
     ) -> Model:
-        api_type = translation_utils.detect_request_api_type(request_body)
+        if api_type is None:
+            api_type = translation_utils.detect_request_api_type(request_body)
+        else:
+            self._validate_explicit_request_type(request_body, api_type)
         model = Model(name=model_name, api_type=api_type)
 
         self._find_matching_model(model)
         # We found a match, return a model with original name.
         return model
+
+    @staticmethod
+    def _validate_explicit_request_type(
+        request_body: dict[str, Any], api_type: ModelApiType
+    ) -> None:
+        if api_type == ModelApiType.ANTHROPIC_MESSAGES:
+            validate_anthropic_request(request_body)
+            return
+        required_field = {
+            ModelApiType.COMPLETIONS: "messages",
+            ModelApiType.RESPONSES: "input",
+            ModelApiType.GEMINI: "contents",
+        }[api_type]
+        if required_field not in request_body:
+            raise InvalidProtocolRequestError(
+                f"{api_type.value} request requires {required_field!r}",
+                source_api_type=api_type,
+                path=f"$.{required_field}",
+            )
 
     def _find_matching_model(self, model: Model) -> Model:
         try:
@@ -146,9 +208,12 @@ class ChatTranslator:
                 raise ValueError(f"Model {model.name} not found")
 
     def find_response_model(
-        self, model_name: str, response_body: dict[str, Any]
+        self,
+        model_name: str,
+        response_body: dict[str, Any],
+        api_type: ModelApiType | None = None,
     ) -> Model:
-        api_type = translation_utils.detect_response_api_type(response_body)
+        api_type = api_type or translation_utils.detect_response_api_type(response_body)
         model = Model(name=model_name, api_type=api_type)
 
         self._find_matching_model(model)
