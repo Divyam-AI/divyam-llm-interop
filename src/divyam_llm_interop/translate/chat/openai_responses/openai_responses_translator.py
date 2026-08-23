@@ -99,16 +99,13 @@ class OpenAiResponsesTranslator(Translator):
     def request_from_unified(
         self, from_request: UnifiedChatCompletionsRequest, target: Model
     ) -> ChatRequest:
-        is_anthropic_ingress = isinstance(
-            from_request.body.unknowns.get("anthropic_request_raw"), dict
-        )
         # Apply model specific tweaks.
         model_specific_completions_request = self.unified_to_openai_tr.to_openai(
             from_request, target
         )
         responses_request_body = convert_completion_request_to_responses_request(
             model_specific_completions_request.body,
-            official_tool_items=is_anthropic_ingress,
+            official_tool_items=True,
         )
         target_capabilities = self._model_registry.get_capabilities(target)
 

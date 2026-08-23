@@ -84,9 +84,11 @@ requested semantic. In particular, Anthropic `stop_sequences` can map to Chat
 Completions, Gemini, or Anthropic, but not to OpenAI Responses because Responses
 has no exact stop-sequence request control.
 
-Anthropic-to-Responses tool continuations use separate top-level
-`function_call` and `function_call_output` input items. Existing non-Anthropic
-Responses conversion behavior is intentionally unchanged by this addition.
+Tool continuations targeting OpenAI Responses use separate top-level
+`function_call` and `function_call_output` input items for every source
+protocol. The existing
+`DIVYAM_RESPONSES_TRANSLATOR_FLATTEN_FUNCTION_OUTPUT=True` opt-in remains for
+vLLM versions that require the legacy flattened function-output workaround.
 
 ### Translate chat response
 

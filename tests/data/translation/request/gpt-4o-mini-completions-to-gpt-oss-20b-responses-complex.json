@@ -105,23 +105,14 @@
         "role": "user"
       },
       {
-        "content": [],
-        "role": "assistant",
-        "tool_calls": [
-          {
-            "arguments": "{\n\t\"location\": \"London\",\n\t\"unit\": \"celsius\"\n}",
-            "id": "call_01HZYQAX8FN8PZQJ6KCCK2F9GH",
-            "name": "get_weather",
-            "status": null,
-            "type": "function"
-          }
-        ]
+        "arguments": "{\n\t\"location\": \"London\",\n\t\"unit\": \"celsius\"\n}",
+        "call_id": "call_01HZYQAX8FN8PZQJ6KCCK2F9GH",
+        "name": "get_weather",
+        "type": "function_call"
       },
       {
         "call_id": "call_01HZYQAX8FN8PZQJ6KCCK2F9GH",
-        "name": "get_weather",
         "output": "{ \"temperature\": 16, \"condition\": \"light rain\" }",
-        "role": "tool",
         "type": "function_call_output"
       },
       {

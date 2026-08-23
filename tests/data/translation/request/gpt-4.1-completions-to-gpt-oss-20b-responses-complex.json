@@ -193,24 +193,15 @@
         ]
       },
       {
-        "role": "assistant",
-        "content": [],
-        "tool_calls": [
-          {
-            "id": "call_01HZYQAX8FN8PZQJ6KCCK2F9GH",
-            "type": "function",
-            "name": "get_weather",
-            "arguments": "{\n\t\"location\": \"London\",\n\t\"unit\": \"celsius\"\n}",
-            "status": null
-          }
-        ]
-      },
-      {
+        "type": "function_call",
         "call_id": "call_01HZYQAX8FN8PZQJ6KCCK2F9GH",
         "name": "get_weather",
-        "output": "{ \"temperature\": 16, \"condition\": \"light rain\" }",
-        "role": "tool",
-        "type": "function_call_output"
+        "arguments": "{\n\t\"location\": \"London\",\n\t\"unit\": \"celsius\"\n}"
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "call_01HZYQAX8FN8PZQJ6KCCK2F9GH",
+        "output": "{ \"temperature\": 16, \"condition\": \"light rain\" }"
       },
       {
         "role": "assistant",
@@ -231,24 +222,15 @@
         ]
       },
       {
-        "role": "assistant",
-        "content": [],
-        "tool_calls": [
-          {
-            "id": "call_01HZYPFX9GZ3TRDL8MC8H2Q9JR",
-            "type": "function",
-            "name": "get_weather",
-            "arguments": "{\n\t\"location\": \"New York\",\n\t\"unit\": \"celsius\"\n}",
-            "status": null
-          }
-        ]
-      },
-      {
+        "type": "function_call",
         "call_id": "call_01HZYPFX9GZ3TRDL8MC8H2Q9JR",
         "name": "get_weather",
-        "output": "{ \"temperature\": 20, \"condition\": \"sunny\" }",
-        "role": "tool",
-        "type": "function_call_output"
+        "arguments": "{\n\t\"location\": \"New York\",\n\t\"unit\": \"celsius\"\n}"
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "call_01HZYPFX9GZ3TRDL8MC8H2Q9JR",
+        "output": "{ \"temperature\": 20, \"condition\": \"sunny\" }"
       },
       {
         "role": "assistant",
@@ -269,24 +251,15 @@
         ]
       },
       {
-        "role": "assistant",
-        "content": [],
-        "tool_calls": [
-          {
-            "id": "call_01HZYPKX3LF5DTV5CDV5S9BBPZ",
-            "type": "function",
-            "name": "get_weather_difference",
-            "arguments": "{\n\t\"city_a\": \"London\",\n\t\"city_b\": \"New York\",\n\t\"unit\": \"celsius\"\n}",
-            "status": null
-          }
-        ]
-      },
-      {
+        "type": "function_call",
         "call_id": "call_01HZYPKX3LF5DTV5CDV5S9BBPZ",
         "name": "get_weather_difference",
-        "output": "{ \"difference\": 4 }",
-        "role": "tool",
-        "type": "function_call_output"
+        "arguments": "{\n\t\"city_a\": \"London\",\n\t\"city_b\": \"New York\",\n\t\"unit\": \"celsius\"\n}"
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "call_01HZYPKX3LF5DTV5CDV5S9BBPZ",
+        "output": "{ \"difference\": 4 }"
       },
       {
         "role": "assistant",

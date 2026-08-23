@@ -22,6 +22,7 @@ def convert_completion_request_to_responses_request(
     flatten_function_call_output: bool = (
         os.getenv("DIVYAM_RESPONSES_TRANSLATOR_FLATTEN_FUNCTION_OUTPUT") == "True"
     )
+    use_official_tool_items = official_tool_items and not flatten_function_call_output
     model = completion_request.get("model")
     messages = completion_request.get("messages", [])
     temperature = completion_request.get("temperature")
@@ -178,7 +179,7 @@ def convert_completion_request_to_responses_request(
                     "status": tc.get("status"),
                 }
                 tc_list.append(tc_entry)
-            if official_tool_items:
+            if use_official_tool_items:
                 _append_official_tool_history(
                     input_items,
                     message_item,
@@ -284,7 +285,7 @@ def convert_completion_request_to_responses_request(
     if tool_choice is not None:
         responses_request["tool_choice"] = _responses_tool_choice(
             tool_choice,
-            official_tool_items=official_tool_items,
+            official_tool_items=use_official_tool_items,
         )
     if parallel_tool_calls is not None:
         responses_request["parallel_tool_calls"] = parallel_tool_calls
