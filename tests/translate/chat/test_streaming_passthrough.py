@@ -2,12 +2,11 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """
-Tests that verify streaming responses pass through intact when source and
-target share the same API type.
+Tests for streaming responses when source and target share an API type.
 
-All three API types (Completions, Responses, Gemini) now short-circuit in
-translate_response_streaming when are_responses_compatible returns True,
-returning the exact same ChatResponseStreaming object.
+Completions and Responses are already public wire dictionaries and short-circuit.
+Gemini is normalized because the Router serializes google-genai SDK objects with
+snake_case while its public HTTP response must use the REST API's camelCase.
 """
 
 from typing import Any
@@ -548,12 +547,12 @@ class TestResponsesStreamingPassthrough:
 
 
 # ===================================================================
-# Gemini passthrough (short-circuit — same object returned)
+# Gemini same-protocol normalization
 # ===================================================================
 
 
-class TestGeminiStreamingPassthrough:
-    """Gemini same-to-same now short-circuits: exact same object back."""
+class TestGeminiStreamingNormalization:
+    """Gemini same-to-same streams retain semantics through normalization."""
 
     @pytest.mark.asyncio
     async def test_text_chunks_identity(self, translator):
@@ -563,7 +562,7 @@ class TestGeminiStreamingPassthrough:
 
         result = translator.translate_response_streaming(original, source, target)
 
-        assert result is original
+        assert result is not original
         chunks = await _collect(result)
         assert len(chunks) == len(GEMINI_CHUNKS)
 
@@ -582,7 +581,7 @@ class TestGeminiStreamingPassthrough:
 
         result = translator.translate_response_streaming(original, source, target)
 
-        assert result is original
+        assert result is not original
         chunks = await _collect(result)
         assert len(chunks) == len(GEMINI_TOOL_CALL_CHUNKS)
 
@@ -607,7 +606,7 @@ class TestGeminiStreamingPassthrough:
 
         result = translator.translate_response_streaming(original, source, target)
 
-        assert result is original
+        assert result is not original
         chunks = await _collect(result)
         assert len(chunks) == len(GEMINI_MULTI_CANDIDATE_CHUNKS)
 
@@ -635,7 +634,7 @@ class TestGeminiStreamingPassthrough:
         original = _make_streaming([])
 
         result = translator.translate_response_streaming(original, source, target)
-        assert result is original
+        assert result is not original
         assert await _collect(result) == []
 
     @pytest.mark.asyncio
