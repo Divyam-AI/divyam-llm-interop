@@ -123,3 +123,35 @@ def test_function_call_requires_name():
 
     delta_call_none = UnifiedFunctionCall.from_dict({"name": None, "arguments": "{}"})
     assert delta_call_none.name == ""
+
+
+def test_tool_result_correlation_fields_round_trip():
+    message = UnifiedMessage.from_dict(
+        {
+            "role": "tool",
+            "content": "failed",
+            "tool_call_id": "call_1",
+            "tool_name": "lookup",
+            "tool_result_is_error": True,
+        }
+    )
+
+    assert message.to_dict() == {
+        "role": "tool",
+        "content": "failed",
+        "tool_call_id": "call_1",
+        "tool_name": "lookup",
+        "tool_result_is_error": True,
+    }
+
+
+def test_legacy_tool_result_shape_omits_new_fields_when_unset():
+    message = UnifiedMessage.from_dict(
+        {"role": "tool", "content": "ok", "tool_call_id": "call_1"}
+    )
+
+    assert message.to_dict() == {
+        "role": "tool",
+        "content": "ok",
+        "tool_call_id": "call_1",
+    }

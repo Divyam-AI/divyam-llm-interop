@@ -1,6 +1,7 @@
 # Copyright 2025 Divyam.ai
 # SPDX-License-Identifier: Apache-2.0
 
+import json
 from typing import Any, Optional
 
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
@@ -46,6 +47,8 @@ class UnifiedToCompletionsTranslator:
         for key in list(unified.unknowns.keys()):
             if key not in unknows_to_keep:
                 unified.unknowns.pop(key, None)
+
+        self._encode_internal_tool_result_fields(unified)
 
         unified.model = target.name
 
@@ -95,6 +98,26 @@ class UnifiedToCompletionsTranslator:
             query_parameters=unified_request.query_parameters,
             path_parameters=unified_request.path_parameters,
         )
+
+    @staticmethod
+    def _encode_internal_tool_result_fields(
+        unified: UnifiedChatCompletionsRequestBody,
+    ) -> None:
+        for message in unified.messages:
+            if message.role != "tool":
+                continue
+            if message.tool_result_is_error:
+                try:
+                    error_value = json.loads(message.content or "null")
+                except json.JSONDecodeError:
+                    error_value = message.content or ""
+                message.content = json.dumps(
+                    {"error": error_value},
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                )
+            message.tool_name = None
+            message.tool_result_is_error = None
 
     def _translate_functions(
         self, functions: Optional[list[UnifiedFunction]]
