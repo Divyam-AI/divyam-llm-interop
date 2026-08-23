@@ -10,12 +10,16 @@ from typing_extensions import override
 
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
 from divyam_llm_interop.translate.chat.base import translation_utils
+from divyam_llm_interop.translate.chat.base.translation_utils import close_async_stream
 from divyam_llm_interop.translate.chat.base.translator import Translator
 from divyam_llm_interop.translate.chat.gemini_native.response_normalizer import (
     normalize_gemini_response_body,
 )
 from divyam_llm_interop.translate.chat.model_config.model_registry import (
     ModelRegistry,
+)
+from divyam_llm_interop.translate.chat.translation_errors import (
+    raise_for_internal_stream_error,
 )
 from divyam_llm_interop.translate.chat.types import (
     ChatRequest,
@@ -461,10 +465,13 @@ class GeminiTranslator(Translator):
         self, chat_response: ChatResponseStreaming, source: Model
     ) -> UnifiedChatResponseStreaming:
         async def unified_stream():
-            async for chunk in chat_response.stream:
-                yield UnifiedChatCompletionsStreamChunk.from_dict(
-                    self._gemini_stream_chunk_to_unified_dict(chunk, source)
-                )
+            try:
+                async for chunk in chat_response.stream:
+                    yield UnifiedChatCompletionsStreamChunk.from_dict(
+                        self._gemini_stream_chunk_to_unified_dict(chunk, source)
+                    )
+            finally:
+                await close_async_stream(chat_response.stream)
 
         return UnifiedChatResponseStreaming(
             stream=unified_stream(), headers=chat_response.headers
@@ -480,6 +487,7 @@ class GeminiTranslator(Translator):
             tc_buffer: dict[tuple[int, int], dict[str, str]] = {}
 
             async for unified_chunk in from_response.stream:
+                raise_for_internal_stream_error(unified_chunk)
                 # If there's a gemini_response_raw passthrough, emit as-is.
                 raw = unified_chunk.unknowns.get("gemini_response_raw")
                 if isinstance(raw, dict):
@@ -570,8 +578,18 @@ class GeminiTranslator(Translator):
                 if has_content or unified_chunk.usage:
                     yield body
 
+        translated = gemini_stream()
+
+        async def closing_stream():
+            try:
+                async for event in translated:
+                    yield event
+            finally:
+                await close_async_stream(translated)
+                await close_async_stream(from_response.stream)
+
         return ChatResponseStreaming(
-            stream=gemini_stream(), headers=from_response.headers
+            stream=closing_stream(), headers=from_response.headers
         )
 
     @staticmethod

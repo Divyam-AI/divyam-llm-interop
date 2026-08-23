@@ -1,0 +1,12 @@
+- name: claude-sonnet-5
+  provider: anthropic
+  name_match:
+    regex:
+      - claude-sonnet-5(?:[-.].*)?
+      - anthropic[./-]claude-sonnet-5(?:[-.].*)?
+- name: claude
+  provider: anthropic
+  name_match:
+    regex:
+      - claude(?:[-.].*)?
+      - anthropic[./-]claude(?:[-.].*)?

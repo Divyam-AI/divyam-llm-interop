@@ -1,0 +1,28 @@
+- selector:
+    name:
+      regex:
+        - claude(?:[-.].*)?
+  capabilities:
+    description: Claude text and client-tool routing through Chat Completions or Anthropic Messages
+    supported_api_types:
+      - completions
+      - anthropic_messages
+    max_tokens:
+      min: 1
+      max: 128000
+    default_max_tokens: 4096
+    temperature:
+      min: 0
+      max: 1
+    top_p:
+      min: 0
+      max: 1
+    supports_stop_sequences: true
+    supports_function_calling: true
+    supports_vision: false
+    supports_reasoning: false
+
+- selector:
+    name: claude-sonnet-5
+  capabilities:
+    reasoning_enabled_by_default: true

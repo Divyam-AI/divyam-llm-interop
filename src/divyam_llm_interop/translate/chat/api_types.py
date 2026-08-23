@@ -8,6 +8,7 @@ class ModelApiType(str, Enum):
     COMPLETIONS = "COMPLETIONS"
     RESPONSES = "RESPONSES"
     GEMINI = "GEMINI"
+    ANTHROPIC_MESSAGES = "ANTHROPIC_MESSAGES"
 
     def __repr__(self):
         return self.value
