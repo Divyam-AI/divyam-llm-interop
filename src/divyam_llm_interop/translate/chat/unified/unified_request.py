@@ -105,6 +105,8 @@ class UnifiedMessage:
     name: str | None = None
     tool_calls: list[UnifiedToolCall] | None = None
     tool_call_id: str | None = None
+    tool_name: str | None = None
+    tool_result_is_error: bool | None = None
 
     # If the model refused to respond, this contains the refusal message
     refusal: str | None = None
@@ -122,6 +124,8 @@ class UnifiedMessage:
             name=data.get("name"),
             tool_calls=tool_calls,
             tool_call_id=data.get("tool_call_id"),
+            tool_name=data.get("tool_name"),
+            tool_result_is_error=data.get("tool_result_is_error"),
             refusal=data.get("refusal"),
         )
 
@@ -138,6 +142,10 @@ class UnifiedMessage:
             result["tool_calls"] = [tc.to_dict() for tc in self.tool_calls]
         if self.tool_call_id is not None:
             result["tool_call_id"] = self.tool_call_id
+        if self.tool_name is not None:
+            result["tool_name"] = self.tool_name
+        if self.tool_result_is_error is not None:
+            result["tool_result_is_error"] = self.tool_result_is_error
         if self.refusal is not None:
             result["refusal"] = self.refusal
 

@@ -11,6 +11,9 @@ from typing_extensions import override
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
 from divyam_llm_interop.translate.chat.base import translation_utils
 from divyam_llm_interop.translate.chat.base.translator import Translator
+from divyam_llm_interop.translate.chat.gemini_native.response_normalizer import (
+    normalize_gemini_response_body,
+)
 from divyam_llm_interop.translate.chat.model_config.model_registry import (
     ModelRegistry,
 )
@@ -63,6 +66,7 @@ class GeminiTranslator(Translator):
             "model": body.get("model", source.name),
             "messages": [],
         }
+        pending_call_ids_by_name: dict[str, list[str]] = {}
 
         # Gemini system instructions are separate from conversation contents.
         system_text = self._extract_parts_text(
@@ -95,12 +99,16 @@ class GeminiTranslator(Translator):
                     function_call = part.get("function_call")
                 if function_call:
                     call_name = function_call.get("name", "unknown_function")
+                    call_id = function_call.get("id") or (
+                        f"call_{content_index}_{part_index}_{call_name}"
+                    )
                     arguments = function_call.get(
                         "args", function_call.get("arguments", {})
                     )
+                    pending_call_ids_by_name.setdefault(call_name, []).append(call_id)
                     tool_calls.append(
                         {
-                            "id": f"call_{content_index}_{part_index}_{call_name}",
+                            "id": call_id,
                             "type": "function",
                             "function": {
                                 "name": call_name,
@@ -111,14 +119,26 @@ class GeminiTranslator(Translator):
                     continue
 
                 function_response = part.get("functionResponse")
+                if function_response is None:
+                    function_response = part.get("function_response")
                 if function_response:
+                    tool_name = function_response.get("name", "tool")
+                    pending_ids = pending_call_ids_by_name.get(tool_name, [])
+                    tool_call_id = function_response.get("id")
+                    if not tool_call_id and pending_ids:
+                        tool_call_id = pending_ids.pop(0)
+                    if not tool_call_id:
+                        tool_call_id = f"call_{content_index}_{part_index}_{tool_name}"
+                    result_content, result_is_error = self._gemini_tool_result(
+                        function_response.get("response", {})
+                    )
                     unified_request_dict["messages"].append(
                         {
                             "role": "tool",
-                            "tool_call_id": function_response.get("name"),
-                            "content": json.dumps(
-                                function_response.get("response", {}),
-                            ),
+                            "tool_call_id": tool_call_id,
+                            "tool_name": tool_name,
+                            "tool_result_is_error": result_is_error,
+                            "content": result_content,
                         }
                     )
 
@@ -198,22 +218,27 @@ class GeminiTranslator(Translator):
             }
 
         contents: list[dict[str, Any]] = []
+        call_names_by_id: dict[str, str] = {}
         for message in unified.messages:
             if message.role == "system":
                 continue
 
             if message.role == "tool":
+                tool_name = (
+                    message.tool_name
+                    or call_names_by_id.get(message.tool_call_id or "")
+                    or "tool"
+                )
+                function_response: dict[str, Any] = {
+                    "name": tool_name,
+                    "response": self._gemini_tool_response(message),
+                }
+                if message.tool_call_id:
+                    function_response["id"] = message.tool_call_id
                 contents.append(
                     {
                         "role": "user",
-                        "parts": [
-                            {
-                                "functionResponse": {
-                                    "name": message.tool_call_id or "tool",
-                                    "response": self._safe_json_loads(message.content),
-                                }
-                            }
-                        ],
+                        "parts": [{"functionResponse": function_response}],
                     }
                 )
                 continue
@@ -226,10 +251,12 @@ class GeminiTranslator(Translator):
 
             if message.role == "assistant" and message.tool_calls:
                 for tool_call in message.tool_calls:
+                    call_names_by_id[tool_call.id] = tool_call.function.name
                     arguments = self._safe_json_loads(tool_call.function.arguments)
                     parts.append(
                         {
                             "functionCall": {
+                                "id": tool_call.id,
                                 "name": tool_call.function.name,
                                 "args": arguments,
                             }
@@ -302,12 +329,11 @@ class GeminiTranslator(Translator):
 
     @override
     def are_streaming_responses_compatible(self, source: Model, target: Model) -> bool:
-        # Streaming chunks come from the provider's REST API in canonical
-        # camelCase, so they can be passed through without normalisation.
-        return (
-            source.api_type == ModelApiType.GEMINI
-            and target.api_type == ModelApiType.GEMINI
-        )
+        # google-genai clients may serialize typed stream chunks with
+        # model_dump(), which uses snake_case. Run even same-protocol chunks
+        # through the translator so the public Gemini wire shape stays camelCase.
+        _ = source, target
+        return False
 
     @override
     def response_to_unified(
@@ -373,7 +399,7 @@ class GeminiTranslator(Translator):
     ) -> ChatResponse:
         raw_body = from_response.body.unknowns.get("gemini_response_raw")
         if isinstance(raw_body, dict):
-            body = self._normalize_gemini_response_body(
+            body = normalize_gemini_response_body(
                 raw_body,
                 response_id=from_response.body.id,
                 model_version=from_response.body.model,
@@ -390,6 +416,7 @@ class GeminiTranslator(Translator):
                     parts.append(
                         {
                             "functionCall": {
+                                "id": tool_call.id,
                                 "name": tool_call.function.name,
                                 "args": self._safe_json_loads(
                                     tool_call.function.arguments
@@ -456,7 +483,7 @@ class GeminiTranslator(Translator):
                 # If there's a gemini_response_raw passthrough, emit as-is.
                 raw = unified_chunk.unknowns.get("gemini_response_raw")
                 if isinstance(raw, dict):
-                    yield GeminiTranslator._normalize_gemini_response_body(
+                    yield normalize_gemini_response_body(
                         raw,
                         response_id=unified_chunk.id,
                         model_version=unified_chunk.model,
@@ -477,7 +504,13 @@ class GeminiTranslator(Translator):
                             tc_idx = tc.unknowns.get("index", 0)
                             key = (choice.index, tc_idx)
                             if key not in tc_buffer:
-                                tc_buffer[key] = {"name": "", "arguments": ""}
+                                tc_buffer[key] = {
+                                    "id": "",
+                                    "name": "",
+                                    "arguments": "",
+                                }
+                            if tc.id:
+                                tc_buffer[key]["id"] = tc.id
                             if tc.function.name:
                                 tc_buffer[key]["name"] = tc.function.name
                             tc_buffer[key]["arguments"] += tc.function.arguments
@@ -497,6 +530,7 @@ class GeminiTranslator(Translator):
                             parts.append(
                                 {
                                     "functionCall": {
+                                        "id": buf["id"],
                                         "name": buf["name"],
                                         "args": GeminiTranslator._safe_json_loads(
                                             buf["arguments"]
@@ -608,7 +642,7 @@ class GeminiTranslator(Translator):
     ) -> dict[str, Any]:
         raw_body = unified_chunk.unknowns.get("gemini_response_raw")
         if isinstance(raw_body, dict):
-            return GeminiTranslator._normalize_gemini_response_body(
+            return normalize_gemini_response_body(
                 raw_body,
                 response_id=unified_chunk.id,
                 model_version=unified_chunk.model,
@@ -624,6 +658,7 @@ class GeminiTranslator(Translator):
                     parts.append(
                         {
                             "functionCall": {
+                                "id": tool_call.id,
                                 "name": tool_call.function.name,
                                 "args": GeminiTranslator._safe_json_loads(
                                     tool_call.function.arguments
@@ -663,189 +698,6 @@ class GeminiTranslator(Translator):
         return body
 
     @staticmethod
-    def _normalize_gemini_response_body(
-        raw: dict[str, Any],
-        *,
-        response_id: str | None = None,
-        model_version: str | None = None,
-    ) -> dict[str, Any]:
-        body: dict[str, Any] = {}
-
-        rid = response_id or raw.get("responseId") or raw.get("response_id")
-        if rid is not None:
-            body["responseId"] = rid
-
-        model = model_version or raw.get("modelVersion") or raw.get("model_version")
-        if model is not None:
-            body["modelVersion"] = model
-
-        candidates_raw = raw.get("candidates")
-        if isinstance(candidates_raw, list):
-            body["candidates"] = [
-                GeminiTranslator._normalize_gemini_candidate(candidate)
-                for candidate in candidates_raw
-                if isinstance(candidate, dict)
-            ]
-
-        usage_raw = raw.get("usageMetadata") or raw.get("usage_metadata")
-        if isinstance(usage_raw, dict):
-            body["usageMetadata"] = GeminiTranslator._normalize_gemini_usage_metadata(
-                usage_raw
-            )
-
-        return body
-
-    @staticmethod
-    def _normalize_gemini_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
-        normalized: dict[str, Any] = {}
-
-        if "index" in candidate:
-            normalized["index"] = candidate["index"]
-
-        finish = GeminiTranslator._candidate_field(
-            candidate, "finishReason", "finish_reason"
-        )
-        if finish is not None:
-            normalized["finishReason"] = GeminiTranslator._finish_reason_str(finish)
-
-        finish_message = GeminiTranslator._candidate_field(
-            candidate, "finishMessage", "finish_message"
-        )
-        if finish_message is not None:
-            normalized["finishMessage"] = finish_message
-
-        content = candidate.get("content")
-        if isinstance(content, dict) and content:
-            normalized["content"] = GeminiTranslator._normalize_gemini_content(content)
-
-        reserved = {
-            "index",
-            "finishReason",
-            "finish_reason",
-            "finishMessage",
-            "finish_message",
-            "content",
-        }
-        for key, value in candidate.items():
-            if key in reserved or value is None:
-                continue
-            normalized[key] = value
-
-        return normalized
-
-    @staticmethod
-    def _normalize_gemini_content(content: dict[str, Any]) -> dict[str, Any]:
-        normalized: dict[str, Any] = {}
-        role = content.get("role")
-        if role is not None:
-            normalized["role"] = role
-
-        parts_raw = content.get("parts")
-        if isinstance(parts_raw, list):
-            normalized["parts"] = [
-                GeminiTranslator._normalize_gemini_part(part)
-                for part in parts_raw
-                if isinstance(part, dict)
-            ]
-
-        for key, value in content.items():
-            if key in ("role", "parts") or value is None:
-                continue
-            normalized[key] = value
-
-        return normalized
-
-    @staticmethod
-    def _normalize_gemini_part(part: dict[str, Any]) -> dict[str, Any]:
-        if "text" in part:
-            return {"text": part["text"]}
-
-        function_call = part.get("functionCall") or part.get("function_call")
-        if isinstance(function_call, dict):
-            args = function_call.get("args", function_call.get("arguments", {}))
-            return {
-                "functionCall": {
-                    "name": function_call.get("name"),
-                    "args": args,
-                }
-            }
-
-        function_response = part.get("functionResponse") or part.get(
-            "function_response"
-        )
-        if isinstance(function_response, dict):
-            return {
-                "functionResponse": {
-                    "name": function_response.get("name"),
-                    "response": function_response.get("response", {}),
-                }
-            }
-
-        return dict(part)
-
-    @staticmethod
-    def _normalize_gemini_usage_metadata(meta: dict[str, Any]) -> dict[str, Any]:
-        normalized: dict[str, Any] = {}
-
-        for camel, snake in (
-            ("promptTokenCount", "prompt_token_count"),
-            ("candidatesTokenCount", "candidates_token_count"),
-            ("totalTokenCount", "total_token_count"),
-            ("cachedContentTokenCount", "cached_content_token_count"),
-            ("thoughtsTokenCount", "thoughts_token_count"),
-        ):
-            value = meta.get(camel)
-            if value is None:
-                value = meta.get(snake)
-            if value is not None:
-                normalized[camel] = value
-
-        details = meta.get("promptTokensDetails") or meta.get("prompt_tokens_details")
-        if isinstance(details, list):
-            normalized["promptTokensDetails"] = [
-                GeminiTranslator._normalize_prompt_tokens_detail(row)
-                for row in details
-                if isinstance(row, dict)
-            ]
-
-        service_tier = meta.get("serviceTier") or meta.get("service_tier")
-        if service_tier is not None:
-            normalized["serviceTier"] = service_tier
-
-        reserved = set(normalized.keys()) | {
-            "prompt_token_count",
-            "candidates_token_count",
-            "total_token_count",
-            "cached_content_token_count",
-            "thoughts_token_count",
-            "prompt_tokens_details",
-            "service_tier",
-        }
-        for key, value in meta.items():
-            if key in reserved or value is None:
-                continue
-            normalized[key] = value
-
-        return normalized
-
-    @staticmethod
-    def _normalize_prompt_tokens_detail(row: dict[str, Any]) -> dict[str, Any]:
-        modality = row.get("modality")
-        if modality is not None and hasattr(modality, "value"):
-            modality = modality.value
-        token_count = row.get("tokenCount", row.get("token_count"))
-        detail: dict[str, Any] = {}
-        if modality is not None:
-            detail["modality"] = modality
-        if token_count is not None:
-            detail["tokenCount"] = token_count
-        for key, value in row.items():
-            if key in ("modality", "tokenCount", "token_count") or value is None:
-                continue
-            detail[key] = value
-        return detail
-
-    @staticmethod
     def _candidate_field(candidate: dict[str, Any], *keys: str) -> Any:
         for key in keys:
             if key in candidate:
@@ -879,6 +731,32 @@ class GeminiTranslator(Translator):
             return json.loads(content)
         except (json.JSONDecodeError, ValueError, TypeError):
             return {"value": content}
+
+    @staticmethod
+    def _gemini_tool_result(response: Any) -> tuple[str, bool | None]:
+        if isinstance(response, dict) and "error" in response:
+            return GeminiTranslator._tool_result_text(response["error"]), True
+        if isinstance(response, dict) and set(response) == {"result"}:
+            return GeminiTranslator._tool_result_text(response["result"]), False
+        return GeminiTranslator._tool_result_text(response), False
+
+    @staticmethod
+    def _gemini_tool_response(message: Any) -> dict[str, Any]:
+        try:
+            value = json.loads(message.content or "null")
+        except (json.JSONDecodeError, TypeError):
+            value = message.content or ""
+        if message.tool_result_is_error:
+            return {"error": value}
+        if isinstance(value, dict):
+            return value
+        return {"result": value}
+
+    @staticmethod
+    def _tool_result_text(value: Any) -> str:
+        if isinstance(value, str):
+            return value
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
     @staticmethod
     def _extract_function_declarations(
@@ -991,7 +869,8 @@ class GeminiTranslator(Translator):
             tool_calls.append(
                 UnifiedToolCall.from_dict(
                     {
-                        "id": f"call_{idx}_{function_call.get('name', 'tool')}",
+                        "id": function_call.get("id")
+                        or f"call_{idx}_{function_call.get('name', 'tool')}",
                         "type": "function",
                         "function": {
                             "name": function_call.get("name", "tool"),
