@@ -19,6 +19,7 @@ from divyam_llm_interop.translate.chat.model_config.model_registry import (
     ModelRegistry,
 )
 from divyam_llm_interop.translate.chat.translation_errors import (
+    TargetCapabilityError,
     raise_for_internal_stream_error,
 )
 from divyam_llm_interop.translate.chat.types import (
@@ -209,6 +210,23 @@ class GeminiTranslator(Translator):
         unified = UnifiedChatCompletionsRequestBody.from_dict(
             from_request.body.to_dict(keep_unknowns=True)
         )
+
+        # JSON-schema structured output control has no equivalent in the Gemini
+        # native request shape; it was previously dropped silently. Refuse so the
+        # caller learns the target cannot honour the requested output contract.
+        if (
+            unified.response_format is not None
+            and unified.response_format.type == "json_schema"
+        ):
+            raise TargetCapabilityError(
+                "Gemini native requests cannot represent Chat Completions "
+                "response_format=json_schema structured output control.",
+                source_api_type=ModelApiType.COMPLETIONS,
+                target_api_type=ModelApiType.GEMINI,
+                path="$.response_format",
+                details={"response_format_type": "json_schema"},
+            )
+
         request_body: dict[str, Any] = {"model": target.name}
 
         system_messages = [
@@ -223,9 +241,23 @@ class GeminiTranslator(Translator):
 
         contents: list[dict[str, Any]] = []
         call_names_by_id: dict[str, str] = {}
-        for message in unified.messages:
+        for message_index, message in enumerate(unified.messages):
             if message.role == "system":
                 continue
+
+            # Multimodal image blocks have no native Gemini part emitted on this
+            # path; the text-only builder below would drop them silently. Refuse
+            # so the image input is never lost without the caller knowing.
+            image_part_index = self._image_part_index(message.content)
+            if image_part_index is not None:
+                raise TargetCapabilityError(
+                    "Chat Completions image content cannot be represented as a "
+                    "native Gemini image part on this translation path.",
+                    source_api_type=ModelApiType.COMPLETIONS,
+                    target_api_type=ModelApiType.GEMINI,
+                    path=(f"$.messages[{message_index}].content[{image_part_index}]"),
+                    details={"content_type": "image_url"},
+                )
 
             if message.role == "tool":
                 tool_name = (
@@ -731,6 +763,24 @@ class GeminiTranslator(Translator):
         if not isinstance(finish_reason, str):
             finish_reason = str(finish_reason)
         return finish_reason
+
+    @staticmethod
+    def _image_part_index(content: Any) -> int | None:
+        """Index of the first image content block, else ``None``.
+
+        Only multimodal image blocks trigger this; plain string content and
+        text-only structured content return ``None`` so certified text/tool
+        requests are untouched.
+        """
+        if not isinstance(content, list):
+            return None
+        for index, part in enumerate(content):
+            if isinstance(part, dict) and part.get("type") in (
+                "image_url",
+                "input_image",
+            ):
+                return index
+        return None
 
     @staticmethod
     def _extract_parts_text(parts: list[dict[str, Any]]) -> str | None:

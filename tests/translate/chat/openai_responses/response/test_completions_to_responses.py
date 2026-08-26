@@ -4,7 +4,6 @@
 import time
 import uuid
 from copy import deepcopy
-from typing import Any
 
 import pytest
 
@@ -16,6 +15,9 @@ from divyam_llm_interop.translate.chat.openai_responses.response.completions_to_
 )
 from divyam_llm_interop.translate.chat.openai_responses.response.responses_to_completion import (
     convert_responses_to_completions_response,
+)
+from divyam_llm_interop.translate.chat.translation_errors import (
+    UnsupportedFeatureError,
 )
 from tests.translate.translation_testing_utils import set_values_recursively
 
@@ -497,16 +499,8 @@ def test_completions_to_responses_round_trip():
         )
 
 
-def test_vllm_response_simple():
-    # Ids are random, created time varies and status is optional so ignore
-    # them in verification.
-    values_to_replace: dict[str, Any] = {
-        "id": "static_id",
-        "item_id": "static_id",
-        "created_at": 0,
-        "status": None,
-    }
-
+def test_vllm_reasoning_content_raises():
+    """reasoning_content has no faithful Responses mapping and must raise."""
     vllm_completions_response = {
         "id": "chatcmpl-9f0c29a1bb6a4536837e08156d658f7b",
         "object": "chat.completion",
@@ -518,92 +512,44 @@ def test_vllm_response_simple():
                 "message": {
                     "role": "assistant",
                     "content": "**Name:** John  \n**Age:** 30",
-                    "refusal": None,
-                    "annotations": None,
-                    "audio": None,
-                    "function_call": None,
                     "tool_calls": [],
-                    "reasoning_content": 'The user says: "Extract the name and age from: John is 30 years old". They want the name and age. So answer: Name: John, Age: 30. Probably in a simple format. The user didn\'t specify format, so we can give a short answer.',
+                    "reasoning_content": "The user wants the name and age.",
                 },
-                "logprobs": None,
                 "finish_reason": "stop",
-                "stop_reason": None,
-                "token_ids": None,
             }
         ],
-        "service_tier": None,
-        "system_fingerprint": None,
         "usage": {
             "prompt_tokens": 82,
             "total_tokens": 174,
             "completion_tokens": 92,
-            "prompt_tokens_details": None,
         },
-        "prompt_logprobs": None,
-        "prompt_token_ids": None,
-        "kv_transfer_params": None,
     }
 
-    expected = drop_null_values_recursively(
-        set_values_recursively(
+    with pytest.raises(UnsupportedFeatureError) as exc_info:
+        convert_completions_to_responses_response(vllm_completions_response)
+
+    assert exc_info.value.path == "$.choices[0].message.reasoning_content"
+    assert exc_info.value.details == {"field": "reasoning_content"}
+
+
+def test_choice_level_reasoning_still_maps():
+    """Choice-level 'reasoning' (not reasoning_content) still maps, no regression."""
+    completion = {
+        "id": "chatcmpl-x",
+        "object": "chat.completion",
+        "created": 1759819851,
+        "model": "o3-mini",
+        "choices": [
             {
-                "id": "resp_1b522fd40a554dfbab8e447246b2594d",
-                "created_at": 1759818950,
-                "instructions": None,
-                "metadata": None,
-                "model": "openai/gpt-oss-20b",
-                "object": "response",
-                "output": [
-                    {
-                        "id": "msg_8d10533114764bbabc0f73aeee417dc3",
-                        "content": [
-                            {
-                                "annotations": [],
-                                "text": "**Name:** John  \n**Age:** 30",
-                                "type": "output_text",
-                                "logprobs": None,
-                            }
-                        ],
-                        "role": "assistant",
-                        "status": "completed",
-                        "type": "message",
-                    },
-                    {
-                        "id": "rs_c12b5b9e316242ebbcbf50fb9d3195c2",
-                        "summary": [],
-                        "type": "reasoning",
-                        "content": [
-                            {
-                                "text": 'The user says: "Extract the name and age from: John is 30 years old". They want the name and age. So answer: Name: John, Age: 30. Probably in a simple format. The user didn\'t specify format, so we can give a short answer.',
-                                "type": "reasoning_text",
-                            }
-                        ],
-                        "encrypted_content": None,
-                        "status": None,
-                    },
-                ],
-                "parallel_tool_calls": False,
-                "tool_choice": "none",
-                "tools": [],
-                "usage": {
-                    "input_tokens": 82,
-                    "input_tokens_details": {"cached_tokens": 0},
-                    "output_tokens": 92,
-                    "output_tokens_details": {"reasoning_tokens": 0},
-                    "total_tokens": 174,
-                },
-            },
-            values_to_replace=values_to_replace,
-        )
-    )
+                "index": 0,
+                "message": {"role": "assistant", "content": "42"},
+                "reasoning": "step-by-step thinking",
+                "finish_reason": "stop",
+            }
+        ],
+    }
 
-    values_to_replace["status"] = None
-
-    converted = drop_null_values_recursively(
-        set_values_recursively(
-            data=convert_completions_to_responses_response(vllm_completions_response),
-            values_to_replace=values_to_replace,
-        )
-    )
-
-    assert converted == expected
+    resp = convert_completions_to_responses_response(completion)
+    reasoning_items = [o for o in resp["output"] if o["type"] == "reasoning"]
+    assert len(reasoning_items) == 1
+    assert reasoning_items[0]["content"][0]["text"] == "step-by-step thinking"

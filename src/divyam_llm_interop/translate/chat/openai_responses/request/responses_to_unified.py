@@ -4,8 +4,12 @@
 import json
 from typing import Any
 
+from divyam_llm_interop.translate.chat.api_types import ModelApiType
 from divyam_llm_interop.translate.chat.base.translation_utils import (
     drop_null_values_top_level,
+)
+from divyam_llm_interop.translate.chat.translation_errors import (
+    UnsupportedFeatureError,
 )
 
 
@@ -49,7 +53,7 @@ def convert_responses_to_completions_request(
                 )
                 pending_function_calls.clear()
 
-            for item in input_data:
+            for item_index, item in enumerate(input_data):
                 if item.get("type") == "function_call":
                     pending_function_calls.append(
                         {
@@ -112,14 +116,22 @@ def convert_responses_to_completions_request(
                     msg["content"] = content
                 elif isinstance(content, list):
                     parts_texts = []
-                    for part in content:
+                    for part_index, part in enumerate(content):
                         ptype = part.get("type")
                         if ptype == "input_text" or ptype == "output_text":
                             parts_texts.append(part.get("text", ""))
                         elif ptype == "input_image":
-                            url = part.get("image_url")
-                            if url:
-                                parts_texts.append(f"[Image: {url}]")
+                            # Responses image input has no lossless Chat
+                            # Completions representation on this path; flattening
+                            # it to text silently drops the image, so refuse.
+                            raise UnsupportedFeatureError(
+                                "Responses image input cannot be represented "
+                                "when translating to Chat Completions.",
+                                source_api_type=ModelApiType.RESPONSES,
+                                target_api_type=ModelApiType.COMPLETIONS,
+                                path=(f"$.input[{item_index}].content[{part_index}]"),
+                                details={"content_type": "input_image"},
+                            )
                         elif ptype == "input_file":
                             filename = part.get("filename", "unknown")
                             parts_texts.append(f"[File: {filename}]")
