@@ -1,0 +1,36 @@
+version: 1.0.0
+# Registers divyam-llm-interop as a ci_deploy artifact (Divyam-AI/divyam_router_cd) so the sandbox dev
+# loop can build, test and publish it to the sandbox devpi index alongside its dependents — divyamlibs
+# consumes it (`divyam-llm-interop = ">=0.2.2"`), so a change here needs to be buildable in the same
+# loop as the repos that break when it lands.
+#
+# Scope: SANDBOX ONLY. This repo is deliberately NOT added to the nightly pipeline's upstream set.
+# .github/workflows/release.yml (tag-driven, publishes to PyPI) remains the single authority for
+# released versions. In the sandbox lane ci_deploy never commits its version bump back, so the two
+# cannot fight over pyproject.toml.
+#
+# The step commands intentionally delegate to scripts/lint.sh and scripts/test.sh — the same entry
+# points .github/workflows/{lint,test}.yml call — so local, GitHub Actions and ci_deploy runs cannot
+# drift apart.
+artifacts:
+  divyam-llm-interop:
+    type: python-uv          # uv + hatchling (PEP 621 [project]), not poetry — selects UvManager.
+    manifest_file: pyproject.toml
+    workspace_folder: .
+    build:
+      commands:
+      - uv sync --all-groups
+      - uv build
+    lint:
+      commands:
+      - ./scripts/lint.sh
+    unit_tests:
+      # No --all: that adds the live-API integration tests, which need provider keys.
+      commands:
+      - ./scripts/test.sh --coverage
+    package_publish:
+      auto_version_update: true
+      # No git tag from ci_deploy. Its format ("<artifact>-<version>") cannot match release.yml's
+      # "v*.*.*" trigger, so there is no accidental-release path — but tagging stays the OSS
+      # release workflow's job alone.
+      git_tag: false
