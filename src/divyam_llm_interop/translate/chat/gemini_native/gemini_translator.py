@@ -19,7 +19,6 @@ from divyam_llm_interop.translate.chat.model_config.model_registry import (
     ModelRegistry,
 )
 from divyam_llm_interop.translate.chat.translation_errors import (
-    TargetCapabilityError,
     raise_for_internal_stream_error,
 )
 from divyam_llm_interop.translate.chat.types import (
@@ -240,7 +239,7 @@ class GeminiTranslator(Translator):
 
         contents: list[dict[str, Any]] = []
         call_names_by_id: dict[str, str] = {}
-        for message_index, message in enumerate(unified.messages):
+        for message in unified.messages:
             if message.role == "system":
                 continue
 
@@ -265,9 +264,7 @@ class GeminiTranslator(Translator):
                 continue
 
             role = "model" if message.role == "assistant" else "user"
-            parts: list[dict[str, Any]] = self._content_parts(
-                message.content, message_index
-            )
+            parts: list[dict[str, Any]] = self._content_parts(message.content)
 
             if message.role == "assistant" and message.tool_calls:
                 for tool_call in message.tool_calls:
@@ -751,15 +748,14 @@ class GeminiTranslator(Translator):
             finish_reason = str(finish_reason)
         return finish_reason
 
-    def _content_parts(
-        self, content: Any, message_index: int
-    ) -> list[dict[str, Any]]:
+    def _content_parts(self, content: Any) -> list[dict[str, Any]]:
         """Gemini parts for a message's content.
 
-        Plain string content becomes a single text part. Multimodal list
-        content is walked part-by-part: text blocks become text parts and image
-        blocks become native ``inlineData`` / ``fileData`` parts. A remote image
-        URL, which Gemini native cannot fetch, raises rather than being dropped.
+        Plain string content becomes a single text part. Multimodal list content
+        is walked part-by-part: text blocks become text parts and image blocks
+        become native ``inlineData`` (data: URIs) or ``fileData`` (any other
+        reference) parts. Every image yields a part — nothing is silently
+        dropped — and Gemini itself adjudicates whether it can resolve the URI.
         """
         if content is None:
             return []
@@ -769,14 +765,12 @@ class GeminiTranslator(Translator):
             return []
 
         parts: list[dict[str, Any]] = []
-        for part_index, part in enumerate(content):
+        for part in content:
             if not isinstance(part, dict):
                 continue
             ptype = part.get("type")
             if ptype in ("image_url", "input_image"):
-                parts.append(
-                    self._gemini_image_part(part, message_index, part_index)
-                )
+                parts.append(self._gemini_image_part(part))
             elif ptype in ("text", "input_text", "output_text") or "text" in part:
                 text = part.get("text", "")
                 if text:
@@ -784,28 +778,24 @@ class GeminiTranslator(Translator):
         return parts
 
     @classmethod
-    def _gemini_image_part(
-        cls, part: dict[str, Any], message_index: int, part_index: int
-    ) -> dict[str, Any]:
-        """A native Gemini image part, or raise if it cannot be represented."""
+    def _gemini_image_part(cls, part: dict[str, Any]) -> dict[str, Any]:
+        """A native Gemini image part.
+
+        A ``data:`` URI is inlined as ``inlineData``; any other reference
+        (``gs://``, a Files-API URL, or a plain web URL) is passed through as
+        ``fileData`` so the provider — not this translator — decides whether it
+        can resolve the URI. This never drops the image and never pre-judges a
+        capability the provider owns.
+        """
         url = cls._image_url(part)
         if url.startswith("data:"):
-            mime_type, data = cls._parse_data_uri(url, message_index, part_index)
+            mime_type, data = cls._parse_data_uri(url)
             return {"inlineData": {"mimeType": mime_type, "data": data}}
-        if url.startswith("gs://"):
-            return {"fileData": {"fileUri": url}}
-        # A remote http(s) URL (or a file_id with no inline bytes) cannot be
-        # inlined, and Gemini native does not fetch remote image URLs. Refuse so
-        # the image is never silently lost.
-        raise TargetCapabilityError(
-            "Chat Completions image content given as a remote URL cannot be "
-            "represented as a native Gemini image part; supply a data: URI "
-            "(inline base64) or a gs:// file URI.",
-            source_api_type=ModelApiType.COMPLETIONS,
-            target_api_type=ModelApiType.GEMINI,
-            path=f"$.messages[{message_index}].content[{part_index}]",
-            details={"content_type": "image_url", "reason": "remote_url_unfetchable"},
-        )
+        file_data: dict[str, Any] = {"fileUri": url}
+        mime_type = cls._guess_image_mime(url)
+        if mime_type:
+            file_data["mimeType"] = mime_type
+        return {"fileData": file_data}
 
     @staticmethod
     def _image_url(part: dict[str, Any]) -> str:
@@ -818,22 +808,31 @@ class GeminiTranslator(Translator):
         return part.get("url", "")
 
     @staticmethod
-    def _parse_data_uri(
-        url: str, message_index: int, part_index: int
-    ) -> tuple[str, str]:
-        """Split ``data:<mime>;base64,<data>`` into its mime type and payload."""
-        header, separator, data = url.partition(",")
-        if not separator or ";base64" not in header:
-            raise TargetCapabilityError(
-                "Chat Completions image data URI must be base64-encoded to "
-                "become a native Gemini inlineData part.",
-                source_api_type=ModelApiType.COMPLETIONS,
-                target_api_type=ModelApiType.GEMINI,
-                path=f"$.messages[{message_index}].content[{part_index}]",
-                details={"content_type": "image_url", "reason": "unsupported_data_uri"},
-            )
+    def _parse_data_uri(url: str) -> tuple[str, str]:
+        """Split ``data:<mime>;base64,<data>`` into its mime type and payload.
+
+        Best-effort: a malformed data URI still yields a part, which the
+        provider rejects loudly rather than the image being silently lost.
+        """
+        header, _, data = url.partition(",")
         mime_type = header[len("data:") :].split(";")[0] or "application/octet-stream"
         return mime_type, data
+
+    @staticmethod
+    def _guess_image_mime(url: str) -> str | None:
+        """Best-effort image mime type from a URL's extension, else ``None``."""
+        lowered = url.lower().split("?")[0]
+        for extension, mime_type in (
+            (".png", "image/png"),
+            (".jpg", "image/jpeg"),
+            (".jpeg", "image/jpeg"),
+            (".gif", "image/gif"),
+            (".webp", "image/webp"),
+            (".heic", "image/heic"),
+        ):
+            if lowered.endswith(extension):
+                return mime_type
+        return None
 
     # Keys valid in a JSON Schema but rejected by Gemini's responseSchema subset.
     _GEMINI_UNSUPPORTED_SCHEMA_KEYS = frozenset(

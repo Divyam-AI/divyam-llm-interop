@@ -5,10 +5,9 @@
 
 Image content and response_format=json_schema are mapped onto Gemini's native
 shapes (inlineData / fileData, responseSchema) instead of being silently
-dropped. The one case Gemini native genuinely cannot honour — a remote image
-URL it cannot fetch — still raises rather than losing the image."""
-
-import pytest
+dropped. Every image yields a part — data: URIs inline, any other reference
+becomes fileData — and Gemini itself adjudicates whether it can resolve the
+URI, rather than this translator pre-judging a capability the provider owns."""
 
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
 from divyam_llm_interop.translate.chat.gemini_native.gemini_translator import (
@@ -16,9 +15,6 @@ from divyam_llm_interop.translate.chat.gemini_native.gemini_translator import (
 )
 from divyam_llm_interop.translate.chat.model_config.model_registry import (
     ModelRegistry,
-)
-from divyam_llm_interop.translate.chat.translation_errors import (
-    TargetCapabilityError,
 )
 from divyam_llm_interop.translate.chat.types import Model
 from divyam_llm_interop.translate.chat.unified.unified_request import (
@@ -69,17 +65,20 @@ def test_gs_uri_image_becomes_file_data():
     result = _from_unified(_image_message_body("gs://bucket/photo.png"))
 
     parts = result["contents"][0]["parts"]
-    assert parts[1] == {"fileData": {"fileUri": "gs://bucket/photo.png"}}
+    assert parts[1] == {
+        "fileData": {"fileUri": "gs://bucket/photo.png", "mimeType": "image/png"}
+    }
 
 
-def test_remote_url_image_still_raises():
-    """Gemini native cannot fetch a remote URL, so the image is refused, not lost."""
-    with pytest.raises(TargetCapabilityError) as exc_info:
-        _from_unified(_image_message_body("https://example.com/x.png"))
+def test_remote_url_image_becomes_file_data():
+    """A remote URL is passed through as fileData; Gemini adjudicates it, we never drop it."""
+    result = _from_unified(_image_message_body("https://example.com/x.png"))
 
-    assert exc_info.value.path == "$.messages[0].content[1]"
-    assert exc_info.value.target_api_type == ModelApiType.GEMINI
-    assert exc_info.value.details["reason"] == "remote_url_unfetchable"
+    parts = result["contents"][0]["parts"]
+    assert parts[0] == {"text": "What is in this image?"}
+    assert parts[1] == {
+        "fileData": {"fileUri": "https://example.com/x.png", "mimeType": "image/png"}
+    }
 
 
 def test_json_schema_response_format_becomes_response_schema():
