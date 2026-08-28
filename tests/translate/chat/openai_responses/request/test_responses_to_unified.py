@@ -1,13 +1,8 @@
 # Copyright 2025 Divyam.ai
 # SPDX-License-Identifier: Apache-2.0
 
-import pytest
-
 from divyam_llm_interop.translate.chat.openai_responses.request.responses_to_unified import (
     convert_responses_to_completions_request,
-)
-from divyam_llm_interop.translate.chat.translation_errors import (
-    UnsupportedFeatureError,
 )
 
 
@@ -121,8 +116,8 @@ def test_multi_turn_conversation():
     assert completion_req_conv["messages"][3]["role"] == "user"
 
 
-def test_vision_request_raises_on_image_input():
-    """Responses image input can no longer be silently flattened to text."""
+def test_vision_request_maps_image_to_image_url():
+    """Responses input_image becomes a Chat Completions image_url block, not text."""
     responses_req_vision = {
         "model": "gpt-4o",
         "input": [
@@ -141,11 +136,16 @@ def test_vision_request_raises_on_image_input():
         "max_output_tokens": 300,
     }
 
-    with pytest.raises(UnsupportedFeatureError) as exc_info:
-        convert_responses_to_completions_request(responses_req_vision)
+    completion_req = convert_responses_to_completions_request(responses_req_vision)
 
-    assert exc_info.value.path == "$.input[0].content[1]"
-    assert exc_info.value.details == {"content_type": "input_image"}
+    content = completion_req["messages"][0]["content"]
+    assert content == [
+        {"type": "text", "text": "What's in this image?"},
+        {
+            "type": "image_url",
+            "image_url": {"url": "https://example.com/image.jpg"},
+        },
+    ]
 
 
 def test_streaming_structured_output():
@@ -269,8 +269,8 @@ def test_code_interpreter():
     assert completion_req_code["tools"][0]["type"] == "code_interpreter"
 
 
-def test_complex_input_with_image_raises():
-    """Image input in a multi-part message raises before any flattening."""
+def test_complex_input_with_image_maps_to_multimodal_content():
+    """A multi-part message with an image emits image_url; the file stays as text."""
     responses_req_complex = {
         "model": "gpt-4o",
         "instructions": "You are a helpful assistant that analyzes images and files.",
@@ -295,10 +295,18 @@ def test_complex_input_with_image_raises():
         "max_output_tokens": 500,
     }
 
-    with pytest.raises(UnsupportedFeatureError) as exc_info:
-        convert_responses_to_completions_request(responses_req_complex)
+    completion_req = convert_responses_to_completions_request(responses_req_complex)
 
-    assert exc_info.value.path == "$.input[0].content[1]"
+    assert completion_req["messages"][0]["role"] == "system"
+    content = completion_req["messages"][1]["content"]
+    assert content == [
+        {"type": "text", "text": "Analyze this image and document:"},
+        {
+            "type": "image_url",
+            "image_url": {"url": "https://example.com/chart.jpg"},
+        },
+        {"type": "text", "text": "[File: report.pdf]"},
+    ]
 
 
 def test_input_file_only_still_flattens():
