@@ -6,12 +6,8 @@ import uuid
 from typing import Any
 
 from divyam_llm_interop.interop_logging import logger
-from divyam_llm_interop.translate.chat.api_types import ModelApiType
 from divyam_llm_interop.translate.chat.base.translation_utils import (
     drop_null_values_top_level,
-)
-from divyam_llm_interop.translate.chat.translation_errors import (
-    UnsupportedFeatureError,
 )
 
 
@@ -134,22 +130,11 @@ def convert_completions_to_responses_response(
 
             responses_response["output"].append(message_item)
 
-        # Chat Completions ``message.reasoning_content`` has no faithful
-        # Responses representation on this path and was previously dropped
-        # (it does not survive the unified message model). Refuse instead of
-        # silently losing the model's reasoning trace.
-        if message.get("reasoning_content") is not None:
-            raise UnsupportedFeatureError(
-                "Chat Completions 'reasoning_content' cannot be represented "
-                "when translating to the Responses API.",
-                source_api_type=ModelApiType.COMPLETIONS,
-                target_api_type=ModelApiType.RESPONSES,
-                path="$.choices[0].message.reasoning_content",
-                details={"field": "reasoning_content"},
-            )
-
         # Add reasoning output (if present)
         reasoning = choice.get("reasoning")
+        if not reasoning:
+            # vLLM sometimes includes reasoning in message.reasoning_content
+            reasoning = message.get("reasoning_content")
 
         if reasoning:
             reasoning_item = {

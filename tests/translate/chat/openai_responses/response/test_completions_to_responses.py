@@ -16,9 +16,6 @@ from divyam_llm_interop.translate.chat.openai_responses.response.completions_to_
 from divyam_llm_interop.translate.chat.openai_responses.response.responses_to_completion import (
     convert_responses_to_completions_response,
 )
-from divyam_llm_interop.translate.chat.translation_errors import (
-    UnsupportedFeatureError,
-)
 from tests.translate.translation_testing_utils import set_values_recursively
 
 
@@ -499,8 +496,8 @@ def test_completions_to_responses_round_trip():
         )
 
 
-def test_vllm_reasoning_content_raises():
-    """reasoning_content has no faithful Responses mapping and must raise."""
+def test_vllm_reasoning_content_maps_to_reasoning_item():
+    """vLLM message.reasoning_content is surfaced as a Responses reasoning item."""
     vllm_completions_response = {
         "id": "chatcmpl-9f0c29a1bb6a4536837e08156d658f7b",
         "object": "chat.completion",
@@ -525,11 +522,16 @@ def test_vllm_reasoning_content_raises():
         },
     }
 
-    with pytest.raises(UnsupportedFeatureError) as exc_info:
-        convert_completions_to_responses_response(vllm_completions_response)
+    resp = convert_completions_to_responses_response(vllm_completions_response)
 
-    assert exc_info.value.path == "$.choices[0].message.reasoning_content"
-    assert exc_info.value.details == {"field": "reasoning_content"}
+    message_items = [o for o in resp["output"] if o["type"] == "message"]
+    assert message_items[0]["content"][0]["text"] == "**Name:** John  \n**Age:** 30"
+    reasoning_items = [o for o in resp["output"] if o["type"] == "reasoning"]
+    assert len(reasoning_items) == 1
+    assert (
+        reasoning_items[0]["content"][0]["text"]
+        == "The user wants the name and age."
+    )
 
 
 def test_choice_level_reasoning_still_maps():
