@@ -116,8 +116,8 @@ def test_multi_turn_conversation():
     assert completion_req_conv["messages"][3]["role"] == "user"
 
 
-def test_vision_request():
-    """Vision request with image"""
+def test_vision_request_maps_image_to_image_url():
+    """Responses input_image becomes a Chat Completions image_url block, not text."""
     responses_req_vision = {
         "model": "gpt-4o",
         "input": [
@@ -136,22 +136,16 @@ def test_vision_request():
         "max_output_tokens": 300,
     }
 
-    completion_req_vision = convert_responses_to_completions_request(
-        responses_req_vision
-    )
+    completion_req = convert_responses_to_completions_request(responses_req_vision)
 
-    assert completion_req_vision["model"] == "gpt-4o"
-    assert completion_req_vision["max_completion_tokens"] == 300
-    assert len(completion_req_vision["messages"]) == 1
-    assert completion_req_vision["messages"][0]["role"] == "user"
-
-    # Content must be a string
-    content_str = completion_req_vision["messages"][0]["content"]
-    assert isinstance(content_str, str)
-
-    # Flattened content should include all parts
-    assert "What's in this image?" in content_str
-    assert "https://example.com/image.jpg" in content_str
+    content = completion_req["messages"][0]["content"]
+    assert content == [
+        {"type": "text", "text": "What's in this image?"},
+        {
+            "type": "image_url",
+            "image_url": {"url": "https://example.com/image.jpg"},
+        },
+    ]
 
 
 def test_streaming_structured_output():
@@ -275,8 +269,8 @@ def test_code_interpreter():
     assert completion_req_code["tools"][0]["type"] == "code_interpreter"
 
 
-def test_complex_input_with_file():
-    """Complex input with multiple content types"""
+def test_complex_input_with_image_maps_to_multimodal_content():
+    """A multi-part message with an image emits image_url; the file stays as text."""
     responses_req_complex = {
         "model": "gpt-4o",
         "instructions": "You are a helpful assistant that analyzes images and files.",
@@ -301,21 +295,44 @@ def test_complex_input_with_file():
         "max_output_tokens": 500,
     }
 
-    completion_req_complex = convert_responses_to_completions_request(
-        responses_req_complex
-    )
+    completion_req = convert_responses_to_completions_request(responses_req_complex)
 
-    assert completion_req_complex["model"] == "gpt-4o"
-    assert completion_req_complex["max_completion_tokens"] == 500
-    assert len(completion_req_complex["messages"]) == 2  # system + user
-    assert completion_req_complex["messages"][0]["role"] == "system"
-    assert completion_req_complex["messages"][1]["role"] == "user"
-    # Content must be a string
-    content_str = completion_req_complex["messages"][1]["content"]
+    assert completion_req["messages"][0]["role"] == "system"
+    content = completion_req["messages"][1]["content"]
+    assert content == [
+        {"type": "text", "text": "Analyze this image and document:"},
+        {
+            "type": "image_url",
+            "image_url": {"url": "https://example.com/chart.jpg"},
+        },
+        {"type": "text", "text": "[File: report.pdf]"},
+    ]
+
+
+def test_input_file_only_still_flattens():
+    """input_file (non-image) is not one of the gaps and still flattens."""
+    responses_req_file = {
+        "model": "gpt-4o",
+        "input": [
+            {
+                "type": "message",
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": "Summarize this document:"},
+                    {
+                        "type": "input_file",
+                        "filename": "report.pdf",
+                        "file_id": "file-123",
+                    },
+                ],
+            }
+        ],
+    }
+
+    completion_req = convert_responses_to_completions_request(responses_req_file)
+    content_str = completion_req["messages"][0]["content"]
     assert isinstance(content_str, str)
-    # Flattened content should include all parts
-    assert "Analyze this image and document:" in content_str
-    assert "https://example.com/chart.jpg" in content_str
+    assert "Summarize this document:" in content_str
     assert "[File: report.pdf]" in content_str
 
 
