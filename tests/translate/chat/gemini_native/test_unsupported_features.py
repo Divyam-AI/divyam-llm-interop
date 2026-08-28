@@ -1,9 +1,12 @@
 # Copyright 2025 Divyam.ai
 # SPDX-License-Identifier: Apache-2.0
 
-"""W5: Gemini request building must refuse content it cannot represent
-instead of silently flattening/dropping it, while leaving certified text and
-function-tool requests untouched."""
+"""Gemini request building for multimodal and structured-output requests.
+
+Image content and response_format=json_schema are mapped onto Gemini's native
+shapes (inlineData / fileData, responseSchema) instead of being silently
+dropped. The one case Gemini native genuinely cannot honour — a remote image
+URL it cannot fetch — still raises rather than losing the image."""
 
 import pytest
 
@@ -37,31 +40,49 @@ def _from_unified(body: dict) -> dict:
     return _translator().request_from_unified(request, GEMINI_MODEL).body
 
 
-def test_image_content_raises_target_capability_error():
-    body = {
+def _image_message_body(url: str) -> dict:
+    return {
         "model": "gemini-2.5-pro",
         "messages": [
             {
                 "role": "user",
                 "content": [
                     {"type": "text", "text": "What is in this image?"},
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": "https://example.com/x.png"},
-                    },
+                    {"type": "image_url", "image_url": {"url": url}},
                 ],
             }
         ],
     }
 
+
+def test_data_uri_image_becomes_inline_data():
+    result = _from_unified(_image_message_body("data:image/png;base64,iVBORw0KGgo="))
+
+    parts = result["contents"][0]["parts"]
+    assert parts[0] == {"text": "What is in this image?"}
+    assert parts[1] == {
+        "inlineData": {"mimeType": "image/png", "data": "iVBORw0KGgo="}
+    }
+
+
+def test_gs_uri_image_becomes_file_data():
+    result = _from_unified(_image_message_body("gs://bucket/photo.png"))
+
+    parts = result["contents"][0]["parts"]
+    assert parts[1] == {"fileData": {"fileUri": "gs://bucket/photo.png"}}
+
+
+def test_remote_url_image_still_raises():
+    """Gemini native cannot fetch a remote URL, so the image is refused, not lost."""
     with pytest.raises(TargetCapabilityError) as exc_info:
-        _from_unified(body)
+        _from_unified(_image_message_body("https://example.com/x.png"))
 
     assert exc_info.value.path == "$.messages[0].content[1]"
     assert exc_info.value.target_api_type == ModelApiType.GEMINI
+    assert exc_info.value.details["reason"] == "remote_url_unfetchable"
 
 
-def test_json_schema_response_format_raises_target_capability_error():
+def test_json_schema_response_format_becomes_response_schema():
     body = {
         "model": "gemini-2.5-pro",
         "messages": [{"role": "user", "content": "Extract name and age."}],
@@ -71,17 +92,26 @@ def test_json_schema_response_format_raises_target_capability_error():
                 "name": "person",
                 "schema": {
                     "type": "object",
-                    "properties": {"name": {"type": "string"}},
+                    "properties": {
+                        "name": {"type": "string"},
+                        "age": {"type": "integer"},
+                    },
+                    "required": ["name", "age"],
+                    "additionalProperties": False,
                 },
             },
         },
     }
 
-    with pytest.raises(TargetCapabilityError) as exc_info:
-        _from_unified(body)
+    generation_config = _from_unified(body)["generationConfig"]
 
-    assert exc_info.value.path == "$.response_format"
-    assert exc_info.value.details == {"response_format_type": "json_schema"}
+    assert generation_config["responseMimeType"] == "application/json"
+    schema = generation_config["responseSchema"]
+    assert schema["type"] == "object"
+    assert schema["properties"]["name"] == {"type": "string"}
+    assert schema["required"] == ["name", "age"]
+    # additionalProperties is not part of Gemini's responseSchema subset.
+    assert "additionalProperties" not in schema
 
 
 def test_plain_text_request_still_translates():

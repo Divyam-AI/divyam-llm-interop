@@ -211,21 +211,20 @@ class GeminiTranslator(Translator):
             from_request.body.to_dict(keep_unknowns=True)
         )
 
-        # JSON-schema structured output control has no equivalent in the Gemini
-        # native request shape; it was previously dropped silently. Refuse so the
-        # caller learns the target cannot honour the requested output contract.
+        # Chat Completions response_format=json_schema maps onto Gemini's native
+        # structured-output controls (responseMimeType + responseSchema) rather
+        # than being dropped. Captured here, applied to generationConfig below.
+        response_schema: dict[str, Any] | None = None
         if (
             unified.response_format is not None
             and unified.response_format.type == "json_schema"
+            and unified.response_format.json_schema is not None
         ):
-            raise TargetCapabilityError(
-                "Gemini native requests cannot represent Chat Completions "
-                "response_format=json_schema structured output control.",
-                source_api_type=ModelApiType.COMPLETIONS,
-                target_api_type=ModelApiType.GEMINI,
-                path="$.response_format",
-                details={"response_format_type": "json_schema"},
+            raw_schema = unified.response_format.json_schema.schema
+            raw_schema_dict = (
+                raw_schema.to_dict() if hasattr(raw_schema, "to_dict") else raw_schema
             )
+            response_schema = self._to_gemini_response_schema(raw_schema_dict)
 
         request_body: dict[str, Any] = {"model": target.name}
 
@@ -244,20 +243,6 @@ class GeminiTranslator(Translator):
         for message_index, message in enumerate(unified.messages):
             if message.role == "system":
                 continue
-
-            # Multimodal image blocks have no native Gemini part emitted on this
-            # path; the text-only builder below would drop them silently. Refuse
-            # so the image input is never lost without the caller knowing.
-            image_part_index = self._image_part_index(message.content)
-            if image_part_index is not None:
-                raise TargetCapabilityError(
-                    "Chat Completions image content cannot be represented as a "
-                    "native Gemini image part on this translation path.",
-                    source_api_type=ModelApiType.COMPLETIONS,
-                    target_api_type=ModelApiType.GEMINI,
-                    path=(f"$.messages[{message_index}].content[{image_part_index}]"),
-                    details={"content_type": "image_url"},
-                )
 
             if message.role == "tool":
                 tool_name = (
@@ -280,10 +265,9 @@ class GeminiTranslator(Translator):
                 continue
 
             role = "model" if message.role == "assistant" else "user"
-            parts: list[dict[str, Any]] = []
-
-            if message.content:
-                parts.append({"text": message.content})
+            parts: list[dict[str, Any]] = self._content_parts(
+                message.content, message_index
+            )
 
             if message.role == "assistant" and message.tool_calls:
                 for tool_call in message.tool_calls:
@@ -327,6 +311,9 @@ class GeminiTranslator(Translator):
             generation_config["topK"] = unified.unknowns.get("top_k")
         if unified.seed is not None:
             generation_config["seed"] = unified.seed
+        if response_schema is not None:
+            generation_config["responseMimeType"] = "application/json"
+            generation_config["responseSchema"] = response_schema
 
         if generation_config:
             request_body["generationConfig"] = generation_config
@@ -764,23 +751,116 @@ class GeminiTranslator(Translator):
             finish_reason = str(finish_reason)
         return finish_reason
 
-    @staticmethod
-    def _image_part_index(content: Any) -> int | None:
-        """Index of the first image content block, else ``None``.
+    def _content_parts(
+        self, content: Any, message_index: int
+    ) -> list[dict[str, Any]]:
+        """Gemini parts for a message's content.
 
-        Only multimodal image blocks trigger this; plain string content and
-        text-only structured content return ``None`` so certified text/tool
-        requests are untouched.
+        Plain string content becomes a single text part. Multimodal list
+        content is walked part-by-part: text blocks become text parts and image
+        blocks become native ``inlineData`` / ``fileData`` parts. A remote image
+        URL, which Gemini native cannot fetch, raises rather than being dropped.
         """
+        if content is None:
+            return []
+        if isinstance(content, str):
+            return [{"text": content}] if content else []
         if not isinstance(content, list):
-            return None
-        for index, part in enumerate(content):
-            if isinstance(part, dict) and part.get("type") in (
-                "image_url",
-                "input_image",
-            ):
-                return index
-        return None
+            return []
+
+        parts: list[dict[str, Any]] = []
+        for part_index, part in enumerate(content):
+            if not isinstance(part, dict):
+                continue
+            ptype = part.get("type")
+            if ptype in ("image_url", "input_image"):
+                parts.append(
+                    self._gemini_image_part(part, message_index, part_index)
+                )
+            elif ptype in ("text", "input_text", "output_text") or "text" in part:
+                text = part.get("text", "")
+                if text:
+                    parts.append({"text": text})
+        return parts
+
+    @classmethod
+    def _gemini_image_part(
+        cls, part: dict[str, Any], message_index: int, part_index: int
+    ) -> dict[str, Any]:
+        """A native Gemini image part, or raise if it cannot be represented."""
+        url = cls._image_url(part)
+        if url.startswith("data:"):
+            mime_type, data = cls._parse_data_uri(url, message_index, part_index)
+            return {"inlineData": {"mimeType": mime_type, "data": data}}
+        if url.startswith("gs://"):
+            return {"fileData": {"fileUri": url}}
+        # A remote http(s) URL (or a file_id with no inline bytes) cannot be
+        # inlined, and Gemini native does not fetch remote image URLs. Refuse so
+        # the image is never silently lost.
+        raise TargetCapabilityError(
+            "Chat Completions image content given as a remote URL cannot be "
+            "represented as a native Gemini image part; supply a data: URI "
+            "(inline base64) or a gs:// file URI.",
+            source_api_type=ModelApiType.COMPLETIONS,
+            target_api_type=ModelApiType.GEMINI,
+            path=f"$.messages[{message_index}].content[{part_index}]",
+            details={"content_type": "image_url", "reason": "remote_url_unfetchable"},
+        )
+
+    @staticmethod
+    def _image_url(part: dict[str, Any]) -> str:
+        """Pull the URL out of an image content block across its known shapes."""
+        image_url = part.get("image_url")
+        if isinstance(image_url, str):
+            return image_url
+        if isinstance(image_url, dict):
+            return image_url.get("url", "")
+        return part.get("url", "")
+
+    @staticmethod
+    def _parse_data_uri(
+        url: str, message_index: int, part_index: int
+    ) -> tuple[str, str]:
+        """Split ``data:<mime>;base64,<data>`` into its mime type and payload."""
+        header, separator, data = url.partition(",")
+        if not separator or ";base64" not in header:
+            raise TargetCapabilityError(
+                "Chat Completions image data URI must be base64-encoded to "
+                "become a native Gemini inlineData part.",
+                source_api_type=ModelApiType.COMPLETIONS,
+                target_api_type=ModelApiType.GEMINI,
+                path=f"$.messages[{message_index}].content[{part_index}]",
+                details={"content_type": "image_url", "reason": "unsupported_data_uri"},
+            )
+        mime_type = header[len("data:") :].split(";")[0] or "application/octet-stream"
+        return mime_type, data
+
+    # Keys valid in a JSON Schema but rejected by Gemini's responseSchema subset.
+    _GEMINI_UNSUPPORTED_SCHEMA_KEYS = frozenset(
+        {
+            "additionalProperties",
+            "$schema",
+            "$id",
+            "$ref",
+            "$defs",
+            "definitions",
+            "patternProperties",
+            "strict",
+        }
+    )
+
+    @classmethod
+    def _to_gemini_response_schema(cls, schema: Any) -> Any:
+        """Recursively drop JSON-Schema keys Gemini's responseSchema rejects."""
+        if isinstance(schema, dict):
+            return {
+                key: cls._to_gemini_response_schema(value)
+                for key, value in schema.items()
+                if key not in cls._GEMINI_UNSUPPORTED_SCHEMA_KEYS
+            }
+        if isinstance(schema, list):
+            return [cls._to_gemini_response_schema(value) for value in schema]
+        return schema
 
     @staticmethod
     def _extract_parts_text(parts: list[dict[str, Any]]) -> str | None:
