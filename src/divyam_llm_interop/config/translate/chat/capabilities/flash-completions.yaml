@@ -1,0 +1,18 @@
+- selector:
+    name: glm-5.3-flash
+  capabilities:
+    supported_api_types:
+      - completions
+    api_capabilities:
+      completions:
+        rename_fields:
+          max_completion_tokens: max_tokens
+- selector:
+    name: deepseek-v4-flash-0731
+  capabilities:
+    supported_api_types:
+      - completions
+    api_capabilities:
+      completions:
+        rename_fields:
+          max_completion_tokens: max_tokens
