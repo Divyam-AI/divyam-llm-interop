@@ -110,6 +110,23 @@ def test_translate_request_openai_to_gemini_still_supported(translator):
     assert translated.body["max_tokens"] == 2222
 
 
+def test_translate_request_uses_ollama_token_field_for_gemma4_tag(translator):
+    model = Model(name="gemma4:e2b-mlx", api_type=ModelApiType.COMPLETIONS)
+    chat_request = ChatRequest(
+        body={
+            "model": "gemma4:e2b-mlx",
+            "messages": [{"role": "user", "content": "hello"}],
+            "max_completion_tokens": 8,
+        }
+    )
+
+    translated = translator.translate_request(chat_request, model, model)
+
+    assert translated.body["model"] == "gemma4:e2b-mlx"
+    assert translated.body["max_tokens"] == 8
+    assert "max_completion_tokens" not in translated.body
+
+
 def test_translate_request_openai_to_gemini_native(translator):
     source = Model(name="gpt-4.1-mini", api_type=ModelApiType.COMPLETIONS)
     target = Model(name="gemini-2.5-pro", api_type=ModelApiType.GEMINI)

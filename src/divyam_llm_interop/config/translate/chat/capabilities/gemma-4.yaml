@@ -1,0 +1,9 @@
+- selector:
+    name: gemma4
+  capabilities:
+    supported_api_types:
+      - completions
+    api_capabilities:
+      completions:
+        rename_fields:
+          max_completion_tokens: max_tokens

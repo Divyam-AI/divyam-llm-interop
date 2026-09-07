@@ -12,4 +12,7 @@
 - name: gemma-3-12b-it
 - name: gemma-3-27b
 - name: gemma-3-27b-it
+- name: gemma4
+  name_match:
+    regex: 'gemma4(?::.*)?'
 - name: gemma-embed
