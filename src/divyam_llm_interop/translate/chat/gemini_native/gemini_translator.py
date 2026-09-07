@@ -816,7 +816,7 @@ class GeminiTranslator(Translator):
 
         parameters = function_dict.get("parameters")
         if isinstance(parameters, dict):
-            declaration["parameters"] = parameters
+            declaration["parameters_json_schema"] = parameters
 
         return declaration
 

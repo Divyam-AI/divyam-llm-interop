@@ -1006,7 +1006,7 @@ def test_nested_object_array_schema_is_portable(
     )
 
     assert (
-        result.body["tools"][0]["functionDeclarations"][0]["parameters"]
+        result.body["tools"][0]["functionDeclarations"][0]["parameters_json_schema"]
         == (body["tools"][0]["input_schema"])
     )
 

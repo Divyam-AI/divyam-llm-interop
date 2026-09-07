@@ -66,6 +66,55 @@ def test_native_function_id_and_result_are_correlated_in_unified_request():
     assert unified.messages[1].tool_result_is_error is False
 
 
+def test_openai_function_schema_uses_gemini_json_schema_field():
+    request = ChatRequest(
+        body={
+            "model": CHAT_MODEL.name,
+            "messages": [{"role": "user", "content": "Submit the answer."}],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "submit_answer",
+                        "description": "Submit a grounded answer.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "answer": {"type": "string"},
+                                "count": {
+                                    "type": "integer",
+                                    "enum": [1, 2, 3],
+                                },
+                                "details": {
+                                    "type": "string",
+                                    "optional": True,
+                                },
+                            },
+                            "required": ["answer"],
+                            "additionalProperties": False,
+                        },
+                    },
+                }
+            ],
+        }
+    )
+
+    result = ChatTranslator().translate_request(request, CHAT_MODEL, GEMINI_MODEL)
+
+    declaration = result.body["tools"][0]["functionDeclarations"][0]
+    assert "parameters" not in declaration
+    assert declaration["parameters_json_schema"]["additionalProperties"] is False
+    assert declaration["parameters_json_schema"]["properties"]["count"]["enum"] == [
+        1,
+        2,
+        3,
+    ]
+    assert (
+        declaration["parameters_json_schema"]["properties"]["details"]["optional"]
+        is True
+    )
+
+
 def test_missing_parallel_ids_are_stable_collision_free_and_fifo_correlated():
     request = ChatRequest(
         body={
