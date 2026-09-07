@@ -66,7 +66,7 @@
         "content": [
           {
             "text": "Sorry I did not understand. Can you please elaborate your request?",
-            "type": "input_text"
+            "type": "output_text"
           }
         ],
         "role": "assistant"

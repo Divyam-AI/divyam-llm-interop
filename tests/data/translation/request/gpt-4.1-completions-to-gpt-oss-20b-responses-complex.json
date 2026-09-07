@@ -178,7 +178,7 @@
         "role": "assistant",
         "content": [
           {
-            "type": "input_text",
+            "type": "output_text",
             "text": "Hello! How can I help you today?"
           }
         ]
@@ -207,7 +207,7 @@
         "role": "assistant",
         "content": [
           {
-            "type": "input_text",
+            "type": "output_text",
             "text": "The current temperature in London is 16\u00b0C with light rain."
           }
         ]
@@ -236,7 +236,7 @@
         "role": "assistant",
         "content": [
           {
-            "type": "input_text",
+            "type": "output_text",
             "text": "In New York, it's currently 20\u00b0C and sunny \u2014 a nice day compared to London!"
           }
         ]
@@ -265,7 +265,7 @@
         "role": "assistant",
         "content": [
           {
-            "type": "input_text",
+            "type": "output_text",
             "text": "The temperature difference between London and New York is about 4\u00b0C \u2014 New York is warmer right now."
           }
         ]

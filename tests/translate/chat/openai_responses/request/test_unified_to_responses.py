@@ -36,6 +36,41 @@ def test_simple_text_request():
     assert responses_req["max_output_tokens"] == 150
 
 
+def test_multi_turn_assistant_text_uses_output_text():
+    completion_request = {
+        "model": "gpt-4o",
+        "messages": [
+            {"role": "user", "content": "Who wrote Hamlet?"},
+            {"role": "assistant", "content": "William Shakespeare wrote Hamlet."},
+            {"role": "user", "content": "When was he born?"},
+        ],
+    }
+
+    responses_request = convert_completion_request_to_responses_request(
+        completion_request
+    )
+
+    assert responses_request["input"] == [
+        {
+            "role": "user",
+            "content": [{"type": "input_text", "text": "Who wrote Hamlet?"}],
+        },
+        {
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "output_text",
+                    "text": "William Shakespeare wrote Hamlet.",
+                }
+            ],
+        },
+        {
+            "role": "user",
+            "content": [{"type": "input_text", "text": "When was he born?"}],
+        },
+    ]
+
+
 def test_function_calling_request():
     completion_req_function = {
         "model": "gpt-4o",
@@ -250,7 +285,7 @@ def test_chat_translator_retains_explicit_vllm_tool_output_workaround(monkeypatc
         "role": "assistant",
         "content": [
             {
-                "type": "input_text",
+                "type": "output_text",
                 "text": "called function get_weather and got output sunny",
             }
         ],
@@ -507,6 +542,7 @@ def test_assistant_text_and_tool_call():
 
     # Assistant text message
     assert input_items[1]["role"] == "assistant"
+    assert input_items[1]["content"][0]["type"] == "output_text"
     assert "help you book" in input_items[1]["content"][0]["text"]
 
     # Tool output message

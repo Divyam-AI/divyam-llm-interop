@@ -139,17 +139,14 @@ def convert_completion_request_to_responses_request(
         if isinstance(content, str):
             content_parts.append(
                 {
-                    "type": "input_text",
+                    "type": "input_text" if role == "user" else "output_text",
                     "text": content,
                 }
             )
         elif isinstance(content, list):
             for part in content:
                 if isinstance(part, dict):
-                    adj = dict(part)
-                    if role == "assistant" and adj.get("type") == "output_text":
-                        adj["type"] = "input_text"
-                    content_parts.append(_convert_part(adj, role))
+                    content_parts.append(_convert_part(part, role))
         if content_parts:
             message_item["content"] = content_parts
         elif role == "assistant" and tool_calls:
@@ -219,7 +216,7 @@ def convert_completion_request_to_responses_request(
                                 "role": "assistant",
                                 "content": [
                                     {
-                                        "type": "input_text",
+                                        "type": "output_text",
                                         "text": f"called function {func_name} and got "
                                         f"output {output_str}",
                                     }
