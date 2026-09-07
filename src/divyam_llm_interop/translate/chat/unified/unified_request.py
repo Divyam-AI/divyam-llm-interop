@@ -171,7 +171,7 @@ class UnifiedFunction:
         parameters = JSONSchema.from_dict(data.get("parameters", {}))
         return cls(
             name=data["name"],
-            description=data["description"],
+            description=data.get("description", ""),
             parameters=parameters,
             unknowns=unknowns,
         )
