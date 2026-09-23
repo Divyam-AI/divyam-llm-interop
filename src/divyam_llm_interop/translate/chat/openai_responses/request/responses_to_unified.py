@@ -9,6 +9,16 @@ from divyam_llm_interop.translate.chat.base.translation_utils import (
 )
 
 
+def _responses_image_url(part: dict[str, Any]) -> str:
+    """Pull the URL out of a Responses input_image block across its shapes."""
+    image_url = part.get("image_url")
+    if isinstance(image_url, str):
+        return image_url
+    if isinstance(image_url, dict):
+        return image_url.get("url", "")
+    return part.get("url", "")
+
+
 def convert_responses_to_completions_request(
     responses_request: dict[str, Any],
 ) -> dict[str, Any]:
@@ -49,7 +59,7 @@ def convert_responses_to_completions_request(
                 )
                 pending_function_calls.clear()
 
-            for item in input_data:
+            for item_index, item in enumerate(input_data):
                 if item.get("type") == "function_call":
                     pending_function_calls.append(
                         {
@@ -111,19 +121,46 @@ def convert_responses_to_completions_request(
                 if isinstance(content, str):
                     msg["content"] = content
                 elif isinstance(content, list):
-                    parts_texts = []
-                    for part in content:
-                        ptype = part.get("type")
-                        if ptype == "input_text" or ptype == "output_text":
-                            parts_texts.append(part.get("text", ""))
-                        elif ptype == "input_image":
-                            url = part.get("image_url")
-                            if url:
-                                parts_texts.append(f"[Image: {url}]")
-                        elif ptype == "input_file":
-                            filename = part.get("filename", "unknown")
-                            parts_texts.append(f"[File: {filename}]")
-                    msg["content"] = " ".join(parts_texts) if parts_texts else None
+                    has_image = any(
+                        isinstance(part, dict) and part.get("type") == "input_image"
+                        for part in content
+                    )
+                    if has_image:
+                        # Chat Completions supports multimodal content natively,
+                        # so emit its array form (text + image_url blocks) and
+                        # keep the image instead of flattening it to text.
+                        content_blocks: list[dict[str, Any]] = []
+                        for part in content:
+                            ptype = part.get("type")
+                            if ptype in ("input_text", "output_text"):
+                                content_blocks.append(
+                                    {"type": "text", "text": part.get("text", "")}
+                                )
+                            elif ptype == "input_image":
+                                image_url: dict[str, Any] = {
+                                    "url": _responses_image_url(part)
+                                }
+                                if part.get("detail") is not None:
+                                    image_url["detail"] = part["detail"]
+                                content_blocks.append(
+                                    {"type": "image_url", "image_url": image_url}
+                                )
+                            elif ptype == "input_file":
+                                filename = part.get("filename", "unknown")
+                                content_blocks.append(
+                                    {"type": "text", "text": f"[File: {filename}]"}
+                                )
+                        msg["content"] = content_blocks
+                    else:
+                        parts_texts = []
+                        for part in content:
+                            ptype = part.get("type")
+                            if ptype == "input_text" or ptype == "output_text":
+                                parts_texts.append(part.get("text", ""))
+                            elif ptype == "input_file":
+                                filename = part.get("filename", "unknown")
+                                parts_texts.append(f"[File: {filename}]")
+                        msg["content"] = " ".join(parts_texts) if parts_texts else None
 
                 # Preserve tool calls for assistant messages
                 if role == "assistant" and "tool_calls" in item:

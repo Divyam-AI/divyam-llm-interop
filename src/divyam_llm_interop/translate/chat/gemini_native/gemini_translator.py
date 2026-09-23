@@ -209,6 +209,22 @@ class GeminiTranslator(Translator):
         unified = UnifiedChatCompletionsRequestBody.from_dict(
             from_request.body.to_dict(keep_unknowns=True)
         )
+
+        # Chat Completions response_format=json_schema maps onto Gemini's native
+        # structured-output controls (responseMimeType + responseSchema) rather
+        # than being dropped. Captured here, applied to generationConfig below.
+        response_schema: dict[str, Any] | None = None
+        if (
+            unified.response_format is not None
+            and unified.response_format.type == "json_schema"
+            and unified.response_format.json_schema is not None
+        ):
+            raw_schema = unified.response_format.json_schema.schema
+            raw_schema_dict = (
+                raw_schema.to_dict() if hasattr(raw_schema, "to_dict") else raw_schema
+            )
+            response_schema = self._to_gemini_response_schema(raw_schema_dict)
+
         request_body: dict[str, Any] = {"model": target.name}
 
         system_messages = [
@@ -248,10 +264,7 @@ class GeminiTranslator(Translator):
                 continue
 
             role = "model" if message.role == "assistant" else "user"
-            parts: list[dict[str, Any]] = []
-
-            if message.content:
-                parts.append({"text": message.content})
+            parts: list[dict[str, Any]] = self._content_parts(message.content)
 
             if message.role == "assistant" and message.tool_calls:
                 for tool_call in message.tool_calls:
@@ -295,6 +308,9 @@ class GeminiTranslator(Translator):
             generation_config["topK"] = unified.unknowns.get("top_k")
         if unified.seed is not None:
             generation_config["seed"] = unified.seed
+        if response_schema is not None:
+            generation_config["responseMimeType"] = "application/json"
+            generation_config["responseSchema"] = response_schema
 
         if generation_config:
             request_body["generationConfig"] = generation_config
@@ -731,6 +747,119 @@ class GeminiTranslator(Translator):
         if not isinstance(finish_reason, str):
             finish_reason = str(finish_reason)
         return finish_reason
+
+    def _content_parts(self, content: Any) -> list[dict[str, Any]]:
+        """Gemini parts for a message's content.
+
+        Plain string content becomes a single text part. Multimodal list content
+        is walked part-by-part: text blocks become text parts and image blocks
+        become native ``inlineData`` (data: URIs) or ``fileData`` (any other
+        reference) parts. Every image yields a part — nothing is silently
+        dropped — and Gemini itself adjudicates whether it can resolve the URI.
+        """
+        if content is None:
+            return []
+        if isinstance(content, str):
+            return [{"text": content}] if content else []
+        if not isinstance(content, list):
+            return []
+
+        parts: list[dict[str, Any]] = []
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            ptype = part.get("type")
+            if ptype in ("image_url", "input_image"):
+                parts.append(self._gemini_image_part(part))
+            elif ptype in ("text", "input_text", "output_text") or "text" in part:
+                text = part.get("text", "")
+                if text:
+                    parts.append({"text": text})
+        return parts
+
+    @classmethod
+    def _gemini_image_part(cls, part: dict[str, Any]) -> dict[str, Any]:
+        """A native Gemini image part.
+
+        A ``data:`` URI is inlined as ``inlineData``; any other reference
+        (``gs://``, a Files-API URL, or a plain web URL) is passed through as
+        ``fileData`` so the provider — not this translator — decides whether it
+        can resolve the URI. This never drops the image and never pre-judges a
+        capability the provider owns.
+        """
+        url = cls._image_url(part)
+        if url.startswith("data:"):
+            mime_type, data = cls._parse_data_uri(url)
+            return {"inlineData": {"mimeType": mime_type, "data": data}}
+        file_data: dict[str, Any] = {"fileUri": url}
+        mime_type = cls._guess_image_mime(url)
+        if mime_type:
+            file_data["mimeType"] = mime_type
+        return {"fileData": file_data}
+
+    @staticmethod
+    def _image_url(part: dict[str, Any]) -> str:
+        """Pull the URL out of an image content block across its known shapes."""
+        image_url = part.get("image_url")
+        if isinstance(image_url, str):
+            return image_url
+        if isinstance(image_url, dict):
+            return image_url.get("url", "")
+        return part.get("url", "")
+
+    @staticmethod
+    def _parse_data_uri(url: str) -> tuple[str, str]:
+        """Split ``data:<mime>;base64,<data>`` into its mime type and payload.
+
+        Best-effort: a malformed data URI still yields a part, which the
+        provider rejects loudly rather than the image being silently lost.
+        """
+        header, _, data = url.partition(",")
+        mime_type = header[len("data:") :].split(";")[0] or "application/octet-stream"
+        return mime_type, data
+
+    @staticmethod
+    def _guess_image_mime(url: str) -> str | None:
+        """Best-effort image mime type from a URL's extension, else ``None``."""
+        lowered = url.lower().split("?")[0]
+        for extension, mime_type in (
+            (".png", "image/png"),
+            (".jpg", "image/jpeg"),
+            (".jpeg", "image/jpeg"),
+            (".gif", "image/gif"),
+            (".webp", "image/webp"),
+            (".heic", "image/heic"),
+        ):
+            if lowered.endswith(extension):
+                return mime_type
+        return None
+
+    # Keys valid in a JSON Schema but rejected by Gemini's responseSchema subset.
+    _GEMINI_UNSUPPORTED_SCHEMA_KEYS = frozenset(
+        {
+            "additionalProperties",
+            "$schema",
+            "$id",
+            "$ref",
+            "$defs",
+            "definitions",
+            "patternProperties",
+            "strict",
+        }
+    )
+
+    @classmethod
+    def _to_gemini_response_schema(cls, schema: Any) -> Any:
+        """Recursively drop JSON-Schema keys Gemini's responseSchema rejects."""
+        if isinstance(schema, dict):
+            return {
+                key: cls._to_gemini_response_schema(value)
+                for key, value in schema.items()
+                if key not in cls._GEMINI_UNSUPPORTED_SCHEMA_KEYS
+            }
+        if isinstance(schema, list):
+            return [cls._to_gemini_response_schema(value) for value in schema]
+        return schema
 
     @staticmethod
     def _extract_parts_text(parts: list[dict[str, Any]]) -> str | None:
