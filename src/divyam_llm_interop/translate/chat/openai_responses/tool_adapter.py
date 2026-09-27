@@ -66,6 +66,15 @@ class ToolBinding:
         return text
 
 
+def _tool_alias(name: str, namespace: str | None, custom: bool) -> str:
+    if not custom and namespace is None:
+        return name
+    qualified = f"{namespace}.{name}" if namespace else name
+    digest = hashlib.sha256(json.dumps((namespace, name)).encode()).hexdigest()[:12]
+    alias = re.sub(r"[^A-Za-z0-9_-]", "_", qualified)[:48] + "_" + digest
+    return alias if re.match(r"[A-Za-z_]", alias) else "t_" + alias
+
+
 class ResponsesToolAdapter:
     """Normalize tools/history and restore the caller's tool identities."""
 
@@ -123,16 +132,7 @@ class ResponsesToolAdapter:
             # All adapted names use a digest, avoiding collisions with user names,
             # truncation, punctuation, and identically named tools in two namespaces.
             qualified = f"{namespace}.{name}" if namespace else name
-            digest = hashlib.sha256(json.dumps(identity).encode()).hexdigest()[:12]
-            alias = (
-                name
-                if kind == "function" and namespace is None
-                else re.sub(r"[^A-Za-z0-9_-]", "_", qualified)[:48] + "_" + digest
-            )
-            if (kind == "custom" or namespace is not None) and not re.match(
-                r"[A-Za-z_]", alias
-            ):
-                alias = "t_" + alias
+            alias = _tool_alias(name, namespace, kind == "custom")
             if alias in self.bindings:
                 raise UnsupportedFeatureError("Tool alias collision")
             grammar = None
@@ -190,7 +190,7 @@ class ResponsesToolAdapter:
             self._identities[identity] = alias
             self._definitions[identity] = tool
 
-    def _alias(self, item: dict[str, Any]) -> str:
+    def _alias(self, item: dict[str, Any], *, historical: bool = False) -> str:
         name = item.get("name")
         namespace = item.get("namespace")
         if not isinstance(name, str) or (
@@ -200,6 +200,12 @@ class ResponsesToolAdapter:
         key = (namespace, name)
         if key in self._identities:
             return self._identities[key]
+        if historical and namespace is None and item.get("type") == "function_call":
+            # A removed plain function is not the current namespaced tool that
+            # happens to share its leaf name. Missing namespace is not provenance.
+            if name in self.bindings:
+                raise UnsupportedFeatureError("Tool alias collision")
+            return name
         # Some Responses clients omit namespace when the leaf name is unique.
         matches = [
             alias
@@ -208,6 +214,13 @@ class ResponsesToolAdapter:
         ]
         if namespace is None and len(matches) == 1:
             return matches[0]
+        if historical and (namespace is not None or not matches):
+            # A transcript can retain a tool after that tool is disabled. Naming
+            # the historical call must not re-enable it in the execution tools.
+            alias = _tool_alias(name, namespace, item.get("type") == "custom_tool_call")
+            if alias in self.bindings:
+                raise UnsupportedFeatureError("Tool alias collision")
+            return alias
         raise UnsupportedFeatureError(
             f"Tool history has an unknown or ambiguous tool: {name}"
         )
@@ -244,8 +257,12 @@ class ResponsesToolAdapter:
                 continue
             if kind in {"custom_tool_call", "function_call"}:
                 # Ordinary function history can outlive its tool definition.
-                if kind == "custom_tool_call" or self._identities:
-                    item["name"] = self._alias(item)
+                if (
+                    kind == "custom_tool_call"
+                    or self._identities
+                    or item.get("namespace")
+                ):
+                    item["name"] = self._alias(item, historical=True)
                 item.pop("namespace", None)
                 if kind == "custom_tool_call":
                     if not isinstance(item.get("input"), str):
