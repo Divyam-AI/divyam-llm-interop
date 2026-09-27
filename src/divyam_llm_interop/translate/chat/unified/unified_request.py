@@ -110,6 +110,9 @@ class UnifiedMessage:
 
     # If the model refused to respond, this contains the refusal message
     refusal: str | None = None
+    reasoning: str | dict[str, Any] | None = None
+    reasoning_content: str | None = None
+    reasoning_details: list[dict[str, Any]] | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "UnifiedMessage":
@@ -127,6 +130,9 @@ class UnifiedMessage:
             tool_name=data.get("tool_name"),
             tool_result_is_error=data.get("tool_result_is_error"),
             refusal=data.get("refusal"),
+            reasoning=data.get("reasoning"),
+            reasoning_content=data.get("reasoning_content"),
+            reasoning_details=data.get("reasoning_details"),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -148,6 +154,10 @@ class UnifiedMessage:
             result["tool_result_is_error"] = self.tool_result_is_error
         if self.refusal is not None:
             result["refusal"] = self.refusal
+        for key in ("reasoning", "reasoning_content", "reasoning_details"):
+            value = getattr(self, key)
+            if value is not None:
+                result[key] = value
 
         return result
 

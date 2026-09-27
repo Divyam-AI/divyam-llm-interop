@@ -33,8 +33,12 @@ from divyam_llm_interop.translate.chat.openai_completions.completions_translator
 from divyam_llm_interop.translate.chat.openai_responses.openai_responses_translator import (
     OpenAiResponsesTranslator,
 )
+from divyam_llm_interop.translate.chat.openai_responses.tool_adapter import (
+    ResponsesToolAdapter,
+)
 from divyam_llm_interop.translate.chat.translation_errors import (
     InvalidProtocolRequestError,
+    TargetCapabilityError,
 )
 from divyam_llm_interop.translate.chat.types import (
     ChatRequest,
@@ -49,6 +53,9 @@ class ChatTranslateConfig:
     # If set uses generic translation rules when the translator encounters
     # unknown models.
     allow_generic_translate: bool = False
+    # Serving routers require declared endpoint support; standalone translators
+    # retain their existing best-effort behavior for ordinary function tools.
+    require_declared_capabilities: bool = False
 
 
 class ChatTranslator:
@@ -83,17 +90,45 @@ class ChatTranslator:
         target_translator = self._find_translator_for_model(model=target)
 
         if (
-            target.api_type == ModelApiType.ANTHROPIC_MESSAGES
-            and source.api_type != ModelApiType.ANTHROPIC_MESSAGES
-        ):
-            validate_source_profile_for_anthropic_target(chat_request.body, source)
-
-        if (
             source_translator == target_translator
             and source_translator.are_requests_compatible(source, target)
         ):
             # Short circuit the requests since the models are compatible.
             return chat_request
+
+        if (
+            target.api_type == ModelApiType.ANTHROPIC_MESSAGES
+            and source.api_type != ModelApiType.ANTHROPIC_MESSAGES
+        ):
+            validate_source_profile_for_anthropic_target(chat_request.body, source)
+
+        response_adapter = None
+        if source.api_type == ModelApiType.RESPONSES:
+            if self._model_registry.get_capabilities(target).emits_opaque_reasoning:
+                raise TargetCapabilityError(
+                    "Endpoint emits opaque reasoning that the Responses adapter cannot preserve",
+                    target_api_type=target.api_type,
+                )
+            response_adapter = ResponsesToolAdapter(chat_request.body)
+            chat_request = ChatRequest(
+                body=response_adapter.normalize(chat_request.body),
+                headers=chat_request.headers,
+                query_parameters=chat_request.query_parameters,
+                path_parameters=chat_request.path_parameters,
+            )
+        function_support = self._model_registry.get_capabilities(
+            target
+        ).supports_function_calling
+        if (
+            self._config.require_declared_capabilities
+            and chat_request.body.get("tools")
+            and function_support is not True
+        ):
+            raise TargetCapabilityError(
+                "Endpoint has not declared function-calling support",
+                target_api_type=target.api_type,
+                path="$.tools",
+            )
 
         unified = source_translator.request_to_unified(chat_request, source)
         if source.api_type == ModelApiType.ANTHROPIC_MESSAGES:
@@ -111,10 +146,16 @@ class ChatTranslator:
                 self._model_registry,
             )
         translated = target_translator.request_from_unified(unified, target)
+        if response_adapter and response_adapter.requires_restore:
+            translated.response_adapter = response_adapter
         return translated
 
     def translate_response(
-        self, chat_response: ChatResponse, source: Model, target: Model
+        self,
+        chat_response: ChatResponse,
+        source: Model,
+        target: Model,
+        request: ChatRequest | None = None,
     ) -> ChatResponse:
         """
         Translate the chat response from source to target.
@@ -132,14 +173,23 @@ class ChatTranslator:
             and source_translator.are_responses_compatible(source, target)
         ):
             # Short circuit the responses since the models are compatible.
-            return chat_response
-
-        unified = source_translator.response_to_unified(chat_response, source)
-        translated = target_translator.response_from_unified(unified, target)
+            translated = chat_response
+        else:
+            unified = source_translator.response_to_unified(chat_response, source)
+            translated = target_translator.response_from_unified(unified, target)
+        if request and request.response_adapter:
+            translated = ChatResponse(
+                body=request.response_adapter.restore_response(translated.body),
+                headers=translated.headers,
+            )
         return translated
 
     def translate_response_streaming(
-        self, chat_response: ChatResponseStreaming, source: Model, target: Model
+        self,
+        chat_response: ChatResponseStreaming,
+        source: Model,
+        target: Model,
+        request: ChatRequest | None = None,
     ) -> ChatResponseStreaming:
         """
         Translate the chat response from source to target.
@@ -157,10 +207,17 @@ class ChatTranslator:
             and source_translator.are_streaming_responses_compatible(source, target)
         ):
             # Short circuit the responses since the models are compatible.
-            return chat_response
-
-        unified = source_translator.stream_response_to_unified(chat_response, source)
-        translated = target_translator.stream_response_from_unified(unified, target)
+            translated = chat_response
+        else:
+            unified = source_translator.stream_response_to_unified(
+                chat_response, source
+            )
+            translated = target_translator.stream_response_from_unified(unified, target)
+        if request and request.response_adapter:
+            translated = ChatResponseStreaming(
+                stream=request.response_adapter.restore_stream(translated.stream),
+                headers=translated.headers,
+            )
         return translated
 
     def find_request_model(

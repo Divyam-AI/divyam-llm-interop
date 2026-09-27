@@ -185,6 +185,11 @@ class ModelCapabilities:
     # Optional feature flags
     supports_json_mode: Optional[bool] = None
     supports_function_calling: Optional[bool] = None
+    # Equal non-empty endpoint profiles permit native Responses passthrough,
+    # including opaque state. Declare only for mutually compatible endpoints.
+    responses_wire_profile: Optional[str] = None
+    # Opaque provider state cannot be represented faithfully by a text/function bridge.
+    emits_opaque_reasoning: Optional[bool] = None
     supports_vision: Optional[bool] = None
     supports_reasoning: Optional[bool] = None
     reasoning_enabled_by_default: Optional[bool] = None

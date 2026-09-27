@@ -7,6 +7,8 @@ from collections.abc import AsyncGenerator
 from copy import deepcopy
 from typing import Any, Optional
 
+from .reasoning import readable_reasoning
+
 
 class CompletionsToResponsesStreamConverter:
     """
@@ -70,6 +72,9 @@ class CompletionsToResponsesStreamConverter:
 
         usage_data: dict[str, Any] | None = None
         response_finished = False
+        reasoning_item: dict[str, Any] | None = None
+        reasoning_index = -1
+        reasoning_text = ""
 
         def next_seq() -> int:
             nonlocal seq
@@ -119,6 +124,27 @@ class CompletionsToResponsesStreamConverter:
                     "item": deepcopy(message_item),
                 }
                 is_first_chunk = False
+
+            reasoning_delta = readable_reasoning(delta)
+            if reasoning_delta:
+                if reasoning_item is None:
+                    reasoning_index = next_output_index
+                    next_output_index += 1
+                    reasoning_item = {
+                        "id": f"rs_{uuid.uuid4().hex}",
+                        "type": "reasoning",
+                        "status": "in_progress",
+                        "summary": [],
+                        "content": [],
+                    }
+                    response_obj["output"].append(reasoning_item)
+                    yield {
+                        "type": "response.output_item.added",
+                        "sequence_number": next_seq(),
+                        "output_index": reasoning_index,
+                        "item": deepcopy(reasoning_item),
+                    }
+                reasoning_text += reasoning_delta
 
             # --- Content deltas ---
             content_delta = delta.get("content")
@@ -194,6 +220,13 @@ class CompletionsToResponsesStreamConverter:
                         "item": deepcopy(tc_item),
                     }
 
+                else:
+                    if tool_call_delta.get("id"):
+                        tool_calls_buffer[tc_index]["call_id"] = tool_call_delta["id"]
+                    name_delta = tool_call_delta.get("function", {}).get("name")
+                    if name_delta:
+                        tool_calls_buffer[tc_index]["name"] += name_delta
+
                 args_delta = tool_call_delta.get("function", {}).get("arguments")
                 if args_delta:
                     tool_calls_buffer[tc_index]["arguments"] += args_delta
@@ -242,10 +275,26 @@ class CompletionsToResponsesStreamConverter:
                         "item": deepcopy(message_item),
                     }
 
+                if reasoning_item is not None:
+                    reasoning_item["status"] = "completed"
+                    reasoning_item["content"] = [
+                        {"type": "reasoning_text", "text": reasoning_text}
+                    ]
+                    yield {
+                        "type": "response.output_item.done",
+                        "sequence_number": next_seq(),
+                        "output_index": reasoning_index,
+                        "item": deepcopy(reasoning_item),
+                    }
+
                 # Close tool call items
                 for tc_idx in sorted(tool_calls_buffer):
                     tc = tool_calls_buffer[tc_idx]
-                    tc["status"] = "completed"
+                    tc["status"] = (
+                        "completed"
+                        if finish_reason in ("stop", "tool_calls")
+                        else "incomplete"
+                    )
                     tc_out_idx = tool_output_indices[tc_idx]
 
                     yield {

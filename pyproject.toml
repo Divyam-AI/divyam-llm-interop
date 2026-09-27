@@ -15,6 +15,7 @@ classifiers = [
 dependencies = [
     "pyyaml>=6.0.3",
     "typing-extensions>=4.15.0",
+    "lark>=1.2.2,<2",
 ]
 
 [project.urls]

@@ -195,6 +195,17 @@ def convert_responses_to_completions_request(
             key = "max_completion_tokens" if param == "max_output_tokens" else param
             completion_request[key] = value
 
+    choice = completion_request.get("tool_choice")
+    if (
+        isinstance(choice, dict)
+        and choice.get("type") == "function"
+        and "name" in choice
+    ):
+        completion_request["tool_choice"] = {
+            "type": "function",
+            "function": {"name": choice["name"]},
+        }
+
     # Handle stream options
     if completion_request.get("stream"):
         completion_request["stream_options"] = {"include_usage": True}
