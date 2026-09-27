@@ -133,6 +133,7 @@ def test_new_model_uses_endpoint_capabilities_and_preserves_custom_history():
         request=translated,
     )
     item = result.body["output"][0]
+    assert item["id"].startswith("ctc_")
     assert {k: item[k] for k in ["type", "name", "namespace", "call_id", "input"]} == {
         "type": "custom_tool_call",
         "name": "execute",
@@ -370,6 +371,8 @@ async def test_streamed_custom_input_is_decoded_and_validated_before_exposure(
         and done[0]["namespace"] == "runtime"
     )
     assert events[-1]["type"] == "response.completed"
+    assert done[0]["id"].startswith("ctc_")
+    assert {e["item_id"] for e in events if "item_id" in e} == {done[0]["id"]}
     assert any(i == done[0] for i in events[-1]["response"]["output"])
     assert events[-1]["response"]["usage"]["total_tokens"] == 18
     assert [e["sequence_number"] for e in events] == list(range(1, len(events) + 1))
