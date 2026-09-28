@@ -109,12 +109,19 @@ schema check alone does not establish tool-following quality or state support.
 
 ## Selector-only context
 
-`responses_to_selection_context` in
-`divyam_llm_interop.translate.chat.openai_responses.request.selection_context`
-returns a separate Chat Completions-shaped view for ranking. It omits encrypted
+`ChatTranslator.selection_context(request, api_type)` delegates to the source
+protocol adapter and returns a separate Chat Completions-shaped ranking view.
+The Responses implementation omits encrypted
 reasoning from a copy and uses the existing adapter and message conversion for
 instructions, readable reasoning and tool history. The caller must retain the
 original request for serving and run compatibility checks on that original.
 The projection is lossy and must never be sent to a provider. It does not resolve
 server-side history references; unsupported context and empty message history
 raise so the caller can apply its existing fallback policy.
+
+Use `prepare_request` to capture explicit ingress identity and permitted protocol
+headers/query parameters without forwarding gateway credentials. The same
+protocol adapters own response framing through `encode_response_stream`.
+Native Anthropic Messages passthrough requires matching, nonempty
+`anthropic_wire_profile` capabilities with the same account/state constraints
+described above; portable translation still validates unsupported semantics.
