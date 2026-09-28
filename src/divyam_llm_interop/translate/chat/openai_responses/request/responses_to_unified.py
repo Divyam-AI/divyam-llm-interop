@@ -10,6 +10,23 @@ from divyam_llm_interop.translate.chat.base.translation_utils import (
 from divyam_llm_interop.translate.chat.translation_errors import UnsupportedFeatureError
 
 
+def readable_reasoning_text(item: dict[str, Any]) -> str:
+    """Read a reasoning item without converting opaque or unknown content."""
+    if item.get("encrypted_content"):
+        raise UnsupportedFeatureError(
+            "Opaque reasoning state requires a compatible Responses endpoint"
+        )
+    parts = (item.get("content") or []) + (item.get("summary") or [])
+    if any(
+        not isinstance(part, dict)
+        or part.get("type") not in {"reasoning_text", "summary_text", "text"}
+        or not isinstance(part.get("text", ""), str)
+        for part in parts
+    ):
+        raise UnsupportedFeatureError("Unknown reasoning content cannot be translated")
+    return "\n".join(part["text"] for part in parts if part.get("text"))
+
+
 def convert_responses_to_completions_request(
     responses_request: dict[str, Any],
 ) -> dict[str, Any]:
@@ -71,24 +88,9 @@ def convert_responses_to_completions_request(
             for item in input_data:
                 if item.get("type") == "reasoning":
                     flush_function_calls()
-                    if item.get("encrypted_content"):
-                        raise UnsupportedFeatureError(
-                            "Opaque reasoning state requires a compatible Responses endpoint"
-                        )
-                    parts = (item.get("content") or []) + (item.get("summary") or [])
-                    if any(
-                        not isinstance(part, dict)
-                        or part.get("type")
-                        not in {"reasoning_text", "summary_text", "text"}
-                        or not isinstance(part.get("text", ""), str)
-                        for part in parts
-                    ):
-                        raise UnsupportedFeatureError(
-                            "Unknown reasoning content cannot be translated"
-                        )
-                    pending_reasoning.extend(
-                        part["text"] for part in parts if part.get("text")
-                    )
+                    text = readable_reasoning_text(item)
+                    if text:
+                        pending_reasoning.append(text)
                     continue
                 if item.get("type") == "function_call":
                     pending_function_calls.append(

@@ -1,11 +1,14 @@
 # Copyright 2025 Divyam.ai
 # SPDX-License-Identifier: Apache-2.0
 
+import json
 from abc import ABC, abstractmethod
+from typing import Any
 
 from divyam_llm_interop.translate.chat.model_config.model_registry import (
     ModelRegistry,
 )
+from divyam_llm_interop.translate.chat.translation_errors import InteropTranslationError
 from divyam_llm_interop.translate.chat.types import (
     ChatRequest,
     ChatResponse,
@@ -28,6 +31,38 @@ class Translator(ABC):
 
     def __init__(self, model_registry: ModelRegistry):
         self._model_registry: ModelRegistry = model_registry
+
+    request_header_prefixes: tuple[str, ...] = ()
+    request_query_parameters: tuple[str, ...] = ()
+    stream_done: str | None = None
+
+    def prepare_translation(
+        self, request: ChatRequest, source: Model, target: Model, *, native: bool
+    ) -> ChatRequest:
+        """Normalize source protocol details without changing the input request."""
+        return request
+
+    def validate_source_request(self, request: ChatRequest, source: Model) -> None:
+        """Validate the original source before translating into this protocol."""
+
+    def validate_translation(
+        self,
+        request: ChatRequest,
+        unified: UnifiedChatCompletionsRequest,
+        source: Model,
+        target: Model,
+    ) -> None:
+        """Check protocol semantics that cannot be silently dropped by a route."""
+
+    def selection_context(self, request: ChatRequest, source: Model) -> dict[str, Any]:
+        """Readable projection for ranking only; never use it for serving."""
+        return self.request_to_unified(request, source).body.to_dict(keep_unknowns=True)
+
+    def format_stream_event(self, event: dict[str, Any]) -> str:
+        return f"data: {json.dumps(event, ensure_ascii=False)}"
+
+    def format_stream_error(self, error: InteropTranslationError) -> str:
+        return self.format_stream_event({"error": error.to_dict()})
 
     @abstractmethod
     def models(self) -> list[Model]:

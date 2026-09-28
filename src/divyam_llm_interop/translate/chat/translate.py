@@ -1,19 +1,15 @@
 # Copyright 2025 Divyam.ai
 # SPDX-License-Identifier: Apache-2.0
 
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, replace
 from typing import Any
 
 from divyam_llm_interop.translate.chat.anthropic_messages import (
     AnthropicMessagesTranslator,
 )
-from divyam_llm_interop.translate.chat.anthropic_messages.route_validation import (
-    validate_portable_target_capabilities,
-    validate_source_profile_for_anthropic_target,
-)
 from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
     validate_anthropic_request,
-    validate_no_assistant_prefill,
 )
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
 from divyam_llm_interop.translate.chat.base import translation_utils
@@ -33,13 +29,8 @@ from divyam_llm_interop.translate.chat.openai_completions.completions_translator
 from divyam_llm_interop.translate.chat.openai_responses.openai_responses_translator import (
     OpenAiResponsesTranslator,
 )
-from divyam_llm_interop.translate.chat.openai_responses.request.native_continuation import (
-    normalize_native_continuation,
-)
-from divyam_llm_interop.translate.chat.openai_responses.tool_adapter import (
-    ResponsesToolAdapter,
-)
 from divyam_llm_interop.translate.chat.translation_errors import (
+    InteropTranslationError,
     InvalidProtocolRequestError,
     TargetCapabilityError,
 )
@@ -78,6 +69,55 @@ class ChatTranslator:
             ),
         }
 
+    def prepare_request(
+        self, request: ChatRequest, api_type: ModelApiType
+    ) -> ChatRequest:
+        """Capture protocol metadata without forwarding gateway credentials."""
+        protocol = self._translators[api_type]
+        return replace(
+            request,
+            api_type=api_type,
+            headers={
+                name.lower(): value
+                for name, value in (request.headers or {}).items()
+                if name.lower().startswith(protocol.request_header_prefixes)
+            }
+            or None,
+            query_parameters={
+                name: value
+                for name, value in (request.query_parameters or {}).items()
+                if name in protocol.request_query_parameters
+            }
+            or None,
+        )
+
+    def selection_context(
+        self, request: ChatRequest, api_type: ModelApiType
+    ) -> dict[str, Any]:
+        """Project readable input using the source protocol, independently of serving."""
+        source = Model(name=request.body.get("model", ""), api_type=api_type)
+        return self._translators[api_type].selection_context(request, source)
+
+    async def encode_response_stream(
+        self,
+        response: ChatResponseStreaming,
+        api_type: ModelApiType,
+        *,
+        add_done: bool = True,
+    ) -> AsyncGenerator[str, None]:
+        """Frame one response; errors terminate it without a success marker."""
+        protocol = self._translators[api_type]
+        try:
+            async for event in response.stream:
+                yield protocol.format_stream_event(event)
+        except InteropTranslationError as exc:
+            yield protocol.format_stream_error(exc)
+            return
+        finally:
+            await translation_utils.close_async_stream(response.stream)
+        if add_done and protocol.stream_done:
+            yield protocol.stream_done
+
     def translate_request(
         self, chat_request: ChatRequest, source: Model, target: Model
     ) -> ChatRequest:
@@ -96,33 +136,15 @@ class ChatTranslator:
             source_translator == target_translator
             and source_translator.are_requests_compatible(source, target)
         ):
-            if source.api_type == ModelApiType.RESPONSES:
-                return replace(
-                    chat_request, body=normalize_native_continuation(chat_request.body)
-                )
-            # Short circuit the requests since the models are compatible.
-            return chat_request
-
-        if (
-            target.api_type == ModelApiType.ANTHROPIC_MESSAGES
-            and source.api_type != ModelApiType.ANTHROPIC_MESSAGES
-        ):
-            validate_source_profile_for_anthropic_target(chat_request.body, source)
-
-        response_adapter = None
-        if source.api_type == ModelApiType.RESPONSES:
-            if self._model_registry.get_capabilities(target).emits_opaque_reasoning:
-                raise TargetCapabilityError(
-                    "Endpoint emits opaque reasoning that the Responses adapter cannot preserve",
-                    target_api_type=target.api_type,
-                )
-            response_adapter = ResponsesToolAdapter(chat_request.body)
-            chat_request = ChatRequest(
-                body=response_adapter.normalize(chat_request.body),
-                headers=chat_request.headers,
-                query_parameters=chat_request.query_parameters,
-                path_parameters=chat_request.path_parameters,
+            return source_translator.prepare_translation(
+                chat_request, source, target, native=True
             )
+
+        target_translator.validate_source_request(chat_request, source)
+        original_request = chat_request
+        chat_request = source_translator.prepare_translation(
+            chat_request, source, target, native=False
+        )
         unified = source_translator.request_to_unified(chat_request, source)
         function_support = self._model_registry.get_capabilities(
             target
@@ -138,34 +160,28 @@ class ChatTranslator:
                 path="$.tools",
             )
 
-        if (
-            source.api_type == ModelApiType.RESPONSES
-            and target.api_type != ModelApiType.COMPLETIONS
-            and any(message.reasoning_content for message in unified.body.messages)
-        ):
-            raise TargetCapabilityError(
-                "Target adapter cannot preserve readable reasoning history",
-                target_api_type=target.api_type,
-                path="$.input",
-            )
-        if source.api_type == ModelApiType.ANTHROPIC_MESSAGES:
-            if target.api_type != ModelApiType.ANTHROPIC_MESSAGES:
-                validate_no_assistant_prefill(chat_request.body)
-            validate_portable_target_capabilities(
-                unified.body,
-                target,
-                self._model_registry,
-            )
-        elif target.api_type == ModelApiType.ANTHROPIC_MESSAGES:
-            validate_portable_target_capabilities(
-                unified.body,
-                target,
-                self._model_registry,
+        source_translator.validate_translation(
+            original_request, unified, source, target
+        )
+        if target_translator is not source_translator:
+            target_translator.validate_translation(
+                original_request, unified, source, target
             )
         translated = target_translator.request_from_unified(unified, target)
-        if response_adapter and response_adapter.requires_restore:
-            translated.response_adapter = response_adapter
-        return translated
+        if original_request.api_type is not None:
+            translated = self.prepare_request(
+                replace(
+                    translated,
+                    headers=original_request.headers,
+                    query_parameters=original_request.query_parameters,
+                ),
+                target.api_type,
+            )
+        return replace(
+            translated,
+            response_adapter=chat_request.response_adapter,
+            api_type=target.api_type,
+        )
 
     def translate_response(
         self,

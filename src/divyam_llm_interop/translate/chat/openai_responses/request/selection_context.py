@@ -6,6 +6,7 @@ from typing import Any
 
 from divyam_llm_interop.translate.chat.openai_responses.request.responses_to_unified import (
     convert_responses_to_completions_request,
+    readable_reasoning_text,
 )
 from divyam_llm_interop.translate.chat.openai_responses.tool_adapter import (
     ResponsesToolAdapter,
@@ -23,9 +24,18 @@ def responses_to_selection_context(body: dict[str, Any]) -> dict[str, Any]:
     readable = deepcopy(body)
     items = readable.get("input")
     if isinstance(items, list):
+        projected = []
         for item in items:
             if isinstance(item, dict) and item.get("type") == "reasoning":
                 item.pop("encrypted_content", None)
+                text = readable_reasoning_text(item)
+                if text:
+                    # Preserve the selector's established text features. This
+                    # projection is never sent to a provider as conversation.
+                    projected.append({"role": "assistant", "content": text})
+            else:
+                projected.append(item)
+        readable["input"] = projected
     normalized = ResponsesToolAdapter(readable).normalize(readable)
     context = convert_responses_to_completions_request(normalized)
     if not context.get("messages"):

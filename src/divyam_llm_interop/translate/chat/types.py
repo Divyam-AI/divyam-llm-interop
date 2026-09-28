@@ -3,14 +3,19 @@
 
 from collections.abc import AsyncGenerator
 from dataclasses import asdict, dataclass, field
-from typing import TYPE_CHECKING, Any, Optional
+from typing import Any, Optional, Protocol
 
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
 
-if TYPE_CHECKING:
-    from divyam_llm_interop.translate.chat.openai_responses.tool_adapter import (
-        ResponsesToolAdapter,
-    )
+
+class ResponseAdapter(Protocol):
+    """Request-local state used to reconstruct the caller's response."""
+
+    def restore_response(self, response: dict[str, Any]) -> dict[str, Any]: ...
+
+    def restore_stream(
+        self, stream: AsyncGenerator[dict[str, Any], None]
+    ) -> AsyncGenerator[dict[str, Any], None]: ...
 
 
 @dataclass(frozen=True)
@@ -76,9 +81,11 @@ class ChatRequest:
     query_parameters: Optional[dict[str, str]] = None
     path_parameters: Optional[dict[str, str]] = None
     # Local response reconstruction state; never part of the provider payload.
-    response_adapter: "ResponsesToolAdapter | None" = field(
+    response_adapter: ResponseAdapter | None = field(
         default=None, repr=False, compare=False
     )
+    # Explicit at HTTP ingress; older library callers may still use detection.
+    api_type: ModelApiType | None = None
 
 
 @dataclass

@@ -2,6 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 
+from copy import deepcopy
+from typing import Any
+
 from typing_extensions import override
 
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
@@ -32,6 +35,13 @@ from divyam_llm_interop.translate.chat.unified.unified_response import (
 
 
 class CompletionsTranslator(Translator):
+    request_header_prefixes = ("openai-beta",)
+    stream_done = "data: [DONE]"
+
+    @override
+    def selection_context(self, request: ChatRequest, source: Model) -> dict[str, Any]:
+        return deepcopy(request.body)
+
     """Translator for OpenAi models."""
 
     def __init__(self, model_registry: ModelRegistry):
