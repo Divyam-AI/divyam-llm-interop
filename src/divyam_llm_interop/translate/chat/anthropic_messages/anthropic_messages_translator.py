@@ -51,6 +51,14 @@ class AnthropicMessagesTranslator(Translator):
     request_query_parameters = ("beta",)
 
     @override
+    def selection_context(self, request: ChatRequest, source: Model) -> dict[str, Any]:
+        context = super().selection_context(request, source)
+        # The raw envelope is for lossless serving, not a second copy of the
+        # conversation for ranking. Keep it on the original request only.
+        context.pop("anthropic_request_raw", None)
+        return context
+
+    @override
     def validate_source_request(self, request: ChatRequest, source: Model) -> None:
         if source.api_type != ModelApiType.ANTHROPIC_MESSAGES:
             validate_source_profile_for_anthropic_target(request.body, source)
