@@ -33,12 +33,8 @@ def anthropic_request_to_unified(
     _copy_tools(body, unified_body)
     user_id = (body.get("metadata") or {}).get("user_id")
     if user_id is not None:
-        # OpenAI caps user identifiers at 64 characters; keep long identities stable.
-        unified_body["user"] = (
-            user_id
-            if len(user_id) <= 64
-            else hashlib.sha256(user_id.encode()).hexdigest()
-        )
+        # Stable pseudonymous IDs preserve correlation without exposing raw identity.
+        unified_body["user"] = hashlib.sha256(user_id.encode()).hexdigest()
     output_config = body.get("output_config") or {}
     if output_config.get("effort") is not None:
         unified_body["reasoning_effort"] = output_config["effort"]

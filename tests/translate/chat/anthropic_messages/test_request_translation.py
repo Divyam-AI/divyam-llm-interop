@@ -591,7 +591,10 @@ def test_schema_constraints_are_not_silently_dropped_for_native_gemini(
 @pytest.mark.parametrize(
     "user_id, expected_user",
     [
-        ("session-123", "session-123"),
+        (
+            "session-123",
+            "b9c84322f82434cb46e239d20daf1f3714eeb5077f87fb0f0cd4bd336bc01b54",
+        ),
         ("u" * 150, "816752062318c8f216b0d347163d40e917a8c522ce07be3d0ebc80db6132fc5b"),
     ],
 )
@@ -616,6 +619,21 @@ def test_anthropic_coding_request_preserves_identity_effort_and_tool_constraints
         }
     )
     schema["properties"]["args"] = {"description": "Optional arbitrary JSON value"}
+    schema["title"] = "LookupArguments"
+    schema["$defs"] = {
+        "Location": {
+            "type": "object",
+            "properties": {"name": {"type": "string", "title": "Name"}},
+            "required": ["name"],
+            "title": "Location",
+        }
+    }
+    schema["properties"]["location"] = {"$ref": "#/$defs/Location"}
+    schema["properties"]["unit"] = {
+        "anyOf": [{"type": "string"}, {"type": "null"}],
+        "default": None,
+        "title": "Unit",
+    }
     schema["properties"]["answers"] = {
         "type": "object",
         "propertyNames": {"type": "string", "pattern": "^[A-Za-z]"},
@@ -628,6 +646,7 @@ def test_anthropic_coding_request_preserves_identity_effort_and_tool_constraints
         Model("gpt-6-sol", api_type, capability_overrides={"supports_reasoning": True}),
     )
     assert result.body["user"] == expected_user
+    assert user_id not in json.dumps(result.body)
     if api_type == ModelApiType.RESPONSES:
         assert result.body["reasoning"] == {"effort": "low"}
         assert result.body["tools"][0]["parameters"] == schema
@@ -1123,7 +1142,7 @@ def test_invalid_tool_names_fail_at_the_source(
     ("schema", "message"),
     [
         ({"type": "string"}, "object root"),
-        ({"type": ["object", "null"]}, "one non-null"),
+        ({"type": ["object", "null"]}, "object root"),
         (
             {
                 "type": "object",
@@ -1147,7 +1166,7 @@ def test_invalid_tool_names_fail_at_the_source(
     ],
 )
 def test_invalid_portable_schemas_fail_closed(
-    translator, anthropic_model, completions_model, schema, message
+    translator, anthropic_model, gemini_model, schema, message
 ):
     body = _anthropic_tool_request()
     body["tools"][0]["input_schema"] = schema
@@ -1156,7 +1175,7 @@ def test_invalid_portable_schemas_fail_closed(
         (InvalidProtocolRequestError, UnsupportedFeatureError), match=message
     ):
         translator.translate_request(
-            ChatRequest(body=body), anthropic_model, completions_model
+            ChatRequest(body=body), anthropic_model, gemini_model
         )
 
 

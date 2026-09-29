@@ -3,12 +3,29 @@
 
 import json
 
+import pytest
+
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
 from divyam_llm_interop.translate.chat.openai_responses.request.unified_to_responses import (
     convert_completion_request_to_responses_request,
 )
 from divyam_llm_interop.translate.chat.translate import ChatTranslator
+from divyam_llm_interop.translate.chat.translation_errors import (
+    InvalidProtocolRequestError,
+)
 from divyam_llm_interop.translate.chat.types import ChatRequest, Model
+
+
+def test_missing_json_schema_is_a_typed_request_error():
+    with pytest.raises(InvalidProtocolRequestError) as exc:
+        convert_completion_request_to_responses_request(
+            {
+                "model": "example",
+                "messages": [],
+                "response_format": {"type": "json_schema"},
+            }
+        )
+    assert exc.value.path == "$.response_format.json_schema"
 
 
 def test_simple_text_request():

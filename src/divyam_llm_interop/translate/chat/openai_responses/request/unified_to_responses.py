@@ -9,6 +9,9 @@ from typing import Any
 from divyam_llm_interop.translate.chat.base.translation_utils import (
     drop_null_values_top_level,
 )
+from divyam_llm_interop.translate.chat.translation_errors import (
+    InvalidProtocolRequestError,
+)
 
 
 def convert_completion_request_to_responses_request(
@@ -296,7 +299,13 @@ def convert_completion_request_to_responses_request(
     if response_format is not None:
         output_format = dict(response_format)
         if output_format.get("type") == "json_schema":
-            output_format.update(output_format.pop("json_schema"))
+            schema = output_format.pop("json_schema", None)
+            if not isinstance(schema, dict):
+                raise InvalidProtocolRequestError(
+                    "json_schema response format requires a json_schema object",
+                    path="$.response_format.json_schema",
+                )
+            output_format.update(schema)
         responses_request["text"] = {"format": output_format}
     if user is not None:
         responses_request["user"] = user

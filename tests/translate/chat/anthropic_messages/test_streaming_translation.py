@@ -682,15 +682,18 @@ async def test_anthropic_target_rejects_duplicate_terminal_chunks(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("tool_call", [False, True])
 @pytest.mark.parametrize("late_text", ["", "unexpected text"])
+@pytest.mark.parametrize("repeat_finish", [False, True])
 async def test_usage_trailer_preserves_usage_without_replaying_content(
-    translator, completions_model, anthropic_model, tool_call, late_text
+    translator, completions_model, anthropic_model, tool_call, late_text, repeat_finish
 ):
     source = _completions_tool_stream() if tool_call else _completions_text_stream()
     source[-1]["choices"] = [
         {
             "index": 0,
             "delta": {"role": "assistant", "content": late_text},
-            "finish_reason": "tool_calls" if tool_call else "stop",
+            "finish_reason": ("tool_calls" if tool_call else "stop")
+            if repeat_finish
+            else None,
         }
     ]
     translated = translator.translate_response_streaming(

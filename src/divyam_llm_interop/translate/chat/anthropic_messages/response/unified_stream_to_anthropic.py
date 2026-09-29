@@ -92,7 +92,7 @@ def _consume_chunk(
         if (
             chunk.usage is not None
             and choice.index == 0
-            and choice.finish_reason == state.finish_reason
+            and choice.finish_reason in (None, state.finish_reason)
             and delta.role in (None, "assistant")
             and delta.content in (None, "")
             and not delta.tool_calls

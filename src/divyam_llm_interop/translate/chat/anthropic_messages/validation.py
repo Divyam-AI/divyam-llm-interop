@@ -153,7 +153,10 @@ def validate_portable_schema(
                 additional, f"{path}.additionalProperties", allow_constraints=True
             )
         elif additional is not None and not isinstance(additional, bool):
-            _invalid("additionalProperties must be a boolean or schema", path)
+            _invalid(
+                "additionalProperties must be a boolean or schema",
+                f"{path}.additionalProperties",
+            )
         if "allOf" in schema:
             branches = schema["allOf"]
             if not isinstance(branches, list) or not branches:
@@ -402,12 +405,15 @@ def _validate_tools(tools: Any) -> set[str]:
         names.add(name)
         if "description" in tool and not isinstance(tool["description"], str):
             _invalid("tool description must be a string", f"{path}.description")
-        validate_portable_schema(
-            tool.get("input_schema"),
-            f"{path}.input_schema",
-            require_object_root=True,
-            allow_constraints=True,
-        )
+        # Keep the source schema intact. OpenAI-format targets can carry its
+        # constraints; narrower targets validate their subset before selection.
+        schema = tool.get("input_schema")
+        _require_mapping(schema, f"{path}.input_schema")
+        if schema.get("type") != "object":
+            _invalid(
+                "tool input_schema must have an object root",
+                f"{path}.input_schema.type",
+            )
     return names
 
 

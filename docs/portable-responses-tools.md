@@ -91,6 +91,21 @@ continuation also require the companion PRs #34–#36.
 
 ## Validation and streaming
 
+Anthropic tool schemas retain their full JSON Schema on compatible OpenAI-format
+routes, including MCP schemas with titles, nullable branches and references. Native
+Gemini retains its narrower preflight check. It also rejects requests carrying
+`metadata.user_id` or `output_config.effort` because this adapter has no equivalent
+Gemini control; typical Claude Code requests with those fields must use another
+compatible endpoint, including an OpenAI-format endpoint serving a Gemini model.
+Neither field is silently dropped. Converted user IDs are always hashed; generic
+OpenAI-format routes retain the legacy `user` field for endpoint compatibility.
+
+Stream encoding returns SSE records without blank-line separators; the existing
+HTTP transport supplies those separators. Responses translation failures emit
+`response.failed` with their actual error code and no success marker. Client retry
+policy remains outside the adapter: Codex can retry unfamiliar failure codes even
+after this terminal event, so this event alone does not guarantee a single call.
+
 Text custom tools and supported Lark grammars are implemented. Regex grammars
 and nested namespaces are rejected. Lark grammars are parsed at preflight and
 returned custom input is validated against the grammar. This is validation of
