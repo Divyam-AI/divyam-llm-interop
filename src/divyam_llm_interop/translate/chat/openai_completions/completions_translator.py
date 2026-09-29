@@ -35,14 +35,14 @@ from divyam_llm_interop.translate.chat.unified.unified_response import (
 
 
 class CompletionsTranslator(Translator):
+    """Translator for OpenAi models."""
+
     request_header_prefixes = ("openai-beta",)
     stream_done = "data: [DONE]"
 
     @override
     def selection_context(self, request: ChatRequest, source: Model) -> dict[str, Any]:
         return deepcopy(request.body)
-
-    """Translator for OpenAi models."""
 
     def __init__(self, model_registry: ModelRegistry):
         super().__init__(model_registry=model_registry)

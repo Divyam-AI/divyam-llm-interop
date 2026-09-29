@@ -105,7 +105,11 @@ class ChatTranslator:
         *,
         add_done: bool = True,
     ) -> AsyncGenerator[str, None]:
-        """Frame one response; errors terminate it without a success marker."""
+        """Encode SSE records; the HTTP transport adds the blank-line separators.
+
+        Errors terminate the stream without a success marker. Retry policy stays
+        with the caller; a failed event cannot force every client to stop retrying.
+        """
         protocol = self._translators[api_type]
         try:
             async for event in response.stream:

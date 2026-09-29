@@ -59,6 +59,7 @@ class Translator(ABC):
         return self.request_to_unified(request, source).body.to_dict(keep_unknowns=True)
 
     def format_stream_event(self, event: dict[str, Any]) -> str:
+        """Encode one SSE record without the transport's blank-line separator."""
         return f"data: {json.dumps(event, ensure_ascii=False)}"
 
     def format_stream_error(self, error: InteropTranslationError) -> str:

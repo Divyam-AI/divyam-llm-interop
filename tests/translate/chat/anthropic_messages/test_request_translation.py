@@ -28,6 +28,57 @@ def _anthropic_text_request() -> dict:
     }
 
 
+@pytest.mark.parametrize("target_profile", ["account-a", "account-b"])
+def test_native_anthropic_passthrough_requires_matching_wire_profile(
+    translator, target_profile
+):
+    body = _anthropic_text_request()
+    original = copy.deepcopy(body)
+    source = Model(
+        "source",
+        ModelApiType.ANTHROPIC_MESSAGES,
+        capability_overrides={"anthropic_wire_profile": "account-a"},
+    )
+    target = Model(
+        "target",
+        ModelApiType.ANTHROPIC_MESSAGES,
+        capability_overrides={"anthropic_wire_profile": target_profile},
+    )
+    result = translator.translate_request(ChatRequest(body), source, target)
+    if target_profile == "account-a":
+        assert result.body == original
+    else:
+        assert result.body["model"] == "target"
+        assert result.body["messages"] == original["messages"]
+    assert body == original
+
+
+def test_completions_to_anthropic_still_enforces_target_tool_capability(
+    translator, completions_model
+):
+    body = {
+        "model": completions_model.name,
+        "messages": [{"role": "user", "content": "Hello"}],
+        "tools": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "lookup",
+                    "description": "Look up a record",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+        ],
+    }
+    target = Model(
+        "target",
+        ModelApiType.ANTHROPIC_MESSAGES,
+        capability_overrides={"supports_function_calling": False},
+    )
+    with pytest.raises(TargetCapabilityError, match="function tools"):
+        translator.translate_request(ChatRequest(body), completions_model, target)
+
+
 def _anthropic_tool_request() -> dict:
     return {
         "model": "claude-sonnet-test",

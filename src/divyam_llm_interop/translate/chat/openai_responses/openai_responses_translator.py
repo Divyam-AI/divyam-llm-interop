@@ -116,7 +116,12 @@ class OpenAiResponsesTranslator(Translator):
 
     @override
     def format_stream_error(self, error: InteropTranslationError) -> str:
-        return self.format_stream_event({"type": "error", **error.to_dict()})
+        return self.format_stream_event(
+            {
+                "type": "response.failed",
+                "response": {"status": "failed", "error": error.to_dict()},
+            }
+        )
 
     def __init__(self, model_registry: ModelRegistry):
         super().__init__(model_registry)

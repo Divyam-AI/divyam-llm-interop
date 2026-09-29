@@ -1,6 +1,9 @@
 # Copyright 2025 Divyam.ai
 # SPDX-License-Identifier: Apache-2.0
 
+import json
+from copy import deepcopy
+
 import pytest
 
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
@@ -11,7 +14,85 @@ from divyam_llm_interop.translate.chat.base.translation_utils import (
 from divyam_llm_interop.translate.chat.translate import ChatTranslator
 from divyam_llm_interop.translate.chat.translation_errors import (
     InvalidProtocolRequestError,
+    StreamProtocolError,
 )
+from divyam_llm_interop.translate.chat.types import ChatRequest, ChatResponseStreaming
+
+
+@pytest.mark.parametrize(
+    "api_type,headers,query",
+    [
+        (ModelApiType.COMPLETIONS, {"openai-beta": "v1"}, None),
+        (ModelApiType.RESPONSES, {"openai-beta": "v1"}, None),
+        (ModelApiType.ANTHROPIC_MESSAGES, {"anthropic-beta": "v2"}, {"beta": "true"}),
+    ],
+)
+def test_protocol_metadata_excludes_gateway_credentials(
+    translator, api_type, headers, query
+):
+    request = ChatRequest(
+        body={"model": "example"},
+        headers={
+            "Authorization": "secret",
+            "x-api-key": "secret",
+            "api-key": "secret",
+            "x-goog-api-key": "secret",
+            "OpenAI-Beta": "v1",
+            "Anthropic-Beta": "v2",
+        },
+        query_parameters={"beta": "true", "api_key": "secret"},
+    )
+    original = deepcopy(request)
+    prepared = translator.prepare_request(request, api_type)
+    assert prepared.headers == headers
+    assert prepared.query_parameters == query
+    assert prepared.api_type == api_type
+    assert request == original
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "api_type",
+    [ModelApiType.COMPLETIONS, ModelApiType.RESPONSES, ModelApiType.ANTHROPIC_MESSAGES],
+)
+async def test_partial_stream_failure_emits_one_error_and_no_success_marker(
+    translator, api_type
+):
+    closed = []
+
+    async def stream():
+        try:
+            yield {"type": "content_block_delta", "text": "partial"}
+            raise StreamProtocolError("broken tool input")
+        finally:
+            closed.append(True)
+
+    frames = [
+        frame
+        async for frame in translator.encode_response_stream(
+            ChatResponseStreaming(stream()), api_type
+        )
+    ]
+    assert len(frames) == 2
+    assert closed == [True]
+    assert all(
+        "[DONE]" not in frame and "response.completed" not in frame for frame in frames
+    )
+    assert all(not frame.endswith("\n\n") for frame in frames)
+    error = json.loads(frames[-1].split("data: ", 1)[1])
+    if api_type == ModelApiType.RESPONSES:
+        assert error == {
+            "type": "response.failed",
+            "response": {
+                "status": "failed",
+                "error": {
+                    "code": "stream_protocol_error",
+                    "message": "broken tool input",
+                },
+            },
+        }
+    else:
+        assert error["error"]["message"] == "broken tool input"
 
 
 def test_messages_body_keeps_legacy_completions_detection():
