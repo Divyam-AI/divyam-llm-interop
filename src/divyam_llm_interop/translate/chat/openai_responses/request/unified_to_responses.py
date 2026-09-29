@@ -150,6 +150,10 @@ def convert_completion_request_to_responses_request(
                     if role == "assistant" and adj.get("type") == "output_text":
                         adj["type"] = "input_text"
                     content_parts.append(_convert_part(adj, role))
+        if use_official_tool_items and role == "assistant":
+            for part in content_parts:
+                if part.get("type") == "input_text":
+                    part["type"] = "output_text"
         if content_parts:
             message_item["content"] = content_parts
         elif role == "assistant" and tool_calls:
@@ -290,7 +294,10 @@ def convert_completion_request_to_responses_request(
     if parallel_tool_calls is not None:
         responses_request["parallel_tool_calls"] = parallel_tool_calls
     if response_format is not None:
-        responses_request["response_format"] = response_format
+        output_format = dict(response_format)
+        if output_format.get("type") == "json_schema":
+            output_format.update(output_format.pop("json_schema"))
+        responses_request["text"] = {"format": output_format}
     if user is not None:
         responses_request["user"] = user
     if reasoning:

@@ -680,6 +680,44 @@ async def test_anthropic_target_rejects_duplicate_terminal_chunks(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("tool_call", [False, True])
+@pytest.mark.parametrize("late_text", ["", "unexpected text"])
+async def test_usage_trailer_preserves_usage_without_replaying_content(
+    translator, completions_model, anthropic_model, tool_call, late_text
+):
+    source = _completions_tool_stream() if tool_call else _completions_text_stream()
+    source[-1]["choices"] = [
+        {
+            "index": 0,
+            "delta": {"role": "assistant", "content": late_text},
+            "finish_reason": "tool_calls" if tool_call else "stop",
+        }
+    ]
+    translated = translator.translate_response_streaming(
+        ChatResponseStreaming(_stream(source)), completions_model, anthropic_model
+    )
+    if late_text:
+        with pytest.raises(StreamProtocolError, match="after terminal"):
+            await _collect(translated)
+    else:
+        events = await _collect(translated)
+        assert sum(e["type"] == "message_stop" for e in events) == 1
+        assert events[-2]["usage"]["output_tokens"] == (5 if tool_call else 3)
+        assert events[-2]["delta"]["stop_reason"] == (
+            "tool_use" if tool_call else "end_turn"
+        )
+        if tool_call:
+            assert (
+                sum(
+                    e["type"] == "content_block_start"
+                    and e["content_block"]["type"] == "tool_use"
+                    for e in events
+                )
+                == 1
+            )
+
+
+@pytest.mark.asyncio
 async def test_parallel_tool_calls_become_distinct_contiguous_anthropic_blocks(
     translator, completions_model, anthropic_model
 ):

@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import copy
+import hashlib
 import json
 from typing import Any
 
@@ -30,6 +31,26 @@ def anthropic_request_to_unified(
     }
     _copy_sampling_fields(body, unified_body)
     _copy_tools(body, unified_body)
+    user_id = (body.get("metadata") or {}).get("user_id")
+    if user_id is not None:
+        # OpenAI caps user identifiers at 64 characters; keep long identities stable.
+        unified_body["user"] = (
+            user_id
+            if len(user_id) <= 64
+            else hashlib.sha256(user_id.encode()).hexdigest()
+        )
+    output_config = body.get("output_config") or {}
+    if output_config.get("effort") is not None:
+        unified_body["reasoning_effort"] = output_config["effort"]
+    if "format" in output_config:
+        unified_body["response_format"] = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "response",
+                "schema": copy.deepcopy(output_config["format"]["schema"]),
+                "strict": True,
+            },
+        }
 
     return UnifiedChatCompletionsRequest(
         body=UnifiedChatCompletionsRequestBody.from_dict(unified_body),
@@ -141,6 +162,8 @@ def _copy_tools(body: dict[str, Any], unified_body: dict[str, Any]) -> None:
                     "name": tool["name"],
                     "description": tool.get("description", ""),
                     "parameters": copy.deepcopy(tool["input_schema"]),
+                    # Responses otherwise normalizes optional fields into strict inputs.
+                    "strict": False,
                 },
             }
             for tool in body["tools"]

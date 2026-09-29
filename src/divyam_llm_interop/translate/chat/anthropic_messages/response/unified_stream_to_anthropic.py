@@ -85,6 +85,21 @@ def _consume_chunk(
     if len(chunk.choices) > 1:
         _target_error("Anthropic Messages supports one response choice", "$.choices")
     if state.terminal_seen and chunk.choices:
+        choice = chunk.choices[0]
+        delta = choice.delta
+        # Some OpenAI-compatible providers repeat the finish marker with final usage.
+        # Accept that accounting trailer, while rejecting any new response content.
+        if (
+            chunk.usage is not None
+            and choice.index == 0
+            and choice.finish_reason == state.finish_reason
+            and delta.role in (None, "assistant")
+            and delta.content in (None, "")
+            and not delta.tool_calls
+            and delta.refusal is None
+            and not delta.unknowns
+        ):
+            return events
         _stream_error("semantic chunk received after terminal finish", "$.choices")
     for choice in chunk.choices:
         if choice.index != 0:

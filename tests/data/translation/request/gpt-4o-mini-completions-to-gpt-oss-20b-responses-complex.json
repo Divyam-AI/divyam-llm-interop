@@ -90,7 +90,7 @@
         "content": [
           {
             "text": "Hello! How can I help you today?",
-            "type": "input_text"
+            "type": "output_text"
           }
         ],
         "role": "assistant"
@@ -119,7 +119,7 @@
         "content": [
           {
             "text": "The current temperature in London is 16\u00b0C with light rain.",
-            "type": "input_text"
+            "type": "output_text"
           }
         ],
         "role": "assistant"

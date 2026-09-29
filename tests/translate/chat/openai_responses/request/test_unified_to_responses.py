@@ -156,6 +156,7 @@ def test_chat_translator_emits_official_responses_tool_history():
                 "tool_call_id": "call_weather",
                 "content": '{"temperature_c":22}',
             },
+            {"role": "assistant", "content": "It is 22 degrees."},
             {"role": "user", "content": "Summarize that."},
         ],
         "tools": [
@@ -199,6 +200,10 @@ def test_chat_translator_emits_official_responses_tool_history():
             "type": "function_call_output",
             "call_id": "call_weather",
             "output": '{"temperature_c":22}',
+        },
+        {
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": "It is 22 degrees."}],
         },
         {
             "role": "user",
@@ -416,10 +421,17 @@ def test_streaming_structured_output():
     assert responses_req_stream["model"] == "gpt-4o"
     assert responses_req_stream["stream"] is True
     assert responses_req_stream["temperature"] == 0.3
-    assert responses_req_stream["response_format"]["type"] == "json_schema"
-    assert (
-        responses_req_stream["response_format"]["json_schema"]["name"] == "person_info"
-    )
+    assert "response_format" not in responses_req_stream
+    assert responses_req_stream["text"]["format"] == {
+        "type": "json_schema",
+        "name": "person_info",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {"name": {"type": "string"}, "age": {"type": "number"}},
+            "required": ["name", "age"],
+        },
+    }
 
 
 def test_multiple_system_messages():
