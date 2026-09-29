@@ -104,3 +104,19 @@ def test_selection_does_not_pretend_to_resolve_server_side_history():
         responses_to_selection_context(
             {"input": "Continue", "previous_response_id": "resp_1"}
         )
+
+
+def test_anthropic_ranking_does_not_duplicate_the_serving_envelope():
+    body = {
+        "model": "baseline",
+        "max_tokens": 128,
+        "messages": [{"role": "user", "content": "Add a scoreboard."}],
+    }
+    original = deepcopy(body)
+    context = ChatTranslator().selection_context(
+        ChatRequest(body), ModelApiType.ANTHROPIC_MESSAGES
+    )
+    assert "anthropic_request_raw" not in context
+    assert context["messages"] == original["messages"]
+    context["messages"][0]["content"] = "changed"
+    assert body == original
