@@ -36,7 +36,10 @@ response = translator.translate_response(
 
 The existing capabilities registry remains the owner of field mappings and
 model defaults. Endpoint overrides are merged for that invocation and do not
-modify the registry or other endpoints. Routers should use
+modify the registry or other endpoints. Unknown override keys raise an error.
+`Model` equality identifies the catalog entry, not a configured endpoint;
+overrides are reapplied on every capability lookup and must be included in any
+downstream cache key for resolved endpoint capabilities. Routers should use
 `require_declared_capabilities=True`; the standalone translator retains its
 legacy best-effort default for ordinary tools.
 
@@ -51,10 +54,34 @@ on account or deployment boundaries; profiles must reflect those boundaries.
 Without a matching native profile, the portable adapter rejects encrypted
 reasoning input, stored conversations, `previous_response_id`, background work,
 `store=True`, built-in tools and non-text input/tool results. Readable reasoning
-is retained as text. If an endpoint returns opaque provider reasoning, declare
+is attached to its assistant message as `reasoning_content` on the Chat
+Completions path, never presented as a user-visible answer. Other target adapters
+that cannot retain that field reject the route. Endpoint conformance checks must
+verify acceptance of reasoning history as well as tool calls.
+
+If an endpoint returns opaque provider reasoning, declare
 `emits_opaque_reasoning=True`; it is excluded from this Responses bridge before
 a call. Unexpected opaque output also fails rather than fabricating compatible
 state. Native compatible routes remain available.
+
+This preservation policy applies to every Responses caller, including callers
+without custom tools. Encrypted state in a conversation restricts subsequent
+requests to compatible native routes. The router must filter incompatible
+candidates before selection; an otherwise cheaper model does not justify
+discarding state. Unexpected opaque output fails even after a paid provider call,
+so accurate endpoint capability registration is required to avoid that failure.
+
+## Upgrade compatibility
+
+Version 0.3.0 changes all cross-protocol Responses requests, not just coding
+harness requests. Images, files, built-in tools and server-owned conversation
+fields now fail explicitly instead of being dropped or turned into placeholders.
+Matching native wire profiles keep their passthrough behavior. The router and
+other consumers must adopt this version deliberately and route unsupported
+requests only to an adapter or native endpoint that preserves their full input.
+Coordinate the interop package release with shared-library/router pins and their
+existing compatibility checks before deployment. Historical tools and native
+continuation also require the companion PRs #34–#36.
 
 ## Validation and streaming
 

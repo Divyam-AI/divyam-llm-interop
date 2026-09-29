@@ -168,6 +168,15 @@ class ModelRegistry:
             matching_model, ModelCapabilities(supported_api_types=[model.api_type])
         )
         if model.capability_overrides:
+            known = (
+                {f.name for f in dataclasses.fields(ModelCapabilities)}
+                | set(capabilities.extra)
+            ) - {"extra"}
+            unknown = set(model.capability_overrides) - known
+            if unknown:
+                raise ValueError(
+                    f"Unknown endpoint capability override(s): {', '.join(sorted(unknown))}"
+                )
             return ModelCapabilities.from_dict(
                 {**capabilities.to_dict(), **model.capability_overrides}
             )

@@ -116,6 +116,7 @@ class ChatTranslator:
                 query_parameters=chat_request.query_parameters,
                 path_parameters=chat_request.path_parameters,
             )
+        unified = source_translator.request_to_unified(chat_request, source)
         function_support = self._model_registry.get_capabilities(
             target
         ).supports_function_calling
@@ -130,7 +131,16 @@ class ChatTranslator:
                 path="$.tools",
             )
 
-        unified = source_translator.request_to_unified(chat_request, source)
+        if (
+            source.api_type == ModelApiType.RESPONSES
+            and target.api_type != ModelApiType.COMPLETIONS
+            and any(message.reasoning_content for message in unified.body.messages)
+        ):
+            raise TargetCapabilityError(
+                "Target adapter cannot preserve readable reasoning history",
+                target_api_type=target.api_type,
+                path="$.input",
+            )
         if source.api_type == ModelApiType.ANTHROPIC_MESSAGES:
             if target.api_type != ModelApiType.ANTHROPIC_MESSAGES:
                 validate_no_assistant_prefill(chat_request.body)

@@ -258,10 +258,22 @@ def test_endpoint_overrides_do_not_leak_between_registrations():
 
 
 @pytest.mark.asyncio
-async def test_streamed_custom_input_is_decoded_and_validated_before_exposure():
+@pytest.mark.parametrize("name_style", ["once", "repeated", "fragmented", "legacy"])
+async def test_streamed_custom_input_is_decoded_and_validated_before_exposure(
+    name_style,
+):
     tr = translator()
     translated = tr.translate_request(request(), SOURCE, TARGET)
     alias = translated.body["tools"][0]["function"]["name"]
+
+    first_name = alias[:8] if name_style == "fragmented" else alias
+    next_name = (
+        alias[8:]
+        if name_style == "fragmented"
+        else alias
+        if name_style == "repeated"
+        else None
+    )
 
     async def chunks():
         yield {
@@ -279,7 +291,10 @@ async def test_streamed_custom_input_is_decoded_and_validated_before_exposure():
                                 "index": 0,
                                 "id": "call_stream",
                                 "type": "function",
-                                "function": {"name": alias, "arguments": '{"input":'},
+                                "function": {
+                                    "name": first_name,
+                                    "arguments": '{"input":',
+                                },
                             }
                         ],
                     },
@@ -297,7 +312,13 @@ async def test_streamed_custom_input_is_decoded_and_validated_before_exposure():
                     "index": 0,
                     "delta": {
                         "tool_calls": [
-                            {"index": 0, "function": {"arguments": '"print(42)"}'}}
+                            {
+                                "index": 0,
+                                "function": {
+                                    "name": next_name,
+                                    "arguments": '"print(42)"}',
+                                },
+                            }
                         ]
                     },
                     "finish_reason": None,
@@ -309,7 +330,15 @@ async def test_streamed_custom_input_is_decoded_and_validated_before_exposure():
             "object": "chat.completion.chunk",
             "created": 1,
             "model": TARGET.name,
-            "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}],
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {},
+                    "finish_reason": "function_call"
+                    if name_style == "legacy"
+                    else "tool_calls",
+                }
+            ],
         }
         yield {
             "id": "chatcmpl_probe",
@@ -363,14 +392,15 @@ def test_tool_namespaces_with_the_same_leaf_name_remain_distinct():
                         }
                     ],
                 }
-                for scope in ["crm", "billing"]
+                for scope in ["crm", "billing", "123", "-runtime"]
             ],
         }
     )
     result = translator().translate_request(req, SOURCE, TARGET)
     names = [t["function"]["name"] for t in result.body["tools"]]
-    assert len(set(names)) == 2
+    assert len(set(names)) == 4
     assert all(len(name) <= 64 for name in names)
+    assert all(name[0].isalpha() or name[0] == "_" for name in names)
 
 
 def test_forced_custom_tool_choice_is_translated_to_function_choice():
@@ -476,6 +506,7 @@ def test_plain_reasoning_survives_response_conversion(reasoning_key):
         }
     )
     body = tr.translate_response(response, TARGET, SOURCE, request=translated).body
+    assert [item["type"] for item in body["output"]] == ["reasoning", "message"]
     reasoning = next(item for item in body["output"] if item["type"] == "reasoning")
     assert reasoning["content"] == [
         {"type": "reasoning_text", "text": "Compute six times seven."}
@@ -485,14 +516,25 @@ def test_plain_reasoning_survives_response_conversion(reasoning_key):
 @pytest.mark.asyncio
 async def test_streamed_reasoning_survives_conversion():
     async def chunks():
-        for text, finish in [("Compute six ", None), ("times seven.", "stop")]:
+        for text, finish in [
+            ("Compute six ", None),
+            ("times seven.", None),
+            ("", "stop"),
+        ]:
             yield {
                 "id": "r",
                 "object": "chat.completion.chunk",
                 "created": 1,
                 "model": TARGET.name,
                 "choices": [
-                    {"index": 0, "delta": {"reasoning": text}, "finish_reason": finish}
+                    {
+                        "index": 0,
+                        "delta": {
+                            "reasoning": text,
+                            **({"content": "42"} if finish else {}),
+                        },
+                        "finish_reason": finish,
+                    }
                 ],
             }
 
@@ -506,9 +548,109 @@ async def test_streamed_reasoning_survives_conversion():
     assert item["content"] == [
         {"type": "reasoning_text", "text": "Compute six times seven."}
     ]
+    deltas = [e for e in events if e["type"] == "response.reasoning_text.delta"]
+    assert [e["delta"] for e in deltas] == ["Compute six ", "times seven."]
+    assert all(e["item_id"] == item["id"] and e["output_index"] == 0 for e in deltas)
+    assert [i["type"] for i in events[-1]["response"]["output"]] == [
+        "reasoning",
+        "message",
+    ]
+    assert events.index(deltas[-1]) < next(
+        i for i, e in enumerate(events) if e["type"] == "response.output_text.delta"
+    )
 
 
-def test_provider_encrypted_reasoning_is_not_fabricated_as_portable_state():
+@pytest.mark.parametrize(
+    "body",
+    [
+        {
+            "input": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_image",
+                            "image_url": "https://example.invalid/a.png",
+                        }
+                    ],
+                }
+            ]
+        },
+        {
+            "input": [
+                {
+                    "role": "user",
+                    "content": [{"type": "input_file", "file_id": "file_1"}],
+                }
+            ]
+        },
+        {"input": "Search", "tools": [{"type": "web_search"}]},
+        {"input": "Continue", "previous_response_id": "resp_old"},
+        {"input": "Continue", "conversation": "conv_old"},
+        {"input": "Continue", "background": True},
+        {"input": "Continue", "store": True},
+        {
+            "input": [
+                {"type": "reasoning", "summary": [], "encrypted_content": "opaque"}
+            ]
+        },
+    ],
+)
+def test_default_responses_translation_rejects_content_it_cannot_preserve(body):
+    original = deepcopy(body)
+    with pytest.raises(UnsupportedFeatureError):
+        ChatTranslator().translate_request(
+            ChatRequest(body),
+            Model("gpt-4o", ModelApiType.RESPONSES),
+            Model("gpt-4o", ModelApiType.COMPLETIONS),
+        )
+    assert body == original
+
+
+def test_misspelled_endpoint_capability_is_reported():
+    with pytest.raises(ValueError, match="supports_function_call"):
+        translator().translate_request(
+            request(),
+            SOURCE,
+            endpoint(
+                TARGET.name, ModelApiType.COMPLETIONS, supports_function_call=True
+            ),
+        )
+
+
+@pytest.mark.parametrize(
+    "assistant",
+    [
+        {"role": "assistant", "content": "42"},
+        {
+            "type": "function_call",
+            "name": "status",
+            "namespace": "runtime",
+            "call_id": "call_1",
+            "arguments": "{}",
+        },
+    ],
+)
+def test_readable_history_stays_reasoning_on_the_assistant_message(assistant):
+    req = request()
+    req.body["input"] += [
+        {
+            "type": "reasoning",
+            "content": [{"type": "reasoning_text", "text": "Compute six times seven."}],
+            "summary": [],
+        },
+        assistant,
+    ]
+    original = deepcopy(req.body)
+    result = translator().translate_request(req, SOURCE, TARGET).body["messages"]
+    assert result[-1]["reasoning_content"] == "Compute six times seven."
+    assert result[-1].get("content") == assistant.get("content")
+    assert len(result) == 3
+    assert req.body == original
+
+
+@pytest.mark.parametrize("custom_tools", [True, False])
+def test_provider_encrypted_reasoning_is_not_fabricated_as_portable_state(custom_tools):
     tr = translator()
     translated = tr.translate_request(request(), SOURCE, TARGET)
     response = ChatResponse(
@@ -533,7 +675,9 @@ def test_provider_encrypted_reasoning_is_not_fabricated_as_portable_state():
         }
     )
     with pytest.raises(ResponseTranslationError, match="Opaque provider reasoning"):
-        tr.translate_response(response, TARGET, SOURCE, request=translated)
+        tr.translate_response(
+            response, TARGET, SOURCE, request=translated if custom_tools else None
+        )
 
 
 @pytest.mark.parametrize("finish", ["length", "content_filter"])

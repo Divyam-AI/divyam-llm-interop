@@ -129,6 +129,10 @@ class ResponsesToolAdapter:
                 if kind == "function" and namespace is None
                 else re.sub(r"[^A-Za-z0-9_-]", "_", qualified)[:48] + "_" + digest
             )
+            if (kind == "custom" or namespace is not None) and not re.match(
+                r"[A-Za-z_]", alias
+            ):
+                alias = "t_" + alias
             if alias in self.bindings:
                 raise UnsupportedFeatureError("Tool alias collision")
             grammar = None
@@ -200,7 +204,7 @@ class ResponsesToolAdapter:
         matches = [
             alias
             for (scope, leaf), alias in self._identities.items()
-            if name == leaf or name == f"{scope}.{leaf}"
+            if name == leaf or (scope is not None and name == f"{scope}.{leaf}")
         ]
         if namespace is None and len(matches) == 1:
             return matches[0]
@@ -235,23 +239,8 @@ class ResponsesToolAdapter:
             if kind == "additional_tools":
                 continue
             if kind == "reasoning":
-                if item.get("encrypted_content"):
-                    raise UnsupportedFeatureError(
-                        "Opaque reasoning state requires a compatible Responses endpoint"
-                    )
-                parts = (item.get("content") or []) + (item.get("summary") or [])
-                if any(
-                    part.get("type") not in {"reasoning_text", "summary_text", "text"}
-                    for part in parts
-                ):
-                    raise UnsupportedFeatureError(
-                        "Unknown reasoning content cannot be translated"
-                    )
-                texts = [part["text"] for part in parts if part.get("text")]
-                if texts:
-                    normalized.append(
-                        {"role": "assistant", "content": "\n".join(texts)}
-                    )
+                # Reasoning validation and message association belong to the request converter.
+                normalized.append(item)
                 continue
             if kind in {"custom_tool_call", "function_call"}:
                 # Ordinary function history can outlive its tool definition.

@@ -79,6 +79,29 @@ def convert_completions_to_responses_response(
         role = message.get("role", "assistant")
         content = message.get("content")
         tool_calls = message.get("tool_calls")
+        if not tool_calls and message.get("function_call"):
+            tool_calls = [{"function": message["function_call"]}]
+
+        reasoning = readable_reasoning(
+            {
+                **message,
+                **(
+                    {"reasoning": choice["reasoning"]}
+                    if choice.get("reasoning")
+                    else {}
+                ),
+            }
+        )
+        if reasoning:
+            responses_response["output"].append(
+                {
+                    "id": f"rs_dvy_{uuid.uuid4().hex}",
+                    "type": "reasoning",
+                    "status": "completed",
+                    "summary": [],
+                    "content": [{"type": "reasoning_text", "text": reasoning}],
+                }
+            )
 
         # Add text output
         if content is not None:
@@ -131,27 +154,6 @@ def convert_completions_to_responses_response(
                         )
 
             responses_response["output"].append(message_item)
-
-        reasoning = readable_reasoning(
-            {
-                **message,
-                **(
-                    {"reasoning": choice["reasoning"]}
-                    if choice.get("reasoning")
-                    else {}
-                ),
-            }
-        )
-        if reasoning:
-            responses_response["output"].append(
-                {
-                    "id": f"rs_{uuid.uuid4().hex}",
-                    "type": "reasoning",
-                    "status": "completed",
-                    "summary": [],
-                    "content": [{"type": "reasoning_text", "text": reasoning}],
-                }
-            )
 
         # Add tool/function calls if present
         if tool_calls:

@@ -16,7 +16,11 @@ if TYPE_CHECKING:
 @dataclass(frozen=True)
 class Model:
     """
-    A data class that represents a response from chat completion API.
+    Catalog identity plus request-local endpoint capability overrides.
+
+    Equality and hashing identify the catalog entry, excluding overrides so
+    registry lookup still finds its defaults. Resolved capabilities are overlaid
+    on each lookup; endpoint capability caches must also account for overrides.
     """
 
     name: str
