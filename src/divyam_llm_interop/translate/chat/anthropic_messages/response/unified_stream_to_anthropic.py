@@ -3,6 +3,7 @@
 
 import json
 import uuid
+from time import monotonic
 from typing import Any, NoReturn
 
 from divyam_llm_interop.translate.chat.anthropic_messages.response.stream_state import (
@@ -33,6 +34,7 @@ def unified_stream_to_anthropic(
 ) -> ChatResponseStreaming:
     async def translated_stream():
         state = TargetStreamState(target_model=target.name)
+        last_output_at = monotonic()
         async for chunk in from_response.stream:
             native_error = chunk.unknowns.get(INTERNAL_STREAM_ERROR_KEY)
             if isinstance(native_error, dict):
@@ -41,15 +43,26 @@ def unified_stream_to_anthropic(
             native_event = chunk.unknowns.get(INTERNAL_ANTHROPIC_EVENT_KEY)
             if isinstance(native_event, dict):
                 yield native_event
+                last_output_at = monotonic()
                 continue
             if not state.started:
                 state.started = True
                 state.message_id = _message_id(chunk.id)
                 _capture_usage(chunk, state)
                 yield _message_start(state)
+                last_output_at = monotonic()
             _capture_usage(chunk, state)
-            for event in _consume_chunk(chunk, state):
+            events = _consume_chunk(chunk, state)
+            for event in events:
                 yield event
+            now = monotonic()
+            if events:
+                last_output_at = now
+            elif not state.terminal_seen and now - last_output_at >= 10:
+                # Reasoning and buffered tool arguments are upstream progress,
+                # even when this protocol cannot emit their content yet.
+                yield {"type": "ping"}
+                last_output_at = now
 
         if not state.started:
             _stream_error("cannot translate an empty stream", "$")

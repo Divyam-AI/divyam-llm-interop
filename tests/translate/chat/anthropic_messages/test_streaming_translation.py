@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+from importlib import import_module
 from typing import Any
 
 import pytest
@@ -21,6 +22,49 @@ async def _stream(items: list[dict[str, Any]]):
 
 async def _collect(response: ChatResponseStreaming) -> list[dict[str, Any]]:
     return [event async for event in response.stream]
+
+
+@pytest.mark.asyncio
+async def test_upstream_reasoning_keeps_anthropic_stream_alive_without_exposing_it(
+    translator, completions_model, anthropic_model, monkeypatch
+):
+    clock = [0.0]
+    module = import_module(
+        "divyam_llm_interop.translate.chat.anthropic_messages.response.unified_stream_to_anthropic"
+    )
+    monkeypatch.setattr(module, "monotonic", lambda: clock[0])
+
+    async def upstream():
+        source = _completions_text_stream()
+        yield source[0]
+        for elapsed in (11.0, 12.0, 22.0):
+            clock[0] = elapsed
+            yield {
+                **source[0],
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"reasoning": "private reasoning"},
+                        "finish_reason": None,
+                    }
+                ],
+            }
+        for chunk in source[1:]:
+            yield chunk
+
+    events = await _collect(
+        translator.translate_response_streaming(
+            ChatResponseStreaming(upstream()), completions_model, anthropic_model
+        )
+    )
+    assert sum(event["type"] == "ping" for event in events) == 2
+    assert "private reasoning" not in json.dumps(events)
+    assert [
+        event["delta"]["text"]
+        for event in events
+        if event["type"] == "content_block_delta"
+    ] == ["Hello"]
+    assert events[-1] == {"type": "message_stop"}
 
 
 def _anthropic_text_stream() -> list[dict[str, Any]]:
