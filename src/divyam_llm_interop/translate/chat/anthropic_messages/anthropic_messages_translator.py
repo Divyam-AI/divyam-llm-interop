@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+from dataclasses import replace
 from typing import Any
 
 from typing_extensions import override
@@ -9,6 +10,9 @@ from typing_extensions import override
 from divyam_llm_interop.translate.chat.anthropic_messages.request import (
     anthropic_request_to_unified,
     unified_request_to_anthropic,
+)
+from divyam_llm_interop.translate.chat.anthropic_messages.request.anthropic_to_unified import (
+    normalize_system_messages,
 )
 from divyam_llm_interop.translate.chat.anthropic_messages.response import (
     anthropic_response_to_unified,
@@ -51,6 +55,12 @@ class AnthropicMessagesTranslator(Translator):
     request_query_parameters = ("beta",)
 
     @override
+    def prepare_translation(
+        self, request: ChatRequest, source: Model, target: Model, *, native: bool
+    ) -> ChatRequest:
+        return replace(request, body=normalize_system_messages(request.body))
+
+    @override
     def selection_context(self, request: ChatRequest, source: Model) -> dict[str, Any]:
         context = super().selection_context(request, source)
         # The raw envelope is for lossless serving, not a second copy of the
@@ -75,7 +85,7 @@ class AnthropicMessagesTranslator(Translator):
             source.api_type == ModelApiType.ANTHROPIC_MESSAGES
             and target.api_type != source.api_type
         ):
-            validate_no_assistant_prefill(request.body)
+            validate_no_assistant_prefill(normalize_system_messages(request.body))
         validate_portable_target_capabilities(
             unified.body, target, self._model_registry
         )

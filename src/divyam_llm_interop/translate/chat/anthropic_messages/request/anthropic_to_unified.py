@@ -17,10 +17,54 @@ from divyam_llm_interop.translate.chat.unified.unified_request import (
 )
 
 
+def normalize_system_messages(body: dict[str, Any]) -> dict[str, Any]:
+    """Lift Claude Code's conversation-level system text into Anthropic's field."""
+    messages = body.get("messages")
+    if not isinstance(messages, list):
+        return body
+    system_messages = [
+        message
+        for message in messages
+        if isinstance(message, dict) and message.get("role") == "system"
+    ]
+    if not system_messages:
+        return body
+    system = body.get("system")
+    if system is not None and not isinstance(system, (str, list)):
+        return body  # Preserve malformed input for the existing validator.
+    for message in system_messages:
+        if set(message) != {"role", "content"} or not isinstance(
+            message["content"], (str, list)
+        ):
+            return body
+    normalized = copy.deepcopy(body)
+    blocks = (
+        [{"type": "text", "text": system}]
+        if isinstance(system, str)
+        else copy.deepcopy(system or [])
+    )
+    for message in system_messages:
+        content = message["content"]
+        if blocks:
+            blocks.append({"type": "text", "text": "\n"})
+        blocks.extend(
+            [{"type": "text", "text": content}]
+            if isinstance(content, str)
+            else copy.deepcopy(content)
+        )
+    normalized["system"] = blocks
+    normalized["messages"] = [
+        message
+        for message in normalized["messages"]
+        if not isinstance(message, dict) or message.get("role") != "system"
+    ]
+    return normalized
+
+
 def anthropic_request_to_unified(
     chat_request: ChatRequest, source: Model
 ) -> UnifiedChatCompletionsRequest:
-    body = chat_request.body
+    body = normalize_system_messages(chat_request.body)
     validate_anthropic_request(body)
 
     unified_body: dict[str, Any] = {

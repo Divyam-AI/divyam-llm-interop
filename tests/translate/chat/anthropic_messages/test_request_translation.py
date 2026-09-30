@@ -152,6 +152,40 @@ def test_anthropic_text_maps_to_completions(
     assert result.headers == {"x-trace": "1"}
 
 
+@pytest.mark.parametrize(
+    "content", ["Environment.", [{"type": "text", "text": "Environment."}]]
+)
+def test_claude_system_messages_preserve_instructions_without_mutating_input(
+    translator, anthropic_model, completions_model, content
+):
+    body = _anthropic_text_request()
+    body["messages"].append({"role": "system", "content": content})
+    original = copy.deepcopy(body)
+    request = ChatRequest(body)
+    translated = translator.translate_request(
+        request, anthropic_model, completions_model
+    )
+    assert translated.body["messages"] == [
+        {"role": "system", "content": "Follow policy.\nEnvironment."},
+        {"role": "user", "content": "Hello"},
+    ]
+    context = translator.selection_context(request, ModelApiType.ANTHROPIC_MESSAGES)
+    assert context["messages"] == translated.body["messages"]
+    native = Model(
+        "claude",
+        ModelApiType.ANTHROPIC_MESSAGES,
+        capability_overrides={"anthropic_wire_profile": "same"},
+    )
+    forwarded = translator.translate_request(request, native, native)
+    assert forwarded.body["messages"] == original["messages"][:1]
+    assert forwarded.body["system"] == [
+        {"type": "text", "text": "Follow policy."},
+        {"type": "text", "text": "\n"},
+        {"type": "text", "text": "Environment."},
+    ]
+    assert body == original
+
+
 def test_anthropic_max_tokens_uses_gpt_5_nano_completions_field(
     translator, anthropic_model
 ):
@@ -1111,6 +1145,12 @@ def test_final_assistant_prefill_is_rejected_cross_protocol_but_allowed_same_pro
         ChatRequest(body=body), anthropic_model, anthropic_model
     )
     assert same_protocol.body == body
+
+    body["messages"].append({"role": "system", "content": "Environment."})
+    with pytest.raises(UnsupportedFeatureError, match="prefill"):
+        translator.translate_request(
+            ChatRequest(body=body), anthropic_model, completions_model
+        )
 
 
 def test_user_text_before_tool_result_is_rejected(
