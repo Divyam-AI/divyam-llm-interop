@@ -206,7 +206,9 @@ class ResponsesToolAdapter:
             if name in self.bindings:
                 raise UnsupportedFeatureError("Tool alias collision")
             return name
-        # Some Responses clients omit namespace when the leaf name is unique.
+        # Resolve an unambiguous current-tool reference by its leaf or qualified
+        # name. Historical plain function calls above retain their identity;
+        # a missing namespace does not establish a namespaced tool's provenance.
         matches = [
             alias
             for (scope, leaf), alias in self._identities.items()
