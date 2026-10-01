@@ -3,6 +3,9 @@
 
 from typing import Any, NoReturn
 
+from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
+    validate_portable_schema,
+)
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
 from divyam_llm_interop.translate.chat.model_config.model_capabilities import (
     ModelCapabilities,
@@ -68,6 +71,24 @@ def validate_portable_target_capabilities(
     _validate_stop_sequences(unified.stop, target, capabilities)
     _validate_tools(unified, target, capabilities)
     _validate_parallel_tool_calls(unified.parallel_tool_calls, target)
+    if unified.response_format is not None and (
+        target.api_type == ModelApiType.GEMINI
+        or capabilities.supports_json_mode is False
+    ):
+        _target_error(
+            "target cannot preserve structured output", target, "$.output_config.format"
+        )
+    if target.api_type == ModelApiType.GEMINI:
+        if unified.user is not None or unified.reasoning_effort is not None:
+            _target_error(
+                "native Gemini cannot preserve user identity or effort", target, "$"
+            )
+        for index, tool in enumerate(unified.tools or []):
+            validate_portable_schema(
+                tool.function.parameters.to_dict(),
+                f"$.tools[{index}].input_schema",
+                require_object_root=True,
+            )
 
 
 def validate_source_profile_for_anthropic_target(

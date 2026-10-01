@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+from importlib import import_module
 from typing import Any
 
 import pytest
@@ -21,6 +22,49 @@ async def _stream(items: list[dict[str, Any]]):
 
 async def _collect(response: ChatResponseStreaming) -> list[dict[str, Any]]:
     return [event async for event in response.stream]
+
+
+@pytest.mark.asyncio
+async def test_upstream_reasoning_keeps_anthropic_stream_alive_without_exposing_it(
+    translator, completions_model, anthropic_model, monkeypatch
+):
+    clock = [0.0]
+    module = import_module(
+        "divyam_llm_interop.translate.chat.anthropic_messages.response.unified_stream_to_anthropic"
+    )
+    monkeypatch.setattr(module, "monotonic", lambda: clock[0])
+
+    async def upstream():
+        source = _completions_text_stream()
+        yield source[0]
+        for elapsed in (11.0, 12.0, 22.0):
+            clock[0] = elapsed
+            yield {
+                **source[0],
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"reasoning": "private reasoning"},
+                        "finish_reason": None,
+                    }
+                ],
+            }
+        for chunk in source[1:]:
+            yield chunk
+
+    events = await _collect(
+        translator.translate_response_streaming(
+            ChatResponseStreaming(upstream()), completions_model, anthropic_model
+        )
+    )
+    assert sum(event["type"] == "ping" for event in events) == 2
+    assert "private reasoning" not in json.dumps(events)
+    assert [
+        event["delta"]["text"]
+        for event in events
+        if event["type"] == "content_block_delta"
+    ] == ["Hello"]
+    assert events[-1] == {"type": "message_stop"}
 
 
 def _anthropic_text_stream() -> list[dict[str, Any]]:
@@ -677,6 +721,47 @@ async def test_anthropic_target_rejects_duplicate_terminal_chunks(
 
     with pytest.raises(StreamProtocolError, match="after terminal"):
         await _collect(translated)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool_call", [False, True])
+@pytest.mark.parametrize("late_text", ["", "unexpected text"])
+@pytest.mark.parametrize("repeat_finish", [False, True])
+async def test_usage_trailer_preserves_usage_without_replaying_content(
+    translator, completions_model, anthropic_model, tool_call, late_text, repeat_finish
+):
+    source = _completions_tool_stream() if tool_call else _completions_text_stream()
+    source[-1]["choices"] = [
+        {
+            "index": 0,
+            "delta": {"role": "assistant", "content": late_text},
+            "finish_reason": ("tool_calls" if tool_call else "stop")
+            if repeat_finish
+            else None,
+        }
+    ]
+    translated = translator.translate_response_streaming(
+        ChatResponseStreaming(_stream(source)), completions_model, anthropic_model
+    )
+    if late_text:
+        with pytest.raises(StreamProtocolError, match="after terminal"):
+            await _collect(translated)
+    else:
+        events = await _collect(translated)
+        assert sum(e["type"] == "message_stop" for e in events) == 1
+        assert events[-2]["usage"]["output_tokens"] == (5 if tool_call else 3)
+        assert events[-2]["delta"]["stop_reason"] == (
+            "tool_use" if tool_call else "end_turn"
+        )
+        if tool_call:
+            assert (
+                sum(
+                    e["type"] == "content_block_start"
+                    and e["content_block"]["type"] == "tool_use"
+                    for e in events
+                )
+                == 1
+            )
 
 
 @pytest.mark.asyncio

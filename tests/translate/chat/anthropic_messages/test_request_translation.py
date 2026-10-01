@@ -152,6 +152,40 @@ def test_anthropic_text_maps_to_completions(
     assert result.headers == {"x-trace": "1"}
 
 
+@pytest.mark.parametrize(
+    "content", ["Environment.", [{"type": "text", "text": "Environment."}]]
+)
+def test_claude_system_messages_preserve_instructions_without_mutating_input(
+    translator, anthropic_model, completions_model, content
+):
+    body = _anthropic_text_request()
+    body["messages"].append({"role": "system", "content": content})
+    original = copy.deepcopy(body)
+    request = ChatRequest(body)
+    translated = translator.translate_request(
+        request, anthropic_model, completions_model
+    )
+    assert translated.body["messages"] == [
+        {"role": "system", "content": "Follow policy.\nEnvironment."},
+        {"role": "user", "content": "Hello"},
+    ]
+    context = translator.selection_context(request, ModelApiType.ANTHROPIC_MESSAGES)
+    assert context["messages"] == translated.body["messages"]
+    native = Model(
+        "claude",
+        ModelApiType.ANTHROPIC_MESSAGES,
+        capability_overrides={"anthropic_wire_profile": "same"},
+    )
+    forwarded = translator.translate_request(request, native, native)
+    assert forwarded.body["messages"] == original["messages"][:1]
+    assert forwarded.body["system"] == [
+        {"type": "text", "text": "Follow policy."},
+        {"type": "text", "text": "\n"},
+        {"type": "text", "text": "Environment."},
+    ]
+    assert body == original
+
+
 def test_anthropic_max_tokens_uses_gpt_5_nano_completions_field(
     translator, anthropic_model
 ):
@@ -472,7 +506,9 @@ def test_gemini_tool_ids_and_names_map_to_anthropic(
 @pytest.mark.parametrize(
     ("field", "value"),
     [
-        ("metadata", {"user_id": "u1"}),
+        ("metadata", {"unknown": "u1"}),
+        ("output_config", {"format": {"type": "xml"}}),
+        ("output_config", {"effort": "max"}),
         ("service_tier", "auto"),
         ("mcp_servers", []),
     ],
@@ -483,7 +519,7 @@ def test_unsupported_anthropic_request_fields_fail_closed(
     body = _anthropic_text_request()
     body[field] = value
 
-    with pytest.raises(UnsupportedFeatureError, match="unsupported field"):
+    with pytest.raises(UnsupportedFeatureError):
         translator.translate_request(
             ChatRequest(body=body), anthropic_model, completions_model
         )
@@ -569,15 +605,159 @@ def test_anthropic_server_tool_declaration_fails_closed(
         )
 
 
-def test_nonportable_tool_schema_fails_closed(
-    translator, anthropic_model, completions_model
+@pytest.mark.parametrize(
+    "constraint, value",
+    [("additionalProperties", False), ("propertyNames", {"type": "string"})],
+)
+def test_schema_constraints_are_not_silently_dropped_for_native_gemini(
+    translator, anthropic_model, gemini_model, constraint, value
 ):
     body = _anthropic_tool_request()
-    body["tools"][0]["input_schema"]["additionalProperties"] = False
+    body["tools"][0]["input_schema"][constraint] = value
 
     with pytest.raises(UnsupportedFeatureError, match="unsupported field"):
         translator.translate_request(
+            ChatRequest(body=body), anthropic_model, gemini_model
+        )
+
+
+@pytest.mark.parametrize("api_type", [ModelApiType.COMPLETIONS, ModelApiType.RESPONSES])
+@pytest.mark.parametrize(
+    "user_id, expected_user",
+    [
+        (
+            "session-123",
+            "b9c84322f82434cb46e239d20daf1f3714eeb5077f87fb0f0cd4bd336bc01b54",
+        ),
+        ("u" * 150, "816752062318c8f216b0d347163d40e917a8c522ce07be3d0ebc80db6132fc5b"),
+    ],
+)
+def test_anthropic_coding_request_preserves_identity_effort_and_tool_constraints(
+    translator, anthropic_model, api_type, user_id, expected_user
+):
+    body = _anthropic_tool_request()
+    body["metadata"] = {"user_id": user_id}
+    body["output_config"] = {"effort": "low"}
+    schema = body["tools"][0]["input_schema"]
+    schema.update(
+        {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "additionalProperties": False,
+        }
+    )
+    schema["properties"]["city"].update(
+        {
+            "default": "Bengaluru",
+            "maxLength": 100,
+            "allOf": [{"pattern": "^[A-Z]"}, {"minLength": 1}],
+        }
+    )
+    schema["properties"]["args"] = {"description": "Optional arbitrary JSON value"}
+    schema["title"] = "LookupArguments"
+    schema["$defs"] = {
+        "Location": {
+            "type": "object",
+            "properties": {"name": {"type": "string", "title": "Name"}},
+            "required": ["name"],
+            "title": "Location",
+        }
+    }
+    schema["properties"]["location"] = {"$ref": "#/$defs/Location"}
+    schema["properties"]["unit"] = {
+        "anyOf": [{"type": "string"}, {"type": "null"}],
+        "default": None,
+        "title": "Unit",
+    }
+    schema["properties"]["answers"] = {
+        "type": "object",
+        "propertyNames": {"type": "string", "pattern": "^[A-Za-z]"},
+        "additionalProperties": {"type": "string"},
+    }
+    original = copy.deepcopy(body)
+    result = translator.translate_request(
+        ChatRequest(body=body),
+        anthropic_model,
+        Model("gpt-6-sol", api_type, capability_overrides={"supports_reasoning": True}),
+    )
+    assert result.body["user"] == expected_user
+    assert user_id not in json.dumps(result.body)
+    if api_type == ModelApiType.RESPONSES:
+        assert result.body["reasoning"] == {"effort": "low"}
+        assert result.body["tools"][0]["parameters"] == schema
+        assert result.body["tools"][0]["strict"] is False
+    else:
+        assert result.body["reasoning_effort"] == "low"
+        assert result.body["tools"][0]["function"]["parameters"] == schema
+        assert result.body["tools"][0]["function"]["strict"] is False
+    assert body == original
+
+
+@pytest.mark.parametrize("api_type", [ModelApiType.COMPLETIONS, ModelApiType.RESPONSES])
+def test_anthropic_session_title_preserves_structured_output(
+    translator, anthropic_model, api_type
+):
+    schema = {
+        "type": "object",
+        "properties": {"title": {"type": "string"}},
+        "required": ["title"],
+        "additionalProperties": False,
+    }
+    body = {
+        "model": "claude-sonnet-test",
+        "messages": [{"role": "user", "content": "Name this Snake coding session."}],
+        "max_tokens": 128,
+        "stream": True,
+        "output_config": {"format": {"type": "json_schema", "schema": schema}},
+    }
+    original = copy.deepcopy(body)
+    result = translator.translate_request(
+        ChatRequest(body=body), anthropic_model, Model("gpt-6-sol", api_type)
+    )
+    expected = {"name": "response", "schema": schema, "strict": True}
+    if api_type == ModelApiType.RESPONSES:
+        assert result.body["text"]["format"] == {"type": "json_schema", **expected}
+        assert "response_format" not in result.body
+    else:
+        assert result.body["response_format"] == {
+            "type": "json_schema",
+            "json_schema": expected,
+        }
+    assert result.body["stream"] is True
+    assert body == original
+
+
+@pytest.mark.parametrize(
+    "format_value",
+    [None, {}, {"type": "json_schema"}, {"type": "json_schema", "schema": []}],
+)
+def test_malformed_anthropic_output_format_is_invalid(
+    translator, anthropic_model, completions_model, format_value
+):
+    body = _anthropic_text_request()
+    body["output_config"] = {"format": format_value}
+    with pytest.raises(InvalidProtocolRequestError):
+        translator.translate_request(
             ChatRequest(body=body), anthropic_model, completions_model
+        )
+
+
+def test_native_gemini_does_not_silently_drop_anthropic_output_format(
+    translator, anthropic_model, gemini_model
+):
+    body = _anthropic_text_request()
+    body["output_config"] = {
+        "format": {
+            "type": "json_schema",
+            "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
+        }
+    }
+    with pytest.raises(TargetCapabilityError, match="structured output"):
+        translator.translate_request(
+            ChatRequest(body=body), anthropic_model, gemini_model
         )
 
 
@@ -966,6 +1146,12 @@ def test_final_assistant_prefill_is_rejected_cross_protocol_but_allowed_same_pro
     )
     assert same_protocol.body == body
 
+    body["messages"].append({"role": "system", "content": "Environment."})
+    with pytest.raises(UnsupportedFeatureError, match="prefill"):
+        translator.translate_request(
+            ChatRequest(body=body), anthropic_model, completions_model
+        )
+
 
 def test_user_text_before_tool_result_is_rejected(
     translator, anthropic_model, completions_model
@@ -996,7 +1182,7 @@ def test_invalid_tool_names_fail_at_the_source(
     ("schema", "message"),
     [
         ({"type": "string"}, "object root"),
-        ({"type": ["object", "null"]}, "one non-null"),
+        ({"type": ["object", "null"]}, "object root"),
         (
             {
                 "type": "object",
@@ -1020,7 +1206,7 @@ def test_invalid_tool_names_fail_at_the_source(
     ],
 )
 def test_invalid_portable_schemas_fail_closed(
-    translator, anthropic_model, completions_model, schema, message
+    translator, anthropic_model, gemini_model, schema, message
 ):
     body = _anthropic_tool_request()
     body["tools"][0]["input_schema"] = schema
@@ -1029,7 +1215,7 @@ def test_invalid_portable_schemas_fail_closed(
         (InvalidProtocolRequestError, UnsupportedFeatureError), match=message
     ):
         translator.translate_request(
-            ChatRequest(body=body), anthropic_model, completions_model
+            ChatRequest(body=body), anthropic_model, gemini_model
         )
 
 

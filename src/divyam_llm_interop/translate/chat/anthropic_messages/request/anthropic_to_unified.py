@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import copy
+import hashlib
 import json
 from typing import Any
 
@@ -16,10 +17,54 @@ from divyam_llm_interop.translate.chat.unified.unified_request import (
 )
 
 
+def normalize_system_messages(body: dict[str, Any]) -> dict[str, Any]:
+    """Lift Claude Code's conversation-level system text into Anthropic's field."""
+    messages = body.get("messages")
+    if not isinstance(messages, list):
+        return body
+    system_messages = [
+        message
+        for message in messages
+        if isinstance(message, dict) and message.get("role") == "system"
+    ]
+    if not system_messages:
+        return body
+    system = body.get("system")
+    if system is not None and not isinstance(system, (str, list)):
+        return body  # Preserve malformed input for the existing validator.
+    for message in system_messages:
+        if set(message) != {"role", "content"} or not isinstance(
+            message["content"], (str, list)
+        ):
+            return body
+    normalized = copy.deepcopy(body)
+    blocks = (
+        [{"type": "text", "text": system}]
+        if isinstance(system, str)
+        else copy.deepcopy(system or [])
+    )
+    for message in system_messages:
+        content = message["content"]
+        if blocks:
+            blocks.append({"type": "text", "text": "\n"})
+        blocks.extend(
+            [{"type": "text", "text": content}]
+            if isinstance(content, str)
+            else copy.deepcopy(content)
+        )
+    normalized["system"] = blocks
+    normalized["messages"] = [
+        message
+        for message in normalized["messages"]
+        if not isinstance(message, dict) or message.get("role") != "system"
+    ]
+    return normalized
+
+
 def anthropic_request_to_unified(
     chat_request: ChatRequest, source: Model
 ) -> UnifiedChatCompletionsRequest:
-    body = chat_request.body
+    body = normalize_system_messages(chat_request.body)
     validate_anthropic_request(body)
 
     unified_body: dict[str, Any] = {
@@ -30,6 +75,22 @@ def anthropic_request_to_unified(
     }
     _copy_sampling_fields(body, unified_body)
     _copy_tools(body, unified_body)
+    user_id = (body.get("metadata") or {}).get("user_id")
+    if user_id is not None:
+        # Stable pseudonymous IDs preserve correlation without exposing raw identity.
+        unified_body["user"] = hashlib.sha256(user_id.encode()).hexdigest()
+    output_config = body.get("output_config") or {}
+    if output_config.get("effort") is not None:
+        unified_body["reasoning_effort"] = output_config["effort"]
+    if "format" in output_config:
+        unified_body["response_format"] = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "response",
+                "schema": copy.deepcopy(output_config["format"]["schema"]),
+                "strict": True,
+            },
+        }
 
     return UnifiedChatCompletionsRequest(
         body=UnifiedChatCompletionsRequestBody.from_dict(unified_body),
@@ -141,6 +202,8 @@ def _copy_tools(body: dict[str, Any], unified_body: dict[str, Any]) -> None:
                     "name": tool["name"],
                     "description": tool.get("description", ""),
                     "parameters": copy.deepcopy(tool["input_schema"]),
+                    # Responses otherwise normalizes optional fields into strict inputs.
+                    "strict": False,
                 },
             }
             for tool in body["tools"]

@@ -3,12 +3,29 @@
 
 import json
 
+import pytest
+
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
 from divyam_llm_interop.translate.chat.openai_responses.request.unified_to_responses import (
     convert_completion_request_to_responses_request,
 )
 from divyam_llm_interop.translate.chat.translate import ChatTranslator
+from divyam_llm_interop.translate.chat.translation_errors import (
+    InvalidProtocolRequestError,
+)
 from divyam_llm_interop.translate.chat.types import ChatRequest, Model
+
+
+def test_missing_json_schema_is_a_typed_request_error():
+    with pytest.raises(InvalidProtocolRequestError) as exc:
+        convert_completion_request_to_responses_request(
+            {
+                "model": "example",
+                "messages": [],
+                "response_format": {"type": "json_schema"},
+            }
+        )
+    assert exc.value.path == "$.response_format.json_schema"
 
 
 def test_simple_text_request():
@@ -156,6 +173,7 @@ def test_chat_translator_emits_official_responses_tool_history():
                 "tool_call_id": "call_weather",
                 "content": '{"temperature_c":22}',
             },
+            {"role": "assistant", "content": "It is 22 degrees."},
             {"role": "user", "content": "Summarize that."},
         ],
         "tools": [
@@ -199,6 +217,10 @@ def test_chat_translator_emits_official_responses_tool_history():
             "type": "function_call_output",
             "call_id": "call_weather",
             "output": '{"temperature_c":22}',
+        },
+        {
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": "It is 22 degrees."}],
         },
         {
             "role": "user",
@@ -416,10 +438,17 @@ def test_streaming_structured_output():
     assert responses_req_stream["model"] == "gpt-4o"
     assert responses_req_stream["stream"] is True
     assert responses_req_stream["temperature"] == 0.3
-    assert responses_req_stream["response_format"]["type"] == "json_schema"
-    assert (
-        responses_req_stream["response_format"]["json_schema"]["name"] == "person_info"
-    )
+    assert "response_format" not in responses_req_stream
+    assert responses_req_stream["text"]["format"] == {
+        "type": "json_schema",
+        "name": "person_info",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {"name": {"type": "string"}, "age": {"type": "number"}},
+            "required": ["name", "age"],
+        },
+    }
 
 
 def test_multiple_system_messages():

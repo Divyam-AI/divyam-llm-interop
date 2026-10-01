@@ -9,6 +9,9 @@ from typing import Any
 from divyam_llm_interop.translate.chat.base.translation_utils import (
     drop_null_values_top_level,
 )
+from divyam_llm_interop.translate.chat.translation_errors import (
+    InvalidProtocolRequestError,
+)
 
 
 def convert_completion_request_to_responses_request(
@@ -150,6 +153,10 @@ def convert_completion_request_to_responses_request(
                     if role == "assistant" and adj.get("type") == "output_text":
                         adj["type"] = "input_text"
                     content_parts.append(_convert_part(adj, role))
+        if use_official_tool_items and role == "assistant":
+            for part in content_parts:
+                if part.get("type") == "input_text":
+                    part["type"] = "output_text"
         if content_parts:
             message_item["content"] = content_parts
         elif role == "assistant" and tool_calls:
@@ -290,7 +297,16 @@ def convert_completion_request_to_responses_request(
     if parallel_tool_calls is not None:
         responses_request["parallel_tool_calls"] = parallel_tool_calls
     if response_format is not None:
-        responses_request["response_format"] = response_format
+        output_format = dict(response_format)
+        if output_format.get("type") == "json_schema":
+            schema = output_format.pop("json_schema", None)
+            if not isinstance(schema, dict):
+                raise InvalidProtocolRequestError(
+                    "json_schema response format requires a json_schema object",
+                    path="$.response_format.json_schema",
+                )
+            output_format.update(schema)
+        responses_request["text"] = {"format": output_format}
     if user is not None:
         responses_request["user"] = user
     if reasoning:

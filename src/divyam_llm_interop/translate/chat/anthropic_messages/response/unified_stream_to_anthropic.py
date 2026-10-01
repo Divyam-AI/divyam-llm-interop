@@ -3,6 +3,7 @@
 
 import json
 import uuid
+from time import monotonic
 from typing import Any, NoReturn
 
 from divyam_llm_interop.translate.chat.anthropic_messages.response.stream_state import (
@@ -33,6 +34,7 @@ def unified_stream_to_anthropic(
 ) -> ChatResponseStreaming:
     async def translated_stream():
         state = TargetStreamState(target_model=target.name)
+        last_output_at = monotonic()
         async for chunk in from_response.stream:
             native_error = chunk.unknowns.get(INTERNAL_STREAM_ERROR_KEY)
             if isinstance(native_error, dict):
@@ -41,15 +43,26 @@ def unified_stream_to_anthropic(
             native_event = chunk.unknowns.get(INTERNAL_ANTHROPIC_EVENT_KEY)
             if isinstance(native_event, dict):
                 yield native_event
+                last_output_at = monotonic()
                 continue
             if not state.started:
                 state.started = True
                 state.message_id = _message_id(chunk.id)
                 _capture_usage(chunk, state)
                 yield _message_start(state)
+                last_output_at = monotonic()
             _capture_usage(chunk, state)
-            for event in _consume_chunk(chunk, state):
+            events = _consume_chunk(chunk, state)
+            for event in events:
                 yield event
+            now = monotonic()
+            if events:
+                last_output_at = now
+            elif not state.terminal_seen and now - last_output_at >= 10:
+                # Reasoning and buffered tool arguments are upstream progress,
+                # even when this protocol cannot emit their content yet.
+                yield {"type": "ping"}
+                last_output_at = now
 
         if not state.started:
             _stream_error("cannot translate an empty stream", "$")
@@ -85,6 +98,21 @@ def _consume_chunk(
     if len(chunk.choices) > 1:
         _target_error("Anthropic Messages supports one response choice", "$.choices")
     if state.terminal_seen and chunk.choices:
+        choice = chunk.choices[0]
+        delta = choice.delta
+        # Some OpenAI-compatible providers repeat the finish marker with final usage.
+        # Accept that accounting trailer, while rejecting any new response content.
+        if (
+            chunk.usage is not None
+            and choice.index == 0
+            and choice.finish_reason in (None, state.finish_reason)
+            and delta.role in (None, "assistant")
+            and delta.content in (None, "")
+            and not delta.tool_calls
+            and delta.refusal is None
+            and not delta.unknowns
+        ):
+            return events
         _stream_error("semantic chunk received after terminal finish", "$.choices")
     for choice in chunk.choices:
         if choice.index != 0:

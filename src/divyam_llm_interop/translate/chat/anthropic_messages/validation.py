@@ -22,6 +22,8 @@ _REQUEST_FIELDS = {
     "tools",
     "tool_choice",
     "thinking",
+    "metadata",
+    "output_config",
 }
 _SCHEMA_FIELDS = {
     "type",
@@ -32,6 +34,23 @@ _SCHEMA_FIELDS = {
     "enum",
 }
 _JSON_SCHEMA_TYPES = {"object", "array", "string", "number", "integer", "boolean"}
+_SCHEMA_CONSTRAINTS = {
+    "$schema",
+    "additionalProperties",
+    "propertyNames",
+    "default",
+    "allOf",
+    "format",
+    "minItems",
+    "maxItems",
+    "minLength",
+    "maxLength",
+    "minimum",
+    "maximum",
+    "exclusiveMinimum",
+    "exclusiveMaximum",
+    "pattern",
+}
 _TOOL_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _UNSUPPORTED_BLOCK_TYPES = {
     "image",
@@ -60,19 +79,29 @@ def validate_anthropic_request(body: dict[str, Any]) -> None:
     tool_names = _validate_tools(body.get("tools"))
     _validate_tool_choice(body.get("tool_choice"), tool_names)
     _validate_thinking(body.get("thinking"))
+    _validate_metadata_and_output_config(body)
     _validate_messages(body.get("messages"))
     if "stream" in body and not isinstance(body["stream"], bool):
         _invalid("stream must be a boolean", "$.stream")
 
 
 def validate_portable_schema(
-    schema: Any, path: str, *, require_object_root: bool = False
+    schema: Any,
+    path: str,
+    *,
+    require_object_root: bool = False,
+    allow_constraints: bool = False,
 ) -> None:
     _require_mapping(schema, path)
-    _reject_unknown_fields(schema, _SCHEMA_FIELDS, path)
+    allowed = (
+        _SCHEMA_FIELDS | _SCHEMA_CONSTRAINTS if allow_constraints else _SCHEMA_FIELDS
+    )
+    _reject_unknown_fields(schema, allowed, path)
 
     schema_type = schema.get("type")
-    if not isinstance(schema_type, str) or schema_type not in _JSON_SCHEMA_TYPES:
+    if not (allow_constraints and schema_type is None) and (
+        not isinstance(schema_type, str) or schema_type not in _JSON_SCHEMA_TYPES
+    ):
         _invalid(
             "type must be one non-null portable JSON Schema type",
             f"{path}.type",
@@ -93,7 +122,9 @@ def validate_portable_schema(
                     "property names must be non-empty strings",
                     f"{path}.properties",
                 )
-            validate_portable_schema(child, f"{path}.properties.{name}")
+            validate_portable_schema(
+                child, f"{path}.properties.{name}", allow_constraints=allow_constraints
+            )
 
     items = schema.get("items")
     if items is not None:
@@ -101,7 +132,43 @@ def validate_portable_schema(
             _invalid("items requires type array", f"{path}.items")
         if not isinstance(items, dict):
             _unsupported("tuple-style array schemas are not portable", f"{path}.items")
-        validate_portable_schema(items, f"{path}.items")
+        validate_portable_schema(
+            items, f"{path}.items", allow_constraints=allow_constraints
+        )
+
+    if allow_constraints:
+        if "propertyNames" in schema:
+            names = schema["propertyNames"]
+            if isinstance(names, dict):
+                validate_portable_schema(
+                    names, f"{path}.propertyNames", allow_constraints=True
+                )
+            elif not isinstance(names, bool):
+                _invalid(
+                    "propertyNames must be a boolean or schema", f"{path}.propertyNames"
+                )
+        additional = schema.get("additionalProperties")
+        if isinstance(additional, dict):
+            validate_portable_schema(
+                additional, f"{path}.additionalProperties", allow_constraints=True
+            )
+        elif additional is not None and not isinstance(additional, bool):
+            _invalid(
+                "additionalProperties must be a boolean or schema",
+                f"{path}.additionalProperties",
+            )
+        if "allOf" in schema:
+            branches = schema["allOf"]
+            if not isinstance(branches, list) or not branches:
+                _invalid("allOf must be a non-empty list of schemas", f"{path}.allOf")
+            for index, branch in enumerate(branches):
+                _require_mapping(branch, f"{path}.allOf[{index}]")
+                # A constraint branch can inherit its enclosing type.
+                validate_portable_schema(
+                    {"type": schema_type, **branch},
+                    f"{path}.allOf[{index}]",
+                    allow_constraints=True,
+                )
 
     required = schema.get("required")
     if required is not None:
@@ -178,6 +245,11 @@ def _validate_messages(messages: Any) -> None:
         _require_mapping(message, path)
         _reject_unknown_fields(message, {"role", "content"}, path)
         role = message.get("role")
+        if role == "system":
+            _unsupported(
+                "Message role 'system' is not supported; use top-level system text",
+                f"{path}.role",
+            )
         if role not in {"user", "assistant"}:
             _invalid("role must be user or assistant", f"{path}.role")
         if role == "assistant":
@@ -333,11 +405,15 @@ def _validate_tools(tools: Any) -> set[str]:
         names.add(name)
         if "description" in tool and not isinstance(tool["description"], str):
             _invalid("tool description must be a string", f"{path}.description")
-        validate_portable_schema(
-            tool.get("input_schema"),
-            f"{path}.input_schema",
-            require_object_root=True,
-        )
+        # Keep the source schema intact. OpenAI-format targets can carry its
+        # constraints; narrower targets validate their subset before selection.
+        schema = tool.get("input_schema")
+        _require_mapping(schema, f"{path}.input_schema")
+        if schema.get("type") != "object":
+            _invalid(
+                "tool input_schema must have an object root",
+                f"{path}.input_schema.type",
+            )
     return names
 
 
@@ -384,6 +460,39 @@ def _validate_thinking(thinking: Any) -> None:
         "only thinking.type='disabled' is allowed by the supported text/tool profile",
         "$.thinking",
     )
+
+
+def _validate_metadata_and_output_config(body: dict[str, Any]) -> None:
+    metadata = body.get("metadata")
+    if metadata is not None:
+        _require_mapping(metadata, "$.metadata")
+        _reject_unknown_fields(metadata, {"user_id"}, "$.metadata")
+        if "user_id" in metadata and not isinstance(metadata["user_id"], str):
+            _invalid("user_id must be a string", "$.metadata.user_id")
+    output = body.get("output_config")
+    if output is not None:
+        _require_mapping(output, "$.output_config")
+        _reject_unknown_fields(output, {"effort", "format"}, "$.output_config")
+        if "effort" in output and output["effort"] not in ("low", "medium", "high"):
+            _unsupported(
+                "only low, medium, and high effort are portable",
+                "$.output_config.effort",
+            )
+        if "format" in output:
+            path = "$.output_config.format"
+            output_format = output["format"]
+            _require_mapping(output_format, path)
+            _reject_unknown_fields(output_format, {"type", "schema"}, path)
+            if "type" not in output_format:
+                _invalid("output format requires a type", f"{path}.type")
+            if output_format["type"] != "json_schema":
+                _unsupported("only json_schema output is portable", f"{path}.type")
+            validate_portable_schema(
+                output_format.get("schema"),
+                f"{path}.schema",
+                require_object_root=True,
+                allow_constraints=True,
+            )
 
 
 def _validate_optional_number(
