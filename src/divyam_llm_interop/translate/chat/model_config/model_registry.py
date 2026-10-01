@@ -164,9 +164,23 @@ class ModelRegistry:
             # Search original model instead.
             matching_model = model
 
-        return self._model_capabilities.get(
+        capabilities = self._model_capabilities.get(
             matching_model, ModelCapabilities(supported_api_types=[model.api_type])
         )
+        if model.capability_overrides:
+            known = (
+                {f.name for f in dataclasses.fields(ModelCapabilities)}
+                | set(capabilities.extra)
+            ) - {"extra"}
+            unknown = set(model.capability_overrides) - known
+            if unknown:
+                raise ValueError(
+                    f"Unknown endpoint capability override(s): {', '.join(sorted(unknown))}"
+                )
+            return ModelCapabilities.from_dict(
+                {**capabilities.to_dict(), **model.capability_overrides}
+            )
+        return capabilities
 
     @classmethod
     def _map_models_to_config(

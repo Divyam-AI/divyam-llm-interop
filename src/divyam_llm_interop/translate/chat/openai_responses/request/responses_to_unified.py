@@ -7,6 +7,7 @@ from typing import Any
 from divyam_llm_interop.translate.chat.base.translation_utils import (
     drop_null_values_top_level,
 )
+from divyam_llm_interop.translate.chat.translation_errors import UnsupportedFeatureError
 
 
 def convert_responses_to_completions_request(
@@ -37,19 +38,58 @@ def convert_responses_to_completions_request(
             messages.append({"role": "user", "content": input_data})
         elif isinstance(input_data, list):
             pending_function_calls: list[dict[str, Any]] = []
+            pending_reasoning: list[str] = []
+
+            def attach_reasoning(message: dict[str, Any]) -> None:
+                if not pending_reasoning:
+                    return
+                if message.get("role") != "assistant":
+                    raise UnsupportedFeatureError(
+                        "Readable reasoning requires an associated assistant message or tool call"
+                    )
+                message["reasoning_content"] = "\n".join(
+                    part
+                    for part in [
+                        message.get("reasoning_content", ""),
+                        *pending_reasoning,
+                    ]
+                    if part
+                )
+                pending_reasoning.clear()
 
             def flush_function_calls() -> None:
                 if not pending_function_calls:
                     return
-                messages.append(
-                    {
-                        "role": "assistant",
-                        "tool_calls": list(pending_function_calls),
-                    }
-                )
+                message = {
+                    "role": "assistant",
+                    "tool_calls": list(pending_function_calls),
+                }
+                attach_reasoning(message)
+                messages.append(message)
                 pending_function_calls.clear()
 
             for item in input_data:
+                if item.get("type") == "reasoning":
+                    flush_function_calls()
+                    if item.get("encrypted_content"):
+                        raise UnsupportedFeatureError(
+                            "Opaque reasoning state requires a compatible Responses endpoint"
+                        )
+                    parts = (item.get("content") or []) + (item.get("summary") or [])
+                    if any(
+                        not isinstance(part, dict)
+                        or part.get("type")
+                        not in {"reasoning_text", "summary_text", "text"}
+                        or not isinstance(part.get("text", ""), str)
+                        for part in parts
+                    ):
+                        raise UnsupportedFeatureError(
+                            "Unknown reasoning content cannot be translated"
+                        )
+                    pending_reasoning.extend(
+                        part["text"] for part in parts if part.get("text")
+                    )
+                    continue
                 if item.get("type") == "function_call":
                     pending_function_calls.append(
                         {
@@ -64,6 +104,9 @@ def convert_responses_to_completions_request(
                     continue
 
                 flush_function_calls()
+                if pending_reasoning and item.get("role") != "assistant":
+                    # Older adapter responses placed reasoning after the answer.
+                    attach_reasoning(messages[-1] if messages else {})
 
                 # handle function_call_output first
                 if item.get("type") == "function_call_output":
@@ -106,6 +149,7 @@ def convert_responses_to_completions_request(
                 content = item.get("content", [])
 
                 msg: dict[str, Any] = {"role": role}
+                attach_reasoning(msg)
 
                 # Convert structured content
                 if isinstance(content, str):
@@ -153,6 +197,8 @@ def convert_responses_to_completions_request(
 
                 messages.append(msg)
             flush_function_calls()
+            if pending_reasoning:
+                attach_reasoning(messages[-1] if messages else {})
 
     completion_request["messages"] = messages
 
@@ -194,6 +240,17 @@ def convert_responses_to_completions_request(
         if value is not None:
             key = "max_completion_tokens" if param == "max_output_tokens" else param
             completion_request[key] = value
+
+    choice = completion_request.get("tool_choice")
+    if (
+        isinstance(choice, dict)
+        and choice.get("type") == "function"
+        and "name" in choice
+    ):
+        completion_request["tool_choice"] = {
+            "type": "function",
+            "function": {"name": choice["name"]},
+        }
 
     # Handle stream options
     if completion_request.get("stream"):

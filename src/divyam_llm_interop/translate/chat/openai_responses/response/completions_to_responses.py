@@ -10,6 +10,8 @@ from divyam_llm_interop.translate.chat.base.translation_utils import (
     drop_null_values_top_level,
 )
 
+from .reasoning import readable_reasoning
+
 
 def convert_completions_to_responses_response(
     completion_dict: dict[str, Any],
@@ -30,7 +32,7 @@ def convert_completions_to_responses_response(
     # Extract base fields from Completions response
     completion_id = str(completion_dict.get("id", f"chatcmpl-{uuid.uuid4().hex[:29]}"))
     created = completion_dict.get("created", time.time())
-    model = completion_dict.get("model", "gpt-4o")
+    model = completion_dict.get("model", "")
     choices: list[dict[str, Any]] = completion_dict.get("choices", [])
     usage = completion_dict.get("usage", {})
     system_fingerprint = completion_dict.get("system_fingerprint")
@@ -77,6 +79,29 @@ def convert_completions_to_responses_response(
         role = message.get("role", "assistant")
         content = message.get("content")
         tool_calls = message.get("tool_calls")
+        if not tool_calls and message.get("function_call"):
+            tool_calls = [{"function": message["function_call"]}]
+
+        reasoning = readable_reasoning(
+            {
+                **message,
+                **(
+                    {"reasoning": choice["reasoning"]}
+                    if choice.get("reasoning")
+                    else {}
+                ),
+            }
+        )
+        if reasoning:
+            responses_response["output"].append(
+                {
+                    "id": f"rs_dvy_{uuid.uuid4().hex}",
+                    "type": "reasoning",
+                    "status": "completed",
+                    "summary": [],
+                    "content": [{"type": "reasoning_text", "text": reasoning}],
+                }
+            )
 
         # Add text output
         if content is not None:
@@ -129,48 +154,6 @@ def convert_completions_to_responses_response(
                         )
 
             responses_response["output"].append(message_item)
-
-        # Add reasoning output (if present)
-        reasoning = choice.get("reasoning")
-        if not reasoning:
-            # vLLM sometimes includes reasoning in message.reasoning_content
-            reasoning = message.get("reasoning_content")
-
-        if reasoning:
-            reasoning_item = {
-                "id": f"reasoning_{uuid.uuid4().hex}",
-                "type": "reasoning",
-                "content": [],
-                "summary": [],
-                "status": "completed",
-            }
-
-            # Extract reasoning text or structure
-            if isinstance(reasoning, dict):
-                summary_val = reasoning.get("summary")
-            else:
-                summary_val = reasoning
-
-            # Convert reasoning summary → content (as reasoning_text)
-            if isinstance(summary_val, str):
-                reasoning_item["content"].append(
-                    {"type": "reasoning_text", "text": summary_val}
-                )
-            elif isinstance(summary_val, list):
-                for s in summary_val:
-                    if isinstance(s, str):
-                        reasoning_item["content"].append(
-                            {"type": "reasoning_text", "text": s}
-                        )
-
-            # Optional reasoning metadata
-            if isinstance(reasoning, dict):
-                if "effort" in reasoning:
-                    reasoning_item["effort"] = reasoning["effort"]
-                if "encrypted_content" in reasoning:
-                    reasoning_item["encrypted_content"] = reasoning["encrypted_content"]
-
-            responses_response["output"].append(reasoning_item)
 
         # Add tool/function calls if present
         if tool_calls:

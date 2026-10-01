@@ -597,6 +597,8 @@ def test_vllm_response_simple():
         )
     )
 
+    expected["output"] = [expected["output"][1], expected["output"][0]]
+
     values_to_replace["status"] = None
 
     converted = drop_null_values_recursively(

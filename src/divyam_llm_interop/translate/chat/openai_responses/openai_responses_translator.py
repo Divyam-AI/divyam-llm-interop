@@ -1,8 +1,6 @@
 # Copyright 2025 Divyam.ai
 # SPDX-License-Identifier: Apache-2.0
 
-from typing import ClassVar
-
 from typing_extensions import override
 
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
@@ -58,10 +56,6 @@ from divyam_llm_interop.translate.chat.unified.unified_response import (
 class OpenAiResponsesTranslator(Translator):
     """Translator for OpenAi responses models."""
 
-    # TODO: Assumes parameters are not compatible.
-    #  Identify models that are compatible.
-    compatible_prefixes: ClassVar[list[str]] = []
-
     def __init__(self, model_registry: ModelRegistry):
         super().__init__(model_registry)
         self.unified_to_openai_tr = UnifiedToCompletionsTranslator(
@@ -88,12 +82,13 @@ class OpenAiResponsesTranslator(Translator):
             #  E.g. open AI models on Azure might be compatible parameters wise.
             return False
 
-        for prefix in self.compatible_prefixes:
-            if source.name.startswith(prefix) and target.name.startswith(prefix):
-                # Compatible models.
-                return True
-
-        return False
+        source_profile = self._model_registry.get_capabilities(
+            source
+        ).responses_wire_profile
+        target_profile = self._model_registry.get_capabilities(
+            target
+        ).responses_wire_profile
+        return bool(source_profile and source_profile == target_profile)
 
     @override
     def request_from_unified(

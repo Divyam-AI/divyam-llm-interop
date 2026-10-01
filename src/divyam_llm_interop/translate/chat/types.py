@@ -2,22 +2,34 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from collections.abc import AsyncGenerator
-from dataclasses import asdict, dataclass
-from typing import Any, Optional
+from dataclasses import asdict, dataclass, field
+from typing import TYPE_CHECKING, Any, Optional
 
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
+
+if TYPE_CHECKING:
+    from divyam_llm_interop.translate.chat.openai_responses.tool_adapter import (
+        ResponsesToolAdapter,
+    )
 
 
 @dataclass(frozen=True)
 class Model:
     """
-    A data class that represents a response from chat completion API.
+    Catalog identity plus request-local endpoint capability overrides.
+
+    Equality and hashing identify the catalog entry, excluding overrides so
+    registry lookup still finds its defaults. Resolved capabilities are overlaid
+    on each lookup; endpoint capability caches must also account for overrides.
     """
 
     name: str
     api_type: ModelApiType
     version: Optional[str] = None
     provider: Optional[str] = None
+    capability_overrides: dict[str, Any] = field(
+        default_factory=dict, compare=False, hash=False
+    )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -25,6 +37,11 @@ class Model:
             "api_type": self.api_type.value,  # export enum as string
             "version": self.version,
             "provider": self.provider,
+            **(
+                {"capability_overrides": self.capability_overrides}
+                if self.capability_overrides
+                else {}
+            ),
         }
 
     @classmethod
@@ -44,6 +61,7 @@ class Model:
             api_type=api_parsed,
             version=data.get("version"),
             provider=data.get("provider"),
+            capability_overrides=data.get("capability_overrides") or {},
         )
 
 
@@ -57,6 +75,10 @@ class ChatRequest:
     headers: Optional[dict[str, str]] = None
     query_parameters: Optional[dict[str, str]] = None
     path_parameters: Optional[dict[str, str]] = None
+    # Local response reconstruction state; never part of the provider payload.
+    response_adapter: "ResponsesToolAdapter | None" = field(
+        default=None, repr=False, compare=False
+    )
 
 
 @dataclass

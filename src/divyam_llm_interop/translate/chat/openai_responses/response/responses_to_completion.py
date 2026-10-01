@@ -19,7 +19,7 @@ def convert_responses_to_completions_response(
     """
     response_id = response_dict.get("id", f"chatcmpl-{uuid.uuid4().hex[:29]}")
     created_at = response_dict.get("created_at", time.time())
-    model = response_dict.get("model", "gpt-4o")
+    model = response_dict.get("model", "")
     status = response_dict.get("status", "completed")
     output = response_dict.get("output", [])
     usage = response_dict.get("usage", {})

@@ -384,3 +384,7 @@ file for the full license text.
 ---
 
 Copyright © 2025 DivyamAI Technologies Private Limited. All rights reserved.
+
+### Portable Responses tools and endpoint capabilities
+
+See [Portable Responses tools](docs/portable-responses-tools.md) for generic custom-tool and namespace translation, endpoint overrides, native state compatibility and streaming validation.

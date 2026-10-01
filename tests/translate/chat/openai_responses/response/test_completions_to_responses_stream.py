@@ -72,7 +72,8 @@ async def test_basic_text_streaming():
 
 
 @pytest.mark.asyncio
-async def test_tool_call_streaming():
+@pytest.mark.parametrize("legacy", [False, True])
+async def test_tool_call_streaming(legacy):
     mock_stream = [
         {
             "choices": [
@@ -104,6 +105,15 @@ async def test_tool_call_streaming():
             ]
         },
     ]
+
+    if legacy:
+        for chunk in mock_stream:
+            choice = chunk["choices"][0]
+            choice["delta"]["function_call"] = choice["delta"].pop("tool_calls")[0][
+                "function"
+            ]
+            if choice["finish_reason"]:
+                choice["finish_reason"] = "function_call"
 
     converter = CompletionsToResponsesStreamConverter()
     events = [

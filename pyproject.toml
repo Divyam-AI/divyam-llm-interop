@@ -1,6 +1,6 @@
 [project]
 name = "divyam-llm-interop"
-version = "0.2.1"
+version = "0.3.0"
 description = "A lightweight, provider-neutral library for translating LLM requests and responses across model APIs."
 authors = [{ name = "DivyamAI Technologies Private Limited" }]
 license = { text = "Apache-2.0" }
@@ -15,6 +15,7 @@ classifiers = [
 dependencies = [
     "pyyaml>=6.0.3",
     "typing-extensions>=4.15.0",
+    "lark>=1.2.2,<2",
 ]
 
 [project.urls]

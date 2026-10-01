@@ -7,6 +7,8 @@ from collections.abc import AsyncGenerator
 from copy import deepcopy
 from typing import Any, Optional
 
+from .reasoning import readable_reasoning
+
 
 class CompletionsToResponsesStreamConverter:
     """
@@ -70,6 +72,9 @@ class CompletionsToResponsesStreamConverter:
 
         usage_data: dict[str, Any] | None = None
         response_finished = False
+        reasoning_item: dict[str, Any] | None = None
+        reasoning_index = -1
+        reasoning_text = ""
 
         def next_seq() -> int:
             nonlocal seq
@@ -100,6 +105,45 @@ class CompletionsToResponsesStreamConverter:
                     "response": deepcopy(response_obj),
                 }
 
+                is_first_chunk = False
+
+            reasoning_delta = readable_reasoning(delta)
+            if reasoning_delta:
+                if reasoning_item is None:
+                    reasoning_index = next_output_index
+                    next_output_index += 1
+                    reasoning_item = {
+                        "id": f"rs_dvy_{uuid.uuid4().hex}",
+                        "type": "reasoning",
+                        "status": "in_progress",
+                        "summary": [],
+                        "content": [],
+                    }
+                    response_obj["output"].append(reasoning_item)
+                    yield {
+                        "type": "response.output_item.added",
+                        "sequence_number": next_seq(),
+                        "output_index": reasoning_index,
+                        "item": deepcopy(reasoning_item),
+                    }
+                reasoning_text += reasoning_delta
+                yield {
+                    "type": "response.reasoning_text.delta",
+                    "sequence_number": next_seq(),
+                    "item_id": reasoning_item["id"],
+                    "output_index": reasoning_index,
+                    "content_index": 0,
+                    "delta": reasoning_delta,
+                }
+
+            # Create the message after any leading reasoning, keeping output
+            # indices stable and the final history in provider emission order.
+            if not message_item and (
+                delta.get("content") is not None
+                or delta.get("tool_calls")
+                or delta.get("function_call")
+                or finish_reason
+            ):
                 message_id = f"msg_{uuid.uuid4().hex}"
                 message_item = {
                     "id": message_id,
@@ -118,8 +162,6 @@ class CompletionsToResponsesStreamConverter:
                     "output_index": message_output_index,
                     "item": deepcopy(message_item),
                 }
-                is_first_chunk = False
-
             # --- Content deltas ---
             content_delta = delta.get("content")
             if content_delta is not None:
@@ -148,7 +190,10 @@ class CompletionsToResponsesStreamConverter:
                     }
 
             # --- Tool call deltas ---
-            for tool_call_delta in delta.get("tool_calls", []):
+            tool_deltas = delta.get("tool_calls") or []
+            if not tool_deltas and delta.get("function_call"):
+                tool_deltas = [{"index": 0, "function": delta["function_call"]}]
+            for tool_call_delta in tool_deltas:
                 tc_index = tool_call_delta.get("index", 0)
 
                 # Close text content before opening tool call items
@@ -193,6 +238,14 @@ class CompletionsToResponsesStreamConverter:
                         "output_index": tc_out_idx,
                         "item": deepcopy(tc_item),
                     }
+
+                else:
+                    if tool_call_delta.get("id"):
+                        tool_calls_buffer[tc_index]["call_id"] = tool_call_delta["id"]
+                    name_delta = tool_call_delta.get("function", {}).get("name")
+                    if name_delta and name_delta != tool_calls_buffer[tc_index]["name"]:
+                        # Ignore repeated complete names while retaining fragments.
+                        tool_calls_buffer[tc_index]["name"] += name_delta
 
                 args_delta = tool_call_delta.get("function", {}).get("arguments")
                 if args_delta:
@@ -242,10 +295,34 @@ class CompletionsToResponsesStreamConverter:
                         "item": deepcopy(message_item),
                     }
 
+                if reasoning_item is not None:
+                    reasoning_item["status"] = "completed"
+                    reasoning_item["content"] = [
+                        {"type": "reasoning_text", "text": reasoning_text}
+                    ]
+                    yield {
+                        "type": "response.reasoning_text.done",
+                        "sequence_number": next_seq(),
+                        "item_id": reasoning_item["id"],
+                        "output_index": reasoning_index,
+                        "content_index": 0,
+                        "text": reasoning_text,
+                    }
+                    yield {
+                        "type": "response.output_item.done",
+                        "sequence_number": next_seq(),
+                        "output_index": reasoning_index,
+                        "item": deepcopy(reasoning_item),
+                    }
+
                 # Close tool call items
                 for tc_idx in sorted(tool_calls_buffer):
                     tc = tool_calls_buffer[tc_idx]
-                    tc["status"] = "completed"
+                    tc["status"] = (
+                        "completed"
+                        if finish_reason in ("stop", "tool_calls", "function_call")
+                        else "incomplete"
+                    )
                     tc_out_idx = tool_output_indices[tc_idx]
 
                     yield {
@@ -264,7 +341,7 @@ class CompletionsToResponsesStreamConverter:
                     }
 
                 # Response status
-                if finish_reason in ("stop", "tool_calls"):
+                if finish_reason in ("stop", "tool_calls", "function_call"):
                     response_obj["status"] = "completed"
                 else:
                     response_obj["status"] = "incomplete"
