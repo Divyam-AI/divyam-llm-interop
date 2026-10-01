@@ -33,6 +33,9 @@ from divyam_llm_interop.translate.chat.openai_completions.completions_translator
 from divyam_llm_interop.translate.chat.openai_responses.openai_responses_translator import (
     OpenAiResponsesTranslator,
 )
+from divyam_llm_interop.translate.chat.openai_responses.request.reasoning_history import (
+    validate_native_reasoning_history,
+)
 from divyam_llm_interop.translate.chat.openai_responses.tool_adapter import (
     ResponsesToolAdapter,
 )
@@ -93,6 +96,8 @@ class ChatTranslator:
             source_translator == target_translator
             and source_translator.are_requests_compatible(source, target)
         ):
+            if source.api_type == ModelApiType.RESPONSES:
+                validate_native_reasoning_history(chat_request.body)
             # Short circuit the requests since the models are compatible.
             return chat_request
 

@@ -62,7 +62,13 @@ verify acceptance of reasoning history as well as tool calls.
 If an endpoint returns opaque provider reasoning, declare
 `emits_opaque_reasoning=True`; it is excluded from this Responses bridge before
 a call. Unexpected opaque output also fails rather than fabricating compatible
-state. Native compatible routes remain available.
+state. Native compatible routes remain available for native state. Adapter-created
+reasoning uses the `rs_dvy_` ID prefix. A matching native profile preserves native
+reasoning (including readable content) unchanged, but does not make these portable
+items native: they require the reasoning-history adapter and are rejected before
+native passthrough. Old unmarked items cannot be reliably attributed to the
+adapter and are left unchanged; start a fresh conversation when upgrading an old
+mixed-provider transcript.
 
 This preservation policy applies to every Responses caller, including callers
 without custom tools. Encrypted state in a conversation restricts subsequent
