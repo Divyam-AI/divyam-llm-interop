@@ -18,6 +18,9 @@ from typing import Any
 
 from lark import Lark, LarkError
 
+from divyam_llm_interop.translate.chat.openai_responses.item_ids import (
+    normalize_custom_tool_item_id,
+)
 from divyam_llm_interop.translate.chat.translation_errors import (
     InvalidProtocolRequestError,
     ResponseTranslationError,
@@ -319,7 +322,7 @@ class ResponsesToolAdapter:
         if binding.custom:
             result["type"] = "custom_tool_call"
             result["input"] = binding.decode_input(result.pop("arguments", ""))
-        return result
+        return normalize_custom_tool_item_id(result)
 
     def restore_response(self, body: dict[str, Any]) -> dict[str, Any]:
         result = deepcopy(body)

@@ -1,7 +1,7 @@
 # Copyright 2025 Divyam.ai
 # SPDX-License-Identifier: Apache-2.0
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from divyam_llm_interop.translate.chat.anthropic_messages import (
@@ -33,8 +33,8 @@ from divyam_llm_interop.translate.chat.openai_completions.completions_translator
 from divyam_llm_interop.translate.chat.openai_responses.openai_responses_translator import (
     OpenAiResponsesTranslator,
 )
-from divyam_llm_interop.translate.chat.openai_responses.request.reasoning_history import (
-    validate_native_reasoning_history,
+from divyam_llm_interop.translate.chat.openai_responses.request.native_continuation import (
+    normalize_native_continuation,
 )
 from divyam_llm_interop.translate.chat.openai_responses.tool_adapter import (
     ResponsesToolAdapter,
@@ -97,7 +97,9 @@ class ChatTranslator:
             and source_translator.are_requests_compatible(source, target)
         ):
             if source.api_type == ModelApiType.RESPONSES:
-                validate_native_reasoning_history(chat_request.body)
+                return replace(
+                    chat_request, body=normalize_native_continuation(chat_request.body)
+                )
             # Short circuit the requests since the models are compatible.
             return chat_request
 

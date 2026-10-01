@@ -132,3 +132,27 @@ def test_readable_history_retains_text_and_summary_without_promoting_either():
             "reasoning_content": "Step one.\nSummary.",
         }
     ]
+
+
+@pytest.mark.parametrize("item_id", ["fc_portable", "ctc_native"])
+def test_native_continuation_uses_custom_item_ids_and_preserves_call_links(item_id):
+    call = {
+        "type": "custom_tool_call",
+        "id": item_id,
+        "call_id": "call_1",
+        "name": "execute",
+        "input": "print(42)",
+    }
+    result = {"type": "custom_tool_call_output", "call_id": "call_1", "output": "42"}
+    native = {
+        "type": "reasoning",
+        "id": "rs_native",
+        "summary": [],
+        "content": [{"type": "reasoning_text", "text": "Native context"}],
+    }
+    body = {"input": [native, call, result]}
+    original = deepcopy(body)
+    items = translate(body)["input"]
+    expected_id = "ctc_portable" if item_id == "fc_portable" else "ctc_native"
+    assert items == [native, {**call, "id": expected_id}, result]
+    assert body == original

@@ -5,13 +5,17 @@
 
 from typing import Any
 
+from divyam_llm_interop.translate.chat.openai_responses.item_ids import (
+    normalize_custom_tool_item_id,
+)
 from divyam_llm_interop.translate.chat.translation_errors import UnsupportedFeatureError
 
 
-def validate_native_reasoning_history(body: dict[str, Any]) -> None:
+def normalize_native_continuation(body: dict[str, Any]) -> dict[str, Any]:
     items = body.get("input")
     if not isinstance(items, list):
-        return
+        return body
+    normalized = []
     for item in items:
         if (
             isinstance(item, dict)
@@ -24,3 +28,7 @@ def validate_native_reasoning_history(body: dict[str, Any]) -> None:
                 "Adapter-created reasoning requires a compatible reasoning-history adapter; "
                 "it cannot be rewritten as native assistant text"
             )
+        normalized.append(
+            normalize_custom_tool_item_id(item) if isinstance(item, dict) else item
+        )
+    return {**body, "input": normalized}
