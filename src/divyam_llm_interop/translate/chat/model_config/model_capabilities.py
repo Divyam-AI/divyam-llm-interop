@@ -185,9 +185,14 @@ class ModelCapabilities:
     # Optional feature flags
     supports_json_mode: Optional[bool] = None
     supports_function_calling: Optional[bool] = None
+    # Whether the endpoint accepts an explicit standard service tier.
+    supports_service_tier: Optional[bool] = None
     # Equal non-empty endpoint profiles permit native Responses passthrough,
     # including opaque state. Declare only for mutually compatible endpoints.
     responses_wire_profile: Optional[str] = None
+    # Native Messages passthrough requires an explicitly shared compatibility
+    # domain, including any signed reasoning state and endpoint/account scope.
+    anthropic_wire_profile: Optional[str] = None
     # Opaque provider state cannot be represented faithfully by a text/function bridge.
     emits_opaque_reasoning: Optional[bool] = None
     supports_vision: Optional[bool] = None

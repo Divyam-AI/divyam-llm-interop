@@ -1,6 +1,9 @@
 # Copyright 2025 Divyam.ai
 # SPDX-License-Identifier: Apache-2.0
 
+from dataclasses import replace
+from typing import Any
+
 from typing_extensions import override
 
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
@@ -16,8 +19,14 @@ from divyam_llm_interop.translate.chat.openai_completions.completions_to_unified
 from divyam_llm_interop.translate.chat.openai_completions.unified_to_completions import (
     UnifiedToCompletionsTranslator,
 )
+from divyam_llm_interop.translate.chat.openai_responses.request.native_continuation import (
+    normalize_native_continuation,
+)
 from divyam_llm_interop.translate.chat.openai_responses.request.responses_to_unified import (
     convert_responses_to_completions_request,
+)
+from divyam_llm_interop.translate.chat.openai_responses.request.selection_context import (
+    responses_to_selection_context,
 )
 from divyam_llm_interop.translate.chat.openai_responses.request.unified_to_responses import (
     convert_completion_request_to_responses_request,
@@ -34,7 +43,12 @@ from divyam_llm_interop.translate.chat.openai_responses.response.responses_to_co
 from divyam_llm_interop.translate.chat.openai_responses.response.responses_to_completions_stream import (
     ResponsesToCompletionsStreamConverter,
 )
+from divyam_llm_interop.translate.chat.openai_responses.tool_adapter import (
+    ResponsesToolAdapter,
+)
 from divyam_llm_interop.translate.chat.translation_errors import (
+    InteropTranslationError,
+    TargetCapabilityError,
     raise_for_internal_stream_error,
 )
 from divyam_llm_interop.translate.chat.types import (
@@ -55,6 +69,59 @@ from divyam_llm_interop.translate.chat.unified.unified_response import (
 
 class OpenAiResponsesTranslator(Translator):
     """Translator for OpenAi responses models."""
+
+    request_header_prefixes = ("openai-beta",)
+
+    @override
+    def selection_context(self, request: ChatRequest, source: Model) -> dict[str, Any]:
+        return responses_to_selection_context(request.body)
+
+    @override
+    def prepare_translation(
+        self, request: ChatRequest, source: Model, target: Model, *, native: bool
+    ) -> ChatRequest:
+        if native:
+            return replace(request, body=normalize_native_continuation(request.body))
+        if self._model_registry.get_capabilities(target).emits_opaque_reasoning:
+            raise TargetCapabilityError(
+                "Endpoint emits opaque reasoning that the Responses adapter cannot preserve",
+                target_api_type=target.api_type,
+            )
+        adapter = ResponsesToolAdapter(request.body)
+        body = adapter.normalize(request.body)
+        return replace(
+            request,
+            body=body,
+            response_adapter=adapter if adapter.requires_restore else None,
+        )
+
+    @override
+    def validate_translation(
+        self,
+        request: ChatRequest,
+        unified: UnifiedChatCompletionsRequest,
+        source: Model,
+        target: Model,
+    ) -> None:
+        if (
+            source.api_type == ModelApiType.RESPONSES
+            and target.api_type != ModelApiType.COMPLETIONS
+            and any(message.reasoning_content for message in unified.body.messages)
+        ):
+            raise TargetCapabilityError(
+                "Target adapter cannot preserve readable reasoning history",
+                target_api_type=target.api_type,
+                path="$.input",
+            )
+
+    @override
+    def format_stream_error(self, error: InteropTranslationError) -> str:
+        return self.format_stream_event(
+            {
+                "type": "response.failed",
+                "response": {"status": "failed", "error": error.to_dict()},
+            }
+        )
 
     def __init__(self, model_registry: ModelRegistry):
         super().__init__(model_registry)
