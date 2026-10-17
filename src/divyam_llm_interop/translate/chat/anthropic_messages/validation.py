@@ -19,6 +19,7 @@ _REQUEST_FIELDS = {
     "stream",
     "temperature",
     "top_p",
+    "top_k",
     "stop_sequences",
     "tools",
     "tool_choice",
@@ -124,6 +125,10 @@ def validate_anthropic_request(body: dict[str, Any]) -> None:
     _require_positive_int(body.get("max_tokens"), "$.max_tokens")
     _validate_optional_number(body, "temperature", 0, 1)
     _validate_optional_number(body, "top_p", 0, 1)
+    if "top_k" in body:
+        top_k = body["top_k"]
+        if isinstance(top_k, bool) or not isinstance(top_k, int) or top_k < 0:
+            _invalid("top_k must be a non-negative integer", "$.top_k")
     _validate_stop_sequences(body.get("stop_sequences"))
     _validate_system(body.get("system"))
     tool_names = _validate_tools(body.get("tools"))

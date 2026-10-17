@@ -320,6 +320,9 @@ def _copy_sampling_fields(body: dict[str, Any], unified_body: dict[str, Any]) ->
     for source_name, unified_name in (
         ("temperature", "temperature"),
         ("top_p", "top_p"),
+        # Not a Chat Completions field: kept among the request's unknowns, as
+        # a Gemini request's topK is, for targets that take it.
+        ("top_k", "top_k"),
         ("stream", "stream"),
         ("stop_sequences", "stop"),
     ):

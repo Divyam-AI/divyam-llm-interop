@@ -511,7 +511,6 @@ def test_gemini_tool_ids_and_names_map_to_anthropic(
         ("output_config", {"format": {"type": "xml"}}),
         ("output_config", {"effort": "extreme"}),
         ("mcp_servers", []),
-        ("top_k", 5),
     ],
 )
 def test_unsupported_anthropic_request_fields_fail_closed(

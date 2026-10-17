@@ -9,6 +9,9 @@ from divyam_llm_interop.translate.chat.model_config.model_capabilities import (
     ModelCapabilities,
     ReasoningEffortConfig,
 )
+from divyam_llm_interop.translate.chat.translation_errors import (
+    InvalidProtocolRequestError,
+)
 from divyam_llm_interop.translate.chat.types import ChatRequest, Model
 
 _CLIENT = Model("claude-opus-4-7", ModelApiType.ANTHROPIC_MESSAGES, provider="direct")
@@ -202,3 +205,78 @@ def test_requested_effort_reaches_a_target_as_a_level_it_offers(translator):
     result = translator.translate_request(ChatRequest(body=body), _CLIENT, target)
 
     assert result.body["reasoning_effort"] == "high"
+
+
+def test_top_k_reaches_claude_that_takes_it(translator):
+    result = translator.translate_request(
+        ChatRequest(body=_anthropic_request(top_k=40)),
+        _CLIENT,
+        _claude("claude-opus-4-6"),
+    )
+
+    assert result.body["top_k"] == 40
+
+
+@pytest.mark.parametrize(
+    ("name", "fields"),
+    [
+        ("claude-opus-4-6", {"thinking": {"type": "adaptive"}}),
+        ("claude-sonnet-5", {}),
+        ("claude-opus-5-5", {}),
+    ],
+)
+def test_top_k_is_dropped_where_claude_rejects_it(translator, name, fields):
+    result = translator.translate_request(
+        ChatRequest(body=_anthropic_request(top_k=40, **fields)),
+        _CLIENT,
+        _claude(name),
+    )
+
+    assert "top_k" not in result.body
+
+
+def test_top_k_reaches_gemini_as_top_k(translator):
+    target = Model("gemini-2.5-flash", ModelApiType.GEMINI)
+
+    result = translator.translate_request(
+        ChatRequest(body=_anthropic_request(top_k=40)), _CLIENT, target
+    )
+
+    assert result.body["generationConfig"]["topK"] == 40
+
+
+def test_top_k_reaches_a_completions_endpoint_only_if_it_declares_one(translator):
+    plain = Model("gpt-4.1-mini", ModelApiType.COMPLETIONS)
+    declared = Model(
+        "reasoner-x",
+        ModelApiType.COMPLETIONS,
+        provider="gateway",
+        capability_overrides={"top_k": {"min": 1, "max": 20}},
+    )
+    body = _anthropic_request(top_k=40)
+
+    without = translator.translate_request(ChatRequest(body=body), _CLIENT, plain)
+    fitted = translator.translate_request(ChatRequest(body=body), _CLIENT, declared)
+
+    assert "top_k" not in without.body
+    assert fitted.body["top_k"] == 20
+
+
+def test_top_k_does_not_reach_a_responses_endpoint(translator):
+    target = Model("gpt-5.1", ModelApiType.RESPONSES)
+
+    result = translator.translate_request(
+        ChatRequest(body=_anthropic_request(top_k=40)), _CLIENT, target
+    )
+
+    assert "top_k" not in result.body
+
+
+@pytest.mark.parametrize("value", [-1, 1.5, True, "40"])
+def test_malformed_top_k_is_invalid(translator, value):
+    with pytest.raises(InvalidProtocolRequestError):
+        translator.translate_request(
+            ChatRequest(body=_anthropic_request(top_k=value)),
+            _CLIENT,
+            _claude("claude-opus-4-6"),
+        )

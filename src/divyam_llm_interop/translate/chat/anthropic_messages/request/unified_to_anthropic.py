@@ -229,6 +229,9 @@ def _add_optional_fields(
         value = getattr(unified, unified_name)
         if value is not None:
             body[target_name] = value
+    top_k = unified.unknowns.get("top_k")
+    if isinstance(top_k, int) and not isinstance(top_k, bool):
+        body["top_k"] = top_k
     if unified.stop is not None:
         body["stop_sequences"] = (
             [unified.stop] if isinstance(unified.stop, str) else unified.stop
@@ -378,7 +381,7 @@ def _add_thinking(
     or, for a model that only takes a budget, enabled thinking with a budget
     of 4096, 16384 or 32000 tokens for low, medium and high, kept below
     max_tokens. With reasoning on, sampling controls Claude rejects alongside
-    thinking (temperature other than 1, top_p below 0.95) are dropped.
+    thinking (temperature other than 1, top_p below 0.95, top_k) are dropped.
 
     A model that reasons by default is sent thinking disabled when nothing
     asked for reasoning, so that the request behaves as the client expects.
@@ -410,6 +413,7 @@ def _add_thinking(
             del body["temperature"]
         if body.get("top_p") is not None and body["top_p"] < 0.95:
             del body["top_p"]
+        body.pop("top_k", None)
 
 
 def _fit_to_target(
@@ -418,8 +422,9 @@ def _fit_to_target(
     """Leave out what the target rejects, whatever the client asked for.
 
     Fields the target's catalogue entry drops are removed, such as sampling
-    controls on models that take only their defaults. Claude also rejects a
-    forced tool_choice ("any" or a named tool) while it thinks. When the model
+    controls on models that take only their defaults, and top_k while the
+    model thinks, which Claude rejects. Claude also rejects a forced
+    tool_choice ("any" or a named tool) while it thinks. When the model
     thinks only by default and can stop, thinking is turned off and the
     forced tool kept; when thinking was asked for, or cannot be turned off,
     the choice becomes "auto", so the model may still call the tool.
@@ -430,6 +435,8 @@ def _fit_to_target(
     result = {
         key: value for key, value in body.items() if key not in (drop_fields or [])
     }
+    if "top_k" in result and _thinks(result, capabilities):
+        del result["top_k"]
     choice = result.get("tool_choice")
     if not isinstance(choice, dict) or choice.get("type") not in ("any", "tool"):
         return result
@@ -445,6 +452,15 @@ def _fit_to_target(
     if "disable_parallel_tool_use" in choice:
         auto["disable_parallel_tool_use"] = choice["disable_parallel_tool_use"]
     return {**result, "tool_choice": auto}
+
+
+def _thinks(body: dict[str, Any], capabilities: ModelCapabilities) -> bool:
+    """Whether the target will think on this request body."""
+    thinking = body.get("thinking")
+    mode = thinking.get("type") if isinstance(thinking, dict) else None
+    if mode is None:
+        return bool(capabilities.reasoning_enabled_by_default)
+    return mode != "disabled"
 
 
 def _validate_unified_request(unified: UnifiedChatCompletionsRequestBody) -> None:

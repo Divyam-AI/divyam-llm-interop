@@ -43,6 +43,9 @@ class UnifiedToCompletionsTranslator:
         unknows_to_keep = (
             [EXTRA_BODY_KEY] if target_capabilities.supports_google_extra_body else []
         )
+        # top_k is not a Chat Completions field: it reaches only endpoints whose
+        # entry declares a range for it, fitted to that range.
+        top_k = unified.unknowns.get("top_k")
 
         for key in list(unified.unknowns.keys()):
             if key not in unknows_to_keep:
@@ -78,6 +81,13 @@ class UnifiedToCompletionsTranslator:
             body[EXTRA_BODY_KEY] = self._translate_extra_body(
                 unified, target_capabilities
             )
+
+        if (
+            isinstance(top_k, int)
+            and not isinstance(top_k, bool)
+            and target_capabilities.top_k is not None
+        ):
+            body["top_k"] = int(target_capabilities.top_k.fit_to_range(top_k) or top_k)
 
         # Rename deprecated fields
         target_capabilities.rename_fields_in_place(body, ModelApiType.COMPLETIONS)
