@@ -8,10 +8,98 @@ semantics.
 The chat interop layer supports Chat Completions, OpenAI Responses, native
 Gemini, and the text/client-tool subset of Anthropic Messages. It translates
 requests, non-streaming responses, and streaming events through a shared
-semantic representation. Images, documents, native provider tools, citations,
-reasoning blocks, prompt-cache controls, Realtime/Live, batch, and token-count
-APIs are outside the supported profile and fail closed rather than being
-silently flattened.
+semantic representation. Documents, native provider tools, citations,
+Realtime/Live, batch, and token-count APIs are outside the supported profile and
+fail closed rather than being silently flattened. Images are supported only from
+Anthropic Messages to Chat Completions and Responses targets: user images become
+image parts, and images returned in a `tool_result` follow the turn's tool
+messages as a user message, since Chat Completions tool messages carry only
+text. A target declaring `supports_vision: false`, or native Gemini, refuses
+them.
+
+Anthropic Messages requests translated to another protocol keep what the target
+can express and drop what is only a hint:
+
+- Prompt-cache controls, citations on text blocks, `defer_loading`,
+  `eager_input_streaming`, metadata keys other than `user_id`, and the
+  operational fields `context_management`, `safeguards`, `service_tier`,
+  `inference_geo`, `speed`, `fallbacks`, `container` and `diagnostics` are
+  dropped. Explicit nulls on optional fields count as absent.
+- `output_config.effort` maps to the target's reasoning effort, with `xhigh` and
+  `max` lowered to `high`. Without an explicit effort, an enabled thinking budget
+  maps to `low` up to 4096 tokens, `medium` up to 16384 and `high` above that,
+  and adaptive thinking maps to the target's `default_reasoning_effort`
+  (`medium` when it declares none). Targets without a reasoning control drop
+  the effort.
+- A tool's `strict` flag maps to the function `strict` flag when the schema
+  meets OpenAI's strict requirements (every property required and
+  `additionalProperties: false` on every object); otherwise the tool is sent
+  non-strict.
+
+A request from another protocol to Claude maps `reasoning_effort` or
+`reasoning.effort` to adaptive thinking with `output_config.effort` (`minimal`
+becomes `low`), or to a thinking budget of 4096, 16384 or 32000 tokens for models
+that only take one. `none`, or no effort on a model that reasons by default,
+sends thinking disabled; a model that cannot stop reasoning never receives
+disabled and gets the lowest effort instead.
+
+### Reasoning across endpoints
+
+Each endpoint's reasoning state belongs to a signing domain: the declared
+`anthropic_wire_profile` (or `responses_wire_profile`), otherwise the endpoint's
+protocol, provider and model. Endpoints sharing an `anthropic_wire_profile` are
+forwarded natively. On any other route to an Anthropic-format client, reasoning
+travels back in the content blocks the client returns on its next request:
+
+- Thinking from Claude keeps its text; its signature, and redacted thinking
+  data, are wrapped in an envelope (`dvm1.` plus base64url JSON naming the
+  domain) so they are replayed only to that domain.
+- Readable reasoning from another provider becomes a thinking block for
+  display. Opaque state another provider returns ends the answer in one
+  `redacted_thinking` envelope block: an OpenRouter-style gateway's
+  `reasoning_details`, Gemini `thoughtSignature` values keyed to the function
+  call (or text) they came on, or OpenAI Responses reasoning items with their
+  `encrypted_content`, in output order. An answer with no such state gets no
+  extra block.
+
+On the next request, each endpoint receives only its own state, and envelopes
+never reach a provider: Gemini gets each signature back beside its
+`functionCall` or text part, and a Responses endpoint gets its reasoning items
+back ahead of the call or message they led to. Requests from Anthropic-format
+clients to a reasoning Responses endpoint ask for
+`include: ["reasoning.encrypted_content"]`, unless it declares
+`supports_encrypted_reasoning: false` or the request uses server-side state.
+
+Tool calls a model cannot verify are rewritten as narration of past events, in
+the form `[Earlier, another assistant called the tool Read with input {...}.]`
+and `[The tool Read returned: ...]`, without call IDs:
+
+- Claude, with thinking on: the unfinished tool exchange at the end of the
+  conversation, when its assistant turn has no thinking this endpoint can
+  verify, whoever produced it. Claude then starts a fresh turn with thinking
+  on.
+- Gemini 3: every step of the current turn (since the latest user message other
+  than function responses) whose first function call has no signature from this
+  endpoint, with the function responses answering it. An endpoint can declare
+  `gemini_foreign_call_policy: "skip_signature"` to keep such calls with
+  Google's `skip_thought_signature_validator` value instead, at some cost to
+  reasoning quality. Base64 images, including those a tool returned, reach
+  native Gemini as `inlineData`.
+
+### Endpoint reasoning overrides
+
+Any capability can be overridden per endpoint. In the Divyam Router this is the
+endpoint's `model_configs.endpoint_capabilities`, for example:
+
+```json
+{"endpoint_capabilities": {"default_reasoning_effort": "low", "reasoning_dialect": "openrouter"}}
+```
+
+`default_reasoning_effort` (`low`, `medium` or `high`) is the effort used when
+a client asks for adaptive thinking without a level; the Claude catalogue
+declares `high`, and `medium` for Claude Opus 5.5 and Claude Haiku 5.5.
+`anthropic_wire_profile`, `reasoning_dialect`, `supports_encrypted_reasoning`
+and `gemini_foreign_call_policy` are set the same way.
 
 ## Installation
 

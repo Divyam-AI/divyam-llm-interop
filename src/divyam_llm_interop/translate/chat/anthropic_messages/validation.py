@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import re
+import uuid
 from typing import Any, NoReturn
 
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
@@ -18,13 +19,36 @@ _REQUEST_FIELDS = {
     "stream",
     "temperature",
     "top_p",
+    "top_k",
     "stop_sequences",
     "tools",
     "tool_choice",
     "thinking",
     "metadata",
     "output_config",
+    # Prompt-cache and operational hints. Non-Anthropic targets have no
+    # equivalent and none of them changes what the answer says.
+    "cache_control",
+    "context_management",
+    "safeguards",
+    "service_tier",
+    "inference_geo",
+    "speed",
+    "fallbacks",
+    "container",
+    "diagnostics",
 }
+_TOOL_FIELDS = {
+    "type",
+    "name",
+    "description",
+    "input_schema",
+    "strict",
+    "cache_control",
+    "defer_loading",
+    "eager_input_streaming",
+}
+_EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
 _SCHEMA_FIELDS = {
     "type",
     "description",
@@ -52,11 +76,11 @@ _SCHEMA_CONSTRAINTS = {
     "pattern",
 }
 _TOOL_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+_IMAGE_MEDIA_TYPES = ("image/gif", "image/jpeg", "image/png", "image/webp")
+# Reasoning blocks are valid only as assistant history; see _validate_message_content.
+_REASONING_BLOCK_TYPES = {"thinking", "redacted_thinking"}
 _UNSUPPORTED_BLOCK_TYPES = {
-    "image",
     "document",
-    "thinking",
-    "redacted_thinking",
     "server_tool_use",
     "web_search_tool_result",
     "web_fetch_tool_result",
@@ -67,13 +91,44 @@ _UNSUPPORTED_BLOCK_TYPES = {
 }
 
 
+def without_null_fields(body: Any) -> Any:
+    """Copy a request, treating explicit nulls on optional fields as absent.
+
+    SDKs echo prior assistant output with fields such as ``"citations": null``.
+    Nulls are removed from the request envelope, messages, content blocks,
+    image sources, tools and the small option objects. Tool inputs and JSON
+    schemas keep theirs, because there null is a value.
+    """
+    if not isinstance(body, dict):
+        return body
+    result = _without_nulls(body)
+    system = result.get("system")
+    if isinstance(system, list):
+        result["system"] = [_block_without_nulls(block) for block in system]
+    messages = result.get("messages")
+    if isinstance(messages, list):
+        result["messages"] = [_message_without_nulls(message) for message in messages]
+    tools = result.get("tools")
+    if isinstance(tools, list):
+        result["tools"] = [_without_nulls(tool) for tool in tools]
+    for key in ("tool_choice", "thinking", "metadata", "output_config"):
+        if key in result:
+            result[key] = _without_nulls(result[key])
+    return result
+
+
 def validate_anthropic_request(body: dict[str, Any]) -> None:
+    body = without_null_fields(body)
     _require_mapping(body, "$")
     _reject_unknown_fields(body, _REQUEST_FIELDS, "$")
     _require_non_empty_string(body.get("model"), "$.model")
     _require_positive_int(body.get("max_tokens"), "$.max_tokens")
     _validate_optional_number(body, "temperature", 0, 1)
     _validate_optional_number(body, "top_p", 0, 1)
+    if "top_k" in body:
+        top_k = body["top_k"]
+        if isinstance(top_k, bool) or not isinstance(top_k, int) or top_k < 0:
+            _invalid("top_k must be a non-negative integer", "$.top_k")
     _validate_stop_sequences(body.get("stop_sequences"))
     _validate_system(body.get("system"))
     tool_names = _validate_tools(body.get("tools"))
@@ -83,6 +138,8 @@ def validate_anthropic_request(body: dict[str, Any]) -> None:
     _validate_messages(body.get("messages"))
     if "stream" in body and not isinstance(body["stream"], bool):
         _invalid("stream must be a boolean", "$.stream")
+    if "cache_control" in body:
+        _require_mapping(body["cache_control"], "$.cache_control")
 
 
 def validate_portable_schema(
@@ -191,8 +248,54 @@ def validate_portable_schema(
         _invalid("enum must be a non-empty list", f"{path}.enum")
 
 
+def is_openai_strict_schema(schema: Any) -> bool:
+    """Whether OpenAI accepts a JSON Schema in strict function-calling mode.
+
+    Strict mode requires every object to list all of its properties as
+    required and to set additionalProperties to false. The check follows
+    properties, array items, anyOf and allOf branches, and $defs, since a
+    reference can bring any of those in.
+    """
+    if not isinstance(schema, dict):
+        return False
+    if schema.get("type") == "object" or "properties" in schema:
+        properties = schema.get("properties") or {}
+        if schema.get("additionalProperties") is not False:
+            return False
+        if set(schema.get("required") or []) != set(properties):
+            return False
+        if not all(is_openai_strict_schema(child) for child in properties.values()):
+            return False
+    children: list[Any] = []
+    items = schema.get("items")
+    if items is not None:
+        children.extend(items if isinstance(items, list) else [items])
+    for key in ("anyOf", "allOf"):
+        children.extend(schema.get(key) or [])
+    for key in ("$defs", "definitions"):
+        children.extend((schema.get(key) or {}).values())
+    return all(is_openai_strict_schema(child) for child in children)
+
+
 def is_portable_tool_name(value: Any) -> bool:
     return isinstance(value, str) and _TOOL_NAME_PATTERN.fullmatch(value) is not None
+
+
+_TOOL_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def client_tool_id(provider_id: str | None) -> str:
+    """The tool_use ID an Anthropic client receives for a provider's tool call.
+
+    The provider's ID is kept when Anthropic accepts it, since replayed
+    reasoning state refers to calls by it. Any other ID is replaced by a fresh
+    one: some providers number calls within each response ("Edit:0",
+    "functions.Edit:0"), which Anthropic rejects and which repeats across a
+    conversation, so a client would drop the later call as a duplicate.
+    """
+    if provider_id and _TOOL_ID_PATTERN.fullmatch(provider_id):
+        return provider_id
+    return f"toolu_{uuid.uuid4().hex}"
 
 
 def validate_no_assistant_prefill(body: dict[str, Any]) -> None:
@@ -225,7 +328,7 @@ def text_from_blocks(value: Any, path: str) -> str:
     for index, block in enumerate(value):
         block_path = f"{path}[{index}]"
         _require_mapping(block, block_path)
-        _reject_block_extras(block, {"type", "text"}, block_path)
+        _validate_text_block_fields(block, block_path)
         if block.get("type") != "text":
             _unsupported_block(block.get("type"), block_path)
         if not isinstance(block.get("text"), str):
@@ -299,7 +402,7 @@ def _validate_message_content(
         )
 
     saw_assistant_tool = False
-    saw_user_text = False
+    saw_user_content = False
     result_ids: set[str] = set()
     for block_index, block in enumerate(content):
         path = f"{message_path}.content[{block_index}]"
@@ -308,28 +411,50 @@ def _validate_message_content(
 
         if block_type in _UNSUPPORTED_BLOCK_TYPES:
             _unsupported_block(block_type, path)
+        if block_type in _REASONING_BLOCK_TYPES and role == "assistant":
+            _validate_reasoning_block(block, path)
+            continue
         if block_type == "text":
-            _reject_block_extras(block, {"type", "text"}, path)
+            _validate_text_block_fields(block, path)
             if saw_assistant_tool:
                 _invalid("assistant text blocks must precede tool_use blocks", path)
             if not isinstance(block.get("text"), str):
                 _invalid("text block text must be a string", f"{path}.text")
             if role == "user":
-                saw_user_text = True
+                saw_user_content = True
+            continue
+        if block_type == "image" and role == "user":
+            _validate_image_block(block, path)
+            saw_user_content = True
             continue
         if block_type == "tool_use" and role == "assistant":
             _validate_tool_use(block, path, known_tool_uses, seen_tool_use_ids)
             saw_assistant_tool = True
             continue
         if block_type == "tool_result" and role == "user":
-            if saw_user_text:
-                _invalid("user tool_result blocks must precede text blocks", path)
+            # OpenAI-format targets answer tool calls before any user content.
+            if saw_user_content:
+                _invalid(
+                    "user tool_result blocks must precede text and image blocks", path
+                )
             _validate_tool_result(block, path, known_tool_uses, result_ids)
             continue
         if block_type in {"tool_use", "tool_result"}:
             _invalid(f"{block_type} is not valid for role {role}", path)
         _unsupported_block(block_type, path)
     return result_ids
+
+
+def _validate_reasoning_block(block: dict[str, Any], path: str) -> None:
+    if block["type"] == "thinking":
+        _reject_unknown_fields(block, {"type", "thinking", "signature"}, path)
+        if not isinstance(block.get("thinking"), str):
+            _invalid("thinking block thinking must be a string", f"{path}.thinking")
+        if "signature" in block and not isinstance(block["signature"], str):
+            _invalid("thinking block signature must be a string", f"{path}.signature")
+        return
+    _reject_unknown_fields(block, {"type", "data"}, path)
+    _require_non_empty_string(block.get("data"), f"{path}.data")
 
 
 def _validate_tool_use(
@@ -379,7 +504,54 @@ def _validate_tool_result(
     result_ids.add(str(tool_use_id))
     if "is_error" in block and not isinstance(block["is_error"], bool):
         _invalid("is_error must be a boolean", f"{path}.is_error")
-    text_from_blocks(block.get("content"), f"{path}.content")
+    _validate_tool_result_content(block.get("content"), f"{path}.content")
+
+
+def _validate_tool_result_content(value: Any, path: str) -> None:
+    if value is None or isinstance(value, str):
+        return
+    if not isinstance(value, list):
+        _invalid("content must be a string or a list of text and image blocks", path)
+    for index, block in enumerate(value):
+        block_path = f"{path}[{index}]"
+        _require_mapping(block, block_path)
+        block_type = block.get("type")
+        if block_type == "image":
+            _validate_image_block(block, block_path)
+            continue
+        if block_type != "text":
+            _unsupported_block(block_type, block_path)
+        _validate_text_block_fields(block, block_path)
+        if not isinstance(block.get("text"), str):
+            _invalid("text block text must be a string", f"{block_path}.text")
+
+
+def _validate_image_block(block: dict[str, Any], path: str) -> None:
+    _reject_block_extras(block, {"type", "source"}, path)
+    source_path = f"{path}.source"
+    source: Any = block.get("source")
+    _require_mapping(source, source_path)
+    source_type = source.get("type")
+    if source_type == "base64":
+        _reject_unknown_fields(source, {"type", "media_type", "data"}, source_path)
+        if source.get("media_type") not in _IMAGE_MEDIA_TYPES:
+            _invalid(
+                f"base64 image media_type must be one of {', '.join(_IMAGE_MEDIA_TYPES)}",
+                f"{source_path}.media_type",
+            )
+        _require_non_empty_string(source.get("data"), f"{source_path}.data")
+        return
+    if source_type == "url":
+        _reject_unknown_fields(source, {"type", "url"}, source_path)
+        _require_non_empty_string(source.get("url"), f"{source_path}.url")
+        return
+    if source_type == "file":
+        # A Files API ID names state held by one Anthropic account.
+        _unsupported(
+            "file image sources are not portable across providers",
+            f"{source_path}.type",
+        )
+    _invalid("image source type must be base64 or url", f"{source_path}.type")
 
 
 def _validate_system(system: Any) -> None:
@@ -397,7 +569,13 @@ def _validate_tools(tools: Any) -> set[str]:
     for index, tool in enumerate(tools):
         path = f"$.tools[{index}]"
         _require_mapping(tool, path)
-        _reject_unknown_fields(tool, {"name", "description", "input_schema"}, path)
+        if tool.get("type", "custom") != "custom":
+            # Server tools run on Anthropic's side and have no portable form.
+            _unsupported(
+                f"unsupported field(s): type {tool['type']!r} is a server tool",
+                f"{path}.type",
+            )
+        _reject_unknown_fields(tool, _TOOL_FIELDS, path)
         name = tool.get("name")
         _require_tool_name(name, f"{path}.name")
         if name in names:
@@ -405,6 +583,11 @@ def _validate_tools(tools: Any) -> set[str]:
         names.add(name)
         if "description" in tool and not isinstance(tool["description"], str):
             _invalid("tool description must be a string", f"{path}.description")
+        for flag in ("strict", "defer_loading", "eager_input_streaming"):
+            if flag in tool and not isinstance(tool[flag], bool):
+                _invalid(f"tool {flag} must be a boolean", f"{path}.{flag}")
+        if "cache_control" in tool:
+            _require_mapping(tool["cache_control"], f"{path}.cache_control")
         # Keep the source schema intact. OpenAI-format targets can carry its
         # constraints; narrower targets validate their subset before selection.
         schema = tool.get("input_schema")
@@ -454,28 +637,37 @@ def _validate_stop_sequences(stop_sequences: Any) -> None:
 
 
 def _validate_thinking(thinking: Any) -> None:
-    if thinking is None or thinking == {"type": "disabled"}:
+    if thinking is None:
         return
-    _unsupported(
-        "only thinking.type='disabled' is allowed by the supported text/tool profile",
-        "$.thinking",
-    )
+    _require_mapping(thinking, "$.thinking")
+    thinking_type = thinking.get("type")
+    if thinking_type not in {"disabled", "adaptive", "enabled"}:
+        _unsupported(
+            "thinking.type must be disabled, adaptive or enabled", "$.thinking.type"
+        )
+    allowed = {"type", "display"}
+    if thinking_type == "enabled":
+        allowed.add("budget_tokens")
+        _require_positive_int(thinking.get("budget_tokens"), "$.thinking.budget_tokens")
+    _reject_unknown_fields(thinking, allowed, "$.thinking")
+    if "display" in thinking and not isinstance(thinking["display"], str):
+        _invalid("thinking display must be a string", "$.thinking.display")
 
 
 def _validate_metadata_and_output_config(body: dict[str, Any]) -> None:
     metadata = body.get("metadata")
     if metadata is not None:
+        # Keys other than user_id are client bookkeeping and are not forwarded.
         _require_mapping(metadata, "$.metadata")
-        _reject_unknown_fields(metadata, {"user_id"}, "$.metadata")
         if "user_id" in metadata and not isinstance(metadata["user_id"], str):
             _invalid("user_id must be a string", "$.metadata.user_id")
     output = body.get("output_config")
     if output is not None:
         _require_mapping(output, "$.output_config")
         _reject_unknown_fields(output, {"effort", "format"}, "$.output_config")
-        if "effort" in output and output["effort"] not in ("low", "medium", "high"):
+        if "effort" in output and output["effort"] not in _EFFORT_LEVELS:
             _unsupported(
-                "only low, medium, and high effort are portable",
+                f"effort must be one of {', '.join(_EFFORT_LEVELS)}",
                 "$.output_config.effort",
             )
         if "format" in output:
@@ -515,8 +707,45 @@ def _reject_unknown_fields(value: dict[str, Any], allowed: set[str], path: str) 
         )
 
 
+def _validate_text_block_fields(block: dict[str, Any], path: str) -> None:
+    # Citations echo where earlier output came from. Targets other than
+    # Anthropic have no field for them; the text itself is what they read.
+    _reject_block_extras(block, {"type", "text", "citations"}, path)
+    if "citations" in block and not isinstance(block["citations"], list):
+        _invalid("citations must be a list", f"{path}.citations")
+
+
 def _reject_block_extras(value: dict[str, Any], allowed: set[str], path: str) -> None:
-    _reject_unknown_fields(value, allowed, path)
+    # A cache breakpoint is a hint that only Anthropic targets act on.
+    _reject_unknown_fields(value, allowed | {"cache_control"}, path)
+    if "cache_control" in value:
+        _require_mapping(value["cache_control"], f"{path}.cache_control")
+
+
+def _without_nulls(value: Any) -> Any:
+    if not isinstance(value, dict):
+        return value
+    return {key: item for key, item in value.items() if item is not None}
+
+
+def _message_without_nulls(message: Any) -> Any:
+    message = _without_nulls(message)
+    if isinstance(message, dict) and isinstance(message.get("content"), list):
+        message["content"] = [
+            _block_without_nulls(block) for block in message["content"]
+        ]
+    return message
+
+
+def _block_without_nulls(block: Any) -> Any:
+    block = _without_nulls(block)
+    if not isinstance(block, dict):
+        return block
+    if isinstance(block.get("source"), dict):
+        block["source"] = _without_nulls(block["source"])
+    if isinstance(block.get("content"), list):
+        block["content"] = [_block_without_nulls(item) for item in block["content"]]
+    return block
 
 
 def _require_mapping(value: Any, path: str) -> None:

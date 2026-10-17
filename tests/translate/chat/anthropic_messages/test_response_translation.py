@@ -3,9 +3,15 @@
 
 import copy
 import json
+import re
 
 import pytest
 
+from divyam_llm_interop.translate.chat.base.reasoning_state import (
+    KIND_ANTHROPIC_REDACTED,
+    KIND_ANTHROPIC_SIGNATURE,
+    unwrap_envelope,
+)
 from divyam_llm_interop.translate.chat.translation_errors import (
     ResponseTranslationError,
     TargetCapabilityError,
@@ -143,6 +149,7 @@ def test_anthropic_same_protocol_response_preserves_native_shape_and_rewrites_mo
         ChatResponse(body=body), anthropic_model, target
     )
 
+    # A turn without reasoning state carries no extra block.
     assert result.body == {**body, "model": "claude-target"}
     assert result.body is not body
 
@@ -362,13 +369,67 @@ def test_anthropic_citations_fail_closed(
         )
 
 
-def test_anthropic_thinking_block_fails_closed(
+def _anthropic_thinking_response() -> dict:
+    body = _anthropic_tool_response()
+    body["content"][:0] = [
+        {"type": "thinking", "thinking": "Need the weather.", "signature": "sig-1"},
+        {"type": "redacted_thinking", "data": "opaque-1"},
+    ]
+    return body
+
+
+def test_anthropic_thinking_maps_to_reasoning_content_for_other_clients(
+    translator, anthropic_model, completions_model
+):
+    result = translator.translate_response(
+        ChatResponse(body=_anthropic_thinking_response()),
+        anthropic_model,
+        completions_model,
+    )
+
+    message = result.body["choices"][0]["message"]
+    assert message["reasoning_content"] == "Need the weather."
+    assert message["content"] == "Checking."
+    assert "opaque-1" not in json.dumps(result.body)
+    assert "sig-1" not in json.dumps(result.body)
+
+
+def test_translated_anthropic_route_wraps_thinking_for_its_own_domain(
+    translator, anthropic_model
+):
+    body = _anthropic_thinking_response()
+    target = type(anthropic_model)("claude-client", anthropic_model.api_type)
+
+    result = translator.translate_response(
+        ChatResponse(body=body), anthropic_model, target
+    )
+
+    thinking, redacted, *rest = result.body["content"]
+    assert thinking["thinking"] == "Need the weather."
+    signature = unwrap_envelope(thinking["signature"])
+    data = unwrap_envelope(redacted["data"])
+    domain = "anthropic_messages::claude-sonnet-test"
+    assert signature is not None and data is not None
+    assert (signature.domain, signature.kind, signature.payload) == (
+        domain,
+        KIND_ANTHROPIC_SIGNATURE,
+        {"signature": "sig-1"},
+    )
+    assert (data.domain, data.kind, data.payload) == (
+        domain,
+        KIND_ANTHROPIC_REDACTED,
+        {"data": "opaque-1"},
+    )
+    assert rest == body["content"][2:]
+
+
+def test_anthropic_reasoning_block_extra_fields_fail_closed(
     translator, anthropic_model, completions_model
 ):
     body = _anthropic_response()
-    body["content"] = [{"type": "thinking", "thinking": "secret"}]
+    body["content"] = [{"type": "thinking", "thinking": "x", "summary": "y"}]
 
-    with pytest.raises(UnsupportedFeatureError, match="thinking"):
+    with pytest.raises(UnsupportedFeatureError, match="summary"):
         translator.translate_response(
             ChatResponse(body=body), anthropic_model, completions_model
         )
@@ -535,3 +596,34 @@ def test_anthropic_target_rejects_duplicate_tool_call_ids(
         translator.translate_response(
             ChatResponse(body=body), completions_model, anthropic_model
         )
+
+
+@pytest.mark.parametrize("provider_id", ["Edit:0", "functions.Edit:0", None])
+def test_tool_call_id_anthropic_rejects_is_replaced(
+    translator, completions_model, anthropic_model, provider_id
+):
+    body = _completions_response()
+    body["choices"][0]["message"]["tool_calls"][0]["id"] = provider_id
+
+    result = translator.translate_response(
+        ChatResponse(body=body), completions_model, anthropic_model
+    )
+
+    tool_use = next(b for b in result.body["content"] if b["type"] == "tool_use")
+    assert tool_use["id"].startswith("toolu_")
+    assert re.fullmatch(r"[A-Za-z0-9_-]+", tool_use["id"])
+
+
+def test_per_response_tool_call_ids_differ_across_responses(
+    translator, completions_model, anthropic_model
+):
+    ids = set()
+    for _ in range(2):
+        body = _completions_response()
+        body["choices"][0]["message"]["tool_calls"][0]["id"] = "Edit:0"
+        result = translator.translate_response(
+            ChatResponse(body=body), completions_model, anthropic_model
+        )
+        ids.update(b["id"] for b in result.body["content"] if b["type"] == "tool_use")
+
+    assert len(ids) == 2

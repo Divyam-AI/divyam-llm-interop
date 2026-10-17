@@ -3,7 +3,7 @@
       regex:
         - claude(?:[-.].*)?
   capabilities:
-    description: Claude text and client-tool routing through Chat Completions or Anthropic Messages
+    description: Claude text, image and client-tool routing through Chat Completions or Anthropic Messages
     supported_api_types:
       - completions
       - anthropic_messages
@@ -19,10 +19,85 @@
       max: 1
     supports_stop_sequences: true
     supports_function_calling: true
-    supports_vision: false
-    supports_reasoning: false
+    supports_vision: true
+    supports_reasoning: true
+    # Claude rejects an unfinished tool loop whose last assistant turn lost
+    # the thinking it was generated with while thinking is on.
+    tool_loop_requires_reasoning_replay: true
+    # Anthropic's documented default effort; an endpoint may override it.
+    default_reasoning_effort: high
 
+# Reason by default but accept thinking {"type": "disabled"}. Opus 5 and
+# Haiku 5.5 accept it only at effort high or below, which their default
+# effort is.
 - selector:
-    name: claude-sonnet-5
+    name:
+      regex:
+        - claude-sonnet-5
+        - claude-opus-5
+        - claude-haiku-5-5
   capabilities:
     reasoning_enabled_by_default: true
+
+# Always-on reasoning: these models reject thinking {"type": "disabled"}.
+- selector:
+    name:
+      regex:
+        - claude-fable-5
+        - claude-opus-5-5
+        - claude-sonnet-5-5
+        - claude-mythos
+  capabilities:
+    reasoning_enabled_by_default: true
+    reasoning_can_be_disabled: false
+
+- selector:
+    name: claude-3
+  capabilities:
+    description: Claude 3 and 3.5 models have no extended thinking
+    supports_reasoning: false
+
+# Extended thinking takes an explicit budget_tokens; adaptive thinking and
+# output_config.effort arrived later.
+- selector:
+    name:
+      regex:
+        - claude-3-7-sonnet
+        - claude-4
+  capabilities:
+    supports_adaptive_thinking: false
+
+- selector:
+    name:
+      regex:
+        - claude-opus-5-5
+        - claude-haiku-5-5
+  capabilities:
+    default_reasoning_effort: medium
+
+# Models released after Claude Opus 4.6 reject sampling controls: any top_k,
+# and temperature or top_p other than their defaults. The model's defaults
+# apply when they are left out, through a gateway as much as directly.
+- selector:
+    name:
+      regex:
+        - claude-4-7
+        - claude-fable-5
+        - claude-opus-5
+        - claude-opus-5-5
+        - claude-haiku-5-5
+        - claude-sonnet-5
+        - claude-sonnet-5-5
+        - claude-mythos
+  capabilities:
+    api_capabilities:
+      anthropic_messages:
+        drop_fields:
+          - temperature
+          - top_p
+          - top_k
+      completions:
+        drop_fields:
+          - temperature
+          - top_p
+          - top_k

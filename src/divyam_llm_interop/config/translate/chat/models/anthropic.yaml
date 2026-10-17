@@ -1,9 +1,76 @@
+# Entries are tried in order and the first match wins, so a narrower family
+# precedes a broader one that also matches its names.
+- name: claude-fable-5
+  provider: anthropic
+  name_match:
+    regex:
+      - claude-fable-5(?:[-.@].*)?
+      - anthropic[./-]claude-fable-5(?:[-.@].*)?
+- name: claude-opus-5-5
+  provider: anthropic
+  name_match:
+    regex:
+      - claude-opus-5[-.]5(?:[-.@].*)?
+      - anthropic[./-]claude-opus-5[-.]5(?:[-.@].*)?
+# Opus 5 itself only: a later Opus 5.x may reason differently, so it falls
+# back to the generic Claude entry instead.
+- name: claude-opus-5
+  provider: anthropic
+  name_match:
+    regex:
+      - claude-opus-5(?:@.*|-v\d.*)?
+      - anthropic[./-]claude-opus-5(?:@.*|-v\d.*)?
+- name: claude-haiku-5-5
+  provider: anthropic
+  name_match:
+    regex:
+      - claude-haiku-5[-.]5(?:[-.@].*)?
+      - anthropic[./-]claude-haiku-5[-.]5(?:[-.@].*)?
+- name: claude-sonnet-5-5
+  provider: anthropic
+  name_match:
+    regex:
+      - claude-sonnet-5[-.]5(?:[-.@].*)?
+      - anthropic[./-]claude-sonnet-5[-.]5(?:[-.@].*)?
 - name: claude-sonnet-5
   provider: anthropic
   name_match:
     regex:
       - claude-sonnet-5(?:[-.].*)?
       - anthropic[./-]claude-sonnet-5(?:[-.].*)?
+- name: claude-mythos
+  provider: anthropic
+  name_match:
+    regex:
+      - claude-mythos(?:[-.@].*)?
+      - anthropic[./-]claude-mythos(?:[-.@].*)?
+- name: claude-3
+  provider: anthropic
+  name_match:
+    regex:
+      - claude-3-(?:5-)?(?:haiku|sonnet|opus)(?:[-.@].*)?
+      - anthropic[./-]claude-3-(?:5-)?(?:haiku|sonnet|opus)(?:[-.@].*)?
+- name: claude-3-7-sonnet
+  provider: anthropic
+  name_match:
+    regex:
+      - claude-3-7-sonnet(?:[-.@].*)?
+      - anthropic[./-]claude-3-7-sonnet(?:[-.@].*)?
+# Claude 4.0 to 4.5. A dated, Vertex (@date) or Bedrock (-v1) suffix may
+# follow, but not a later minor version such as 4-6.
+- name: claude-4
+  provider: anthropic
+  name_match:
+    regex:
+      - claude-(?:opus|sonnet|haiku)-4(?:[-.][015])?(?:-\d{8})?(?:@.*|-v\d.*)?
+      - anthropic[./-]claude-(?:opus|sonnet|haiku)-4(?:[-.][015])?(?:-\d{8})?(?:@.*|-v\d.*)?
+# Claude 4.7 and later 4.x releases, which take only default sampling values.
+- name: claude-4-7
+  provider: anthropic
+  name_match:
+    regex:
+      - claude-(?:opus|sonnet|haiku)-4[-.][7-9](?:-\d{8})?(?:@.*|-v\d.*)?
+      - anthropic[./-]claude-(?:opus|sonnet|haiku)-4[-.][7-9](?:-\d{8})?(?:@.*|-v\d.*)?
 - name: claude
   provider: anthropic
   name_match:

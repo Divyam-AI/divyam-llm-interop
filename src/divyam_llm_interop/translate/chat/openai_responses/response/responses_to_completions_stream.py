@@ -7,6 +7,12 @@ from collections.abc import AsyncGenerator
 from typing import Any
 
 from divyam_llm_interop.interop_logging import logger
+from divyam_llm_interop.translate.chat.base.reasoning_state import (
+    RESPONSE_STATE_KEY,
+    STATE_RESPONSES_OUTPUT,
+)
+
+from .reasoning import reasoning_output_state
 
 
 class ResponsesToCompletionsStreamConverter:
@@ -107,6 +113,13 @@ class ResponsesToCompletionsStreamConverter:
                     chunk["choices"][0]["delta"] = {"content": delta_text}
                     yield chunk
 
+            elif event_type == "response.reasoning_summary_text.delta":
+                delta_text = event.get("delta", "")
+                if delta_text:
+                    chunk = self._create_base_chunk()
+                    chunk["choices"][0]["delta"] = {"reasoning_content": delta_text}
+                    yield chunk
+
             elif event_type == "response.function_call_arguments.delta":
                 item_id = event.get("item_id")
                 call_id = event.get("call_id")
@@ -190,6 +203,10 @@ class ResponsesToCompletionsStreamConverter:
         chunk = self._create_base_chunk()
         chunk["choices"][0]["delta"] = {}
         chunk["choices"][0]["finish_reason"] = finish_reason
+        # The completed response lists every output item, reasoning included.
+        reasoning_state = reasoning_output_state(response.get("output"))
+        if reasoning_state is not None:
+            chunk[RESPONSE_STATE_KEY] = {STATE_RESPONSES_OUTPUT: reasoning_state}
 
         if usage:
             chunk["usage"] = {

@@ -331,9 +331,11 @@ def test_anthropic_same_protocol_validates_copies_and_rewrites_model(
     assert result.body is not body
 
 
-def test_sonnet_5_same_protocol_disables_default_reasoning_without_mutation(
+def test_sonnet_5_same_protocol_keeps_the_clients_thinking_choice_without_mutation(
     translator,
 ):
+    # Translated responses now carry thinking back, so a client that sent no
+    # thinking control gets the model's default, as it would natively.
     model = Model("claude-sonnet-5", ModelApiType.ANTHROPIC_MESSAGES)
     body = {
         "model": model.name,
@@ -344,7 +346,7 @@ def test_sonnet_5_same_protocol_disables_default_reasoning_without_mutation(
 
     result = translator.translate_request(ChatRequest(body=body), model, model)
 
-    assert result.body["thinking"] == {"type": "disabled"}
+    assert "thinking" not in result.body
     assert body == original
 
 
@@ -506,10 +508,8 @@ def test_gemini_tool_ids_and_names_map_to_anthropic(
 @pytest.mark.parametrize(
     ("field", "value"),
     [
-        ("metadata", {"unknown": "u1"}),
         ("output_config", {"format": {"type": "xml"}}),
-        ("output_config", {"effort": "max"}),
-        ("service_tier", "auto"),
+        ("output_config", {"effort": "extreme"}),
         ("mcp_servers", []),
     ],
 )
@@ -526,30 +526,33 @@ def test_unsupported_anthropic_request_fields_fail_closed(
 
 
 @pytest.mark.parametrize(
-    "thinking",
+    "thinking, error",
     [
-        {"type": "enabled", "budget_tokens": 1000},
-        {"type": "adaptive"},
-        {"type": "disabled", "display": "omitted"},
-        "disabled",
+        ({"type": "auto"}, UnsupportedFeatureError),
+        ({"type": "adaptive", "budget_tokens": 1000}, UnsupportedFeatureError),
+        ({"type": "enabled"}, InvalidProtocolRequestError),
+        ({"type": "enabled", "budget_tokens": 0}, InvalidProtocolRequestError),
+        ({"type": "adaptive", "display": 1}, InvalidProtocolRequestError),
+        ("disabled", InvalidProtocolRequestError),
     ],
 )
-def test_reasoning_thinking_controls_fail_closed(
-    translator, anthropic_model, completions_model, thinking
+def test_malformed_thinking_controls_fail_closed(
+    translator, anthropic_model, completions_model, thinking, error
 ):
     body = _anthropic_text_request()
     body["thinking"] = thinking
 
-    with pytest.raises(UnsupportedFeatureError, match="thinking"):
+    with pytest.raises(error) as raised:
         translator.translate_request(
             ChatRequest(body=body), anthropic_model, completions_model
         )
+    assert raised.value.path is not None
+    assert raised.value.path.startswith("$.thinking")
 
 
 @pytest.mark.parametrize(
     "block_type",
     [
-        "image",
         "audio",
         "video",
         "document",
@@ -575,7 +578,337 @@ def test_unsupported_content_blocks_fail_closed(
         )
 
 
-@pytest.mark.parametrize("field", ["cache_control", "citations", "grounding_metadata"])
+_PNG_SOURCE = {"type": "base64", "media_type": "image/png", "data": "iVBORw0KGgo="}
+_PNG_DATA_URL = "data:image/png;base64,iVBORw0KGgo="
+
+
+def _anthropic_image_tool_result_request() -> dict:
+    body = _anthropic_tool_request()
+    body["messages"][1]["content"].append(
+        {"type": "tool_use", "id": "toolu_shot", "name": "get_weather", "input": {}}
+    )
+    body["messages"][2]["content"] = [
+        {
+            "type": "tool_result",
+            "tool_use_id": "toolu_shot",
+            "content": [{"type": "image", "source": _PNG_SOURCE}],
+        },
+        {
+            "type": "tool_result",
+            "tool_use_id": "toolu_weather",
+            "content": [
+                {"type": "text", "text": "Sunny"},
+                {
+                    "type": "image",
+                    "source": {"type": "url", "url": "https://example.test/map.png"},
+                },
+            ],
+        },
+        {"type": "text", "text": "Compare them."},
+    ]
+    return body
+
+
+@pytest.mark.parametrize(
+    "source, url",
+    [
+        (_PNG_SOURCE, _PNG_DATA_URL),
+        (
+            {"type": "url", "url": "https://example.test/cat.jpg"},
+            "https://example.test/cat.jpg",
+        ),
+    ],
+)
+def test_anthropic_user_image_maps_to_completions_image_part(
+    translator, anthropic_model, completions_model, source, url
+):
+    body = _anthropic_text_request()
+    body["messages"] = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "What is "},
+                {"type": "image", "source": source},
+                {"type": "text", "text": "this?"},
+            ],
+        }
+    ]
+    original = copy.deepcopy(body)
+
+    result = translator.translate_request(
+        ChatRequest(body=body), anthropic_model, completions_model
+    )
+
+    assert result.body["messages"][1] == {
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "What is "},
+            {"type": "image_url", "image_url": {"url": url}},
+            {"type": "text", "text": "this?"},
+        ],
+    }
+    assert body == original
+
+
+def test_anthropic_tool_result_images_follow_every_tool_message(
+    translator, anthropic_model, completions_model
+):
+    result = translator.translate_request(
+        ChatRequest(body=_anthropic_image_tool_result_request()),
+        anthropic_model,
+        completions_model,
+    )
+
+    assert result.body["messages"][2:] == [
+        {"role": "tool", "content": "[image result]", "tool_call_id": "toolu_shot"},
+        {"role": "tool", "content": "Sunny", "tool_call_id": "toolu_weather"},
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Image(s) returned by tool call toolu_shot:"},
+                {"type": "image_url", "image_url": {"url": _PNG_DATA_URL}},
+                {
+                    "type": "text",
+                    "text": "Image(s) returned by tool call toolu_weather:",
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {"url": "https://example.test/map.png"},
+                },
+                {"type": "text", "text": "Compare them."},
+            ],
+        },
+    ]
+
+
+def test_anthropic_tool_result_image_without_other_user_content(
+    translator, anthropic_model, completions_model
+):
+    body = _anthropic_tool_request()
+    body["messages"][2]["content"] = [
+        {
+            "type": "tool_result",
+            "tool_use_id": "toolu_weather",
+            "content": [{"type": "image", "source": _PNG_SOURCE}],
+            "is_error": False,
+        }
+    ]
+
+    result = translator.translate_request(
+        ChatRequest(body=body), anthropic_model, completions_model
+    )
+
+    assert result.body["messages"][2:] == [
+        {
+            "role": "tool",
+            "content": "[image result]",
+            "tool_call_id": "toolu_weather",
+        },
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "Image(s) returned by tool call toolu_weather:",
+                },
+                {"type": "image_url", "image_url": {"url": _PNG_DATA_URL}},
+            ],
+        },
+    ]
+
+
+def test_anthropic_images_map_to_responses_input_images(
+    translator, anthropic_model, responses_model
+):
+    result = translator.translate_request(
+        ChatRequest(body=_anthropic_image_tool_result_request()),
+        anthropic_model,
+        responses_model,
+    )
+
+    items = result.body["input"]
+    outputs = [item for item in items if item.get("type") == "function_call_output"]
+    assert [(item["call_id"], item["output"]) for item in outputs] == [
+        ("toolu_shot", "[image result]"),
+        ("toolu_weather", "Sunny"),
+    ]
+    assert items[-1] == {
+        "role": "user",
+        "content": [
+            {
+                "type": "input_text",
+                "text": "Image(s) returned by tool call toolu_shot:",
+            },
+            {"type": "input_image", "image_url": _PNG_DATA_URL},
+            {
+                "type": "input_text",
+                "text": "Image(s) returned by tool call toolu_weather:",
+            },
+            {"type": "input_image", "image_url": "https://example.test/map.png"},
+            {"type": "input_text", "text": "Compare them."},
+        ],
+    }
+    assert items.index(outputs[-1]) < len(items) - 1
+
+
+@pytest.mark.parametrize(
+    "image, path",
+    [
+        ({"type": "image"}, "$.messages[0].content[0].source"),
+        (
+            {"type": "image", "source": {"type": "svg"}},
+            "$.messages[0].content[0].source.type",
+        ),
+        (
+            {"type": "image", "source": {**_PNG_SOURCE, "media_type": "image/bmp"}},
+            "$.messages[0].content[0].source.media_type",
+        ),
+        (
+            {"type": "image", "source": {**_PNG_SOURCE, "data": 42}},
+            "$.messages[0].content[0].source.data",
+        ),
+        (
+            {"type": "image", "source": {"type": "url", "url": None}},
+            "$.messages[0].content[0].source.url",
+        ),
+    ],
+)
+def test_malformed_anthropic_image_source_is_invalid(
+    translator, anthropic_model, completions_model, image, path
+):
+    body = _anthropic_text_request()
+    body["messages"] = [{"role": "user", "content": [image]}]
+
+    with pytest.raises(InvalidProtocolRequestError) as error:
+        translator.translate_request(
+            ChatRequest(body=body), anthropic_model, completions_model
+        )
+    assert error.value.path == path
+
+
+def test_malformed_tool_result_image_source_is_invalid(
+    translator, anthropic_model, completions_model
+):
+    body = _anthropic_tool_request()
+    body["messages"][2]["content"][0]["content"] = [
+        {"type": "image", "source": {"type": "base64", "data": "AAAA"}}
+    ]
+
+    with pytest.raises(InvalidProtocolRequestError) as error:
+        translator.translate_request(
+            ChatRequest(body=body), anthropic_model, completions_model
+        )
+    assert error.value.path == "$.messages[2].content[0].content[0].source.media_type"
+
+
+@pytest.mark.parametrize(
+    "image",
+    [
+        {"type": "image", "source": {"type": "file", "file_id": "file_123"}},
+        {"type": "image", "source": _PNG_SOURCE, "detail": "high"},
+    ],
+)
+def test_nonportable_anthropic_image_fields_fail_closed(
+    translator, anthropic_model, completions_model, image
+):
+    body = _anthropic_text_request()
+    body["messages"] = [{"role": "user", "content": [image]}]
+
+    with pytest.raises(UnsupportedFeatureError):
+        translator.translate_request(
+            ChatRequest(body=body), anthropic_model, completions_model
+        )
+
+
+def test_assistant_image_block_fails_closed(
+    translator, anthropic_model, completions_model
+):
+    body = _anthropic_text_request()
+    body["messages"].append(
+        {"role": "assistant", "content": [{"type": "image", "source": _PNG_SOURCE}]}
+    )
+    body["messages"].append({"role": "user", "content": "Again"})
+
+    with pytest.raises(UnsupportedFeatureError, match="content block"):
+        translator.translate_request(
+            ChatRequest(body=body), anthropic_model, completions_model
+        )
+
+
+def test_user_image_before_tool_result_is_rejected(
+    translator, anthropic_model, completions_model
+):
+    body = _anthropic_tool_request()
+    body["messages"][2]["content"].insert(0, {"type": "image", "source": _PNG_SOURCE})
+
+    with pytest.raises(
+        InvalidProtocolRequestError, match="must precede text and image"
+    ):
+        translator.translate_request(
+            ChatRequest(body=body), anthropic_model, completions_model
+        )
+
+
+def test_catalogue_text_only_target_refuses_anthropic_user_image(
+    translator, anthropic_model
+):
+    body = _anthropic_text_request()
+    body["messages"] = [
+        {"role": "user", "content": [{"type": "image", "source": _PNG_SOURCE}]}
+    ]
+    target = Model("gpt-oss-120b", ModelApiType.COMPLETIONS)
+
+    with pytest.raises(TargetCapabilityError, match="image input") as error:
+        translator.translate_request(ChatRequest(body=body), anthropic_model, target)
+    assert error.value.target_api_type == ModelApiType.COMPLETIONS
+
+
+@pytest.mark.parametrize("api_type", [ModelApiType.COMPLETIONS, ModelApiType.RESPONSES])
+def test_declared_text_only_target_refuses_anthropic_tool_result_image(
+    translator, anthropic_model, api_type
+):
+    target = Model(
+        "gpt-4.1-mini", api_type, capability_overrides={"supports_vision": False}
+    )
+
+    with pytest.raises(TargetCapabilityError, match="image input") as error:
+        translator.translate_request(
+            ChatRequest(body=_anthropic_image_tool_result_request()),
+            anthropic_model,
+            target,
+        )
+    assert error.value.target_api_type == api_type
+
+
+def test_undeclared_vision_target_receives_anthropic_images(
+    translator, anthropic_model
+):
+    target = Model("self-hosted-vlm", ModelApiType.COMPLETIONS)
+
+    result = translator.translate_request(
+        ChatRequest(body=_anthropic_image_tool_result_request()),
+        anthropic_model,
+        target,
+    )
+
+    assert result.body["messages"][-1]["content"][1] == {
+        "type": "image_url",
+        "image_url": {"url": _PNG_DATA_URL},
+    }
+
+
+def test_native_gemini_refuses_anthropic_images(
+    translator, anthropic_model, gemini_model
+):
+    with pytest.raises(TargetCapabilityError, match="image input"):
+        translator.translate_request(
+            ChatRequest(body=_anthropic_image_tool_result_request()),
+            anthropic_model,
+            gemini_model,
+        )
+
+
+@pytest.mark.parametrize("field", ["grounding_metadata"])
 def test_anthropic_text_block_metadata_fails_closed(
     translator, anthropic_model, completions_model, field
 ):
@@ -728,7 +1061,7 @@ def test_anthropic_session_title_preserves_structured_output(
 
 @pytest.mark.parametrize(
     "format_value",
-    [None, {}, {"type": "json_schema"}, {"type": "json_schema", "schema": []}],
+    [{}, {"type": "json_schema"}, {"type": "json_schema", "schema": []}],
 )
 def test_malformed_anthropic_output_format_is_invalid(
     translator, anthropic_model, completions_model, format_value
@@ -1407,7 +1740,6 @@ def test_gemini_media_part_is_rejected_before_anthropic_translation(
 @pytest.mark.parametrize(
     ("field", "value"),
     [
-        ("reasoning_effort", "high"),
         ("modalities", ["text"]),
         ("user", "opaque-user"),
         ("logprobs", True),
@@ -1432,7 +1764,6 @@ def test_nonportable_completions_controls_fail_before_anthropic_translation(
     ("field", "value"),
     [
         ("previous_response_id", "resp_previous"),
-        ("reasoning", {"effort": "high"}),
         ("prompt_cache_key", "cache-key"),
         ("text", {"format": {"type": "json_schema"}}),
         ("top_logprobs", 3),

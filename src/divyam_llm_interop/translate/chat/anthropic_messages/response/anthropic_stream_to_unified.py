@@ -5,6 +5,7 @@ import json
 from typing import Any, NoReturn
 
 from divyam_llm_interop.translate.chat.anthropic_messages.response.stream_state import (
+    ANTHROPIC_THINKING_EVENT_KEY,
     SourceStreamState,
 )
 from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
@@ -71,8 +72,7 @@ def _translate_event(
     if event_type == "content_block_delta":
         return [_content_block_delta(event, state)]
     if event_type == "content_block_stop":
-        _content_block_stop(event, state)
-        return []
+        return _content_block_stop(event, state)
     if event_type == "message_delta":
         return [_message_delta(event, state)]
     if event_type == "message_stop":
@@ -124,6 +124,13 @@ def _content_block_start(
     if not isinstance(block, dict):
         _stream_error("content_block must be an object", "$.content_block")
     block_type = block.get("type")
+    if block_type in {"thinking", "redacted_thinking"}:
+        _validate_reasoning_block_start(block)
+        state.blocks[index] = {"type": block_type, "open": True}
+        delta = (
+            {"reasoning_content": block["thinking"]} if block.get("thinking") else {}
+        )
+        return [_thinking_chunk(state, event, delta)]
     if block_type == "text":
         if state.saw_tool_block:
             _stream_error("text blocks must precede tool_use blocks", "$.index")
@@ -197,6 +204,15 @@ def _content_block_delta(
         if not isinstance(text, str):
             _stream_error("text delta must contain a string", "$.delta.text")
         return _chunk(state, delta={"content": text})
+    if block["type"] == "thinking" and delta.get("type") == "thinking_delta":
+        thinking = delta.get("thinking")
+        if not isinstance(thinking, str):
+            _stream_error("thinking delta must contain a string", "$.delta.thinking")
+        return _thinking_chunk(state, event, {"reasoning_content": thinking})
+    if block["type"] == "thinking" and delta.get("type") == "signature_delta":
+        if not isinstance(delta.get("signature"), str):
+            _stream_error("signature delta must contain a string", "$.delta.signature")
+        return _thinking_chunk(state, event, {})
     if block["type"] == "tool_use" and delta.get("type") == "input_json_delta":
         partial_json = delta.get("partial_json")
         if not isinstance(partial_json, str):
@@ -223,7 +239,9 @@ def _content_block_delta(
     )
 
 
-def _content_block_stop(event: dict[str, Any], state: SourceStreamState) -> None:
+def _content_block_stop(
+    event: dict[str, Any], state: SourceStreamState
+) -> list[dict[str, Any]]:
     index = _block_index(event)
     block = state.blocks.get(index)
     if not block or not block["open"]:
@@ -233,6 +251,36 @@ def _content_block_stop(event: dict[str, Any], state: SourceStreamState) -> None
     if block["type"] == "tool_use":
         _validate_complete_tool_json(block["arguments"])
     block["open"] = False
+    if block["type"] in {"thinking", "redacted_thinking"}:
+        return [_thinking_chunk(state, event, {})]
+    return []
+
+
+def _validate_reasoning_block_start(block: dict[str, Any]) -> None:
+    if block["type"] == "thinking":
+        allowed, field = {"type", "thinking", "signature"}, "thinking"
+    else:
+        allowed, field = {"type", "data"}, "data"
+    unknown = set(block) - allowed
+    if unknown:
+        key = min(unknown)
+        _unsupported(
+            f"unsupported {block['type']} field {key!r}", f"$.content_block.{key}"
+        )
+    if not isinstance(block.get(field, ""), str):
+        _stream_error(f"{field} must be a string", f"$.content_block.{field}")
+    if not isinstance(block.get("signature", ""), str):
+        _stream_error("signature must be a string", "$.content_block.signature")
+
+
+def _thinking_chunk(
+    state: SourceStreamState, event: dict[str, Any], delta: dict[str, Any]
+) -> dict[str, Any]:
+    # The block index is renumbered by whoever re-emits the event.
+    native = {key: value for key, value in event.items() if key != "index"}
+    return _chunk(
+        state, delta=delta, chunk_unknowns={ANTHROPIC_THINKING_EVENT_KEY: native}
+    )
 
 
 def _message_delta(event: dict[str, Any], state: SourceStreamState) -> dict[str, Any]:

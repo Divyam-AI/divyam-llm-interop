@@ -6,6 +6,9 @@ import os
 import uuid
 from typing import Any
 
+from divyam_llm_interop.translate.chat.base.reasoning_state import (
+    RESPONSES_OUTPUT_TYPE,
+)
 from divyam_llm_interop.translate.chat.base.translation_utils import (
     drop_null_values_top_level,
 )
@@ -192,6 +195,7 @@ def convert_completion_request_to_responses_request(
                     message_item,
                     tc_list,
                     tool_call_results,
+                    _replay_order(msg),
                 )
                 continue
             message_item["tool_calls"] = tc_list
@@ -235,6 +239,10 @@ def convert_completion_request_to_responses_request(
                         )
             continue
 
+        replay_order = _replay_order(msg) if use_official_tool_items else None
+        if role == "assistant" and replay_order:
+            input_items.extend(_assistant_turn_items(message_item, [], replay_order))
+            continue
         input_items.append(message_item)
 
     responses_request["input"] = input_items
@@ -346,15 +354,14 @@ def _append_official_tool_history(
     message_item: dict[str, Any],
     tool_calls: list[dict[str, Any]],
     tool_call_results: dict[str, list[dict[str, Any]]],
+    replay_order: list[dict[str, Any]] | None = None,
 ) -> None:
-    if message_item.get("content"):
-        input_items.append(message_item)
-
     call_ids: set[str] = set()
+    function_calls: list[dict[str, Any]] = []
     for tool_call in tool_calls:
         call_id = tool_call["id"]
         call_ids.add(call_id)
-        input_items.append(
+        function_calls.append(
             {
                 "type": "function_call",
                 "call_id": call_id,
@@ -362,6 +369,9 @@ def _append_official_tool_history(
                 "arguments": tool_call["arguments"] or "{}",
             }
         )
+    input_items.extend(
+        _assistant_turn_items(message_item, function_calls, replay_order)
+    )
 
     for call_id, output_parts in tool_call_results.items():
         if call_id not in call_ids:
@@ -373,6 +383,49 @@ def _append_official_tool_history(
                 "output": _tool_output_text(output_parts),
             }
         )
+
+
+def _replay_order(message: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """The output order of this endpoint's earlier turn, selected for replay."""
+    for entry in message.get("reasoning_details") or []:
+        if isinstance(entry, dict) and entry.get("type") == RESPONSES_OUTPUT_TYPE:
+            items = entry.get("items")
+            return items if isinstance(items, list) else None
+    return None
+
+
+def _assistant_turn_items(
+    message_item: dict[str, Any],
+    function_calls: list[dict[str, Any]],
+    replay_order: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    """An assistant turn's input items, in the order the endpoint produced them.
+
+    Reasoning items go back where they were, ahead of the message or function
+    call they led to. Without a recorded order, the message precedes the calls.
+    """
+    calls = {call["call_id"]: call for call in function_calls}
+    has_message = bool(message_item.get("content"))
+    items: list[dict[str, Any]] = []
+    for entry in replay_order or []:
+        entry_type = entry.get("type")
+        if entry_type == "reasoning":
+            items.append(
+                {
+                    "type": "reasoning",
+                    "id": entry["id"],
+                    "encrypted_content": entry["encrypted_content"],
+                    "summary": entry.get("summary") or [],
+                }
+            )
+        elif entry_type == "message" and has_message:
+            items.append(message_item)
+            has_message = False
+        elif entry_type == "function_call" and entry.get("call_id") in calls:
+            items.append(calls.pop(entry["call_id"]))
+    if has_message:
+        items.append(message_item)
+    return items + list(calls.values())
 
 
 def _tool_output_text(content_parts: list[dict[str, Any]]) -> str:

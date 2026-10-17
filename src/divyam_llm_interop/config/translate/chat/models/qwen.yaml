@@ -34,3 +34,6 @@
 - name: qwen3-8b-instruct
 - name: qwen3-14b-instruct
 - name: qwen3-32b-instruct
+- name: qwen3.7-plus
+- name: qwen3.8-flash
+- name: qwen3.8-max

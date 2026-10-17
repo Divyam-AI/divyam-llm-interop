@@ -37,6 +37,8 @@ _COMPLETIONS_FIELDS = {
     "tool_choice",
     "parallel_tool_calls",
     "n",
+    # Mapped to Claude thinking; see plan_thinking.
+    "reasoning_effort",
 }
 _RESPONSES_FIELDS = {
     "model",
@@ -49,6 +51,7 @@ _RESPONSES_FIELDS = {
     "tools",
     "tool_choice",
     "parallel_tool_calls",
+    "reasoning",
 }
 _GEMINI_FIELDS = {
     "model",
@@ -70,6 +73,7 @@ def validate_portable_target_capabilities(
     _validate_numeric_ranges(unified, target, capabilities)
     _validate_stop_sequences(unified.stop, target, capabilities)
     _validate_tools(unified, target, capabilities)
+    _validate_image_input(unified, target, capabilities)
     _validate_parallel_tool_calls(unified.parallel_tool_calls, target)
     if unified.response_format is not None and (
         target.api_type == ModelApiType.GEMINI
@@ -79,10 +83,9 @@ def validate_portable_target_capabilities(
             "target cannot preserve structured output", target, "$.output_config.format"
         )
     if target.api_type == ModelApiType.GEMINI:
-        if unified.user is not None or unified.reasoning_effort is not None:
-            _target_error(
-                "native Gemini cannot preserve user identity or effort", target, "$"
-            )
+        # The end-user ID is attribution only, and the Gemini encoder omits it.
+        if _has_explicit_effort(unified):
+            _target_error("native Gemini cannot preserve effort", target, "$")
         for index, tool in enumerate(unified.tools or []):
             validate_portable_schema(
                 tool.function.parameters.to_dict(),
@@ -112,6 +115,15 @@ def validate_source_profile_for_anthropic_target(
         _validate_gemini_tools(body.get("tools"), source)
         _validate_gemini_tool_config(body.get("toolConfig"), source)
         _validate_gemini_generation_config(body.get("generationConfig"), source)
+
+
+def _has_explicit_effort(unified: UnifiedChatCompletionsRequestBody) -> bool:
+    # Effort derived from Anthropic thinking is omitted where it has no
+    # control; only an effort the caller set explicitly is refused.
+    raw = unified.unknowns.get("anthropic_request_raw")
+    if isinstance(raw, dict):
+        return (raw.get("output_config") or {}).get("effort") is not None
+    return unified.reasoning_effort is not None
 
 
 def _validate_numeric_ranges(
@@ -196,6 +208,48 @@ def _validate_tools(
         _target_error(
             "target does not support client function tools", target, "$.tools"
         )
+
+
+def _validate_image_input(
+    unified: UnifiedChatCompletionsRequestBody,
+    target: Model,
+    capabilities: ModelCapabilities,
+) -> None:
+    if not any(_has_image_part(message.content) for message in unified.messages):
+        return
+    if target.api_type == ModelApiType.GEMINI and any(
+        not url.startswith("data:")
+        for message in unified.messages
+        for url in _image_urls(message.content)
+    ):
+        # Gemini takes images inline; a URL would need an uploaded file.
+        _target_error(
+            "native Gemini can carry only inline (base64) image input",
+            target,
+            "$.messages",
+        )
+    # An undeclared endpoint is attempted; only a text-only declaration refuses.
+    if capabilities.supports_vision is False:
+        _target_error("target does not support image input", target, "$.messages")
+
+
+def _image_urls(content: Any) -> list[str]:
+    if not isinstance(content, list):
+        return []
+    urls: list[str] = []
+    for part in content:
+        if isinstance(part, dict) and part.get("type") == "image_url":
+            image_url = part.get("image_url")
+            url = image_url.get("url") if isinstance(image_url, dict) else None
+            urls.append(url if isinstance(url, str) else "")
+    return urls
+
+
+def _has_image_part(content: Any) -> bool:
+    # Unified content is a string, or a list of Chat Completions content parts.
+    return isinstance(content, list) and any(
+        isinstance(part, dict) and part.get("type") == "image_url" for part in content
+    )
 
 
 def _validate_parallel_tool_calls(value: bool | None, target: Model) -> None:

@@ -1,6 +1,7 @@
 # Copyright 2025 Divyam.ai
 # SPDX-License-Identifier: Apache-2.0
 
+import base64
 import copy
 import json
 import time
@@ -10,6 +11,13 @@ from typing_extensions import override
 
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
 from divyam_llm_interop.translate.chat.base import translation_utils
+from divyam_llm_interop.translate.chat.base.reasoning_state import (
+    GEMINI_SIGNATURE_TYPE,
+    RESPONSE_STATE_KEY,
+    STATE_GEMINI_SIGNATURES,
+    narrate_tool_call,
+    narrate_tool_result,
+)
 from divyam_llm_interop.translate.chat.base.translation_utils import close_async_stream
 from divyam_llm_interop.translate.chat.base.translator import Translator
 from divyam_llm_interop.translate.chat.gemini_native.response_normalizer import (
@@ -37,6 +45,12 @@ from divyam_llm_interop.translate.chat.unified.unified_response import (
     UnifiedChatCompletionsStreamChunk,
     UnifiedChatResponseStreaming,
 )
+
+# Google's documented thought signature for function calls a Gemini model did
+# not produce, such as history from another model. It costs reasoning quality,
+# so it is used only for endpoints that opt in with gemini_foreign_call_policy
+# "skip_signature"; by default such calls are flattened instead.
+_SKIP_SIGNATURE_VALIDATOR = "skip_thought_signature_validator"
 
 
 class GeminiTranslator(Translator):
@@ -249,27 +263,38 @@ class GeminiTranslator(Translator):
 
             role = "model" if message.role == "assistant" else "user"
             parts: list[dict[str, Any]] = []
-
-            if message.content:
-                parts.append({"text": message.content})
+            text_signature, call_signatures = self._replayed_signatures(message)
+            content: Any = message.content
+            if isinstance(content, list):
+                # Chat Completions content parts: text and inline images.
+                parts.extend(self._content_parts(content))
+            else:
+                parts.extend(self._text_parts(content, text_signature))
 
             if message.role == "assistant" and message.tool_calls:
                 for tool_call in message.tool_calls:
                     call_names_by_id[tool_call.id] = tool_call.function.name
                     arguments = self._safe_json_loads(tool_call.function.arguments)
-                    parts.append(
-                        {
-                            "functionCall": {
-                                "id": tool_call.id,
-                                "name": tool_call.function.name,
-                                "args": arguments,
-                            }
+                    part: dict[str, Any] = {
+                        "functionCall": {
+                            "id": tool_call.id,
+                            "name": tool_call.function.name,
+                            "args": arguments,
                         }
-                    )
+                    }
+                    if tool_call.id in call_signatures:
+                        part["thoughtSignature"] = call_signatures[tool_call.id]
+                    parts.append(part)
 
             if parts:
                 contents.append({"role": role, "parts": parts})
 
+        capabilities = self._model_registry.get_capabilities(target)
+        if capabilities.tool_loop_requires_reasoning_replay:
+            if capabilities.gemini_foreign_call_policy == "skip_signature":
+                self._sign_current_turn(contents)
+            else:
+                contents = self._flatten_unsigned_steps(contents)
         request_body["contents"] = contents
 
         generation_config: dict[str, Any] = {}
@@ -346,17 +371,22 @@ class GeminiTranslator(Translator):
         body = chat_response.body
         candidates = body.get("candidates", [])
 
+        signatures: list[dict[str, Any]] = []
         choices = []
         for index, candidate in enumerate(candidates):
             content = candidate.get("content") or {}
             parts = content.get("parts", []) if isinstance(content, dict) else []
-            text = self._extract_parts_text(parts)
+            text, thought_text = self._split_thought_text(parts)
             tool_calls = self._extract_tool_calls_from_parts(parts)
             message: dict[str, Any] = {"role": "assistant"}
             if text:
                 message["content"] = text
+            if thought_text:
+                message["reasoning_content"] = thought_text
             if tool_calls:
                 message["tool_calls"] = [tc.to_dict() for tc in tool_calls]
+            if index == 0:
+                signatures = self._thought_signatures(parts)
 
             finish = GeminiTranslator._candidate_field(
                 candidate, "finishReason", "finish_reason"
@@ -392,6 +422,8 @@ class GeminiTranslator(Translator):
             completion_body["usage"] = usage
 
         completion_body["gemini_response_raw"] = copy.deepcopy(body)
+        if candidates and signatures:
+            completion_body[RESPONSE_STATE_KEY] = {STATE_GEMINI_SIGNATURES: signatures}
 
         return translation_utils.as_is_response_to_unified(
             ChatResponse(body=completion_body, headers=chat_response.headers)
@@ -598,16 +630,21 @@ class GeminiTranslator(Translator):
     ) -> dict[str, Any]:
         """Map one native Gemini stream chunk to OpenAI-style stream chunk dict."""
         candidates = body.get("candidates", [])
+        signatures: list[dict[str, Any]] = []
         choices: list[dict[str, Any]] = []
         for index, candidate in enumerate(candidates):
             content = candidate.get("content") or {}
             parts = content.get("parts", []) if isinstance(content, dict) else []
-            text = GeminiTranslator._extract_parts_text(parts)
+            text, thought_text = GeminiTranslator._split_thought_text(parts)
             tool_calls = GeminiTranslator._extract_tool_calls_from_parts(parts)
+            if index == 0:
+                signatures.extend(GeminiTranslator._thought_signatures(parts))
 
             delta: dict[str, Any] = {}
             if text:
                 delta["content"] = text
+            if thought_text:
+                delta["reasoning_content"] = thought_text
             if tool_calls:
                 delta["tool_calls"] = [tc.to_dict() for tc in tool_calls]
             if isinstance(content, dict):
@@ -652,6 +689,8 @@ class GeminiTranslator(Translator):
         }
         if usage is not None:
             chunk_dict["usage"] = usage
+        if signatures:
+            chunk_dict[RESPONSE_STATE_KEY] = {STATE_GEMINI_SIGNATURES: signatures}
         return chunk_dict
 
     @staticmethod
@@ -876,9 +915,7 @@ class GeminiTranslator(Translator):
     ) -> list[UnifiedToolCall]:
         tool_calls: list[UnifiedToolCall] = []
         for idx, part in enumerate(parts):
-            function_call = part.get("functionCall")
-            if function_call is None:
-                function_call = part.get("function_call")
+            function_call = GeminiTranslator._function_call(part)
             if not function_call:
                 continue
             function_args = function_call.get(
@@ -887,8 +924,7 @@ class GeminiTranslator(Translator):
             tool_calls.append(
                 UnifiedToolCall.from_dict(
                     {
-                        "id": function_call.get("id")
-                        or f"call_{idx}_{function_call.get('name', 'tool')}",
+                        "id": GeminiTranslator._function_call_id(function_call, idx),
                         "type": "function",
                         "function": {
                             "name": function_call.get("name", "tool"),
@@ -898,6 +934,262 @@ class GeminiTranslator(Translator):
                 )
             )
         return tool_calls
+
+    @staticmethod
+    def _function_call(part: dict[str, Any]) -> dict[str, Any] | None:
+        function_call = part.get("functionCall")
+        if function_call is None:
+            function_call = part.get("function_call")
+        return function_call if isinstance(function_call, dict) else None
+
+    @staticmethod
+    def _function_call_id(function_call: dict[str, Any], index: int) -> str:
+        return (
+            function_call.get("id")
+            or f"call_{index}_{function_call.get('name', 'tool')}"
+        )
+
+    @staticmethod
+    def _split_thought_text(parts: list[dict[str, Any]]) -> tuple[str | None, str]:
+        """Answer text, and the thought summaries Gemini marks with thought."""
+        answer = [part for part in parts if not part.get("thought")]
+        thoughts = "".join(
+            str(part["text"])
+            for part in parts
+            if part.get("thought") and part.get("text") is not None
+        )
+        return GeminiTranslator._extract_parts_text(answer), thoughts
+
+    @staticmethod
+    def _part_signature(part: dict[str, Any]) -> str | None:
+        value = part.get("thoughtSignature", part.get("thought_signature"))
+        if isinstance(value, bytes):
+            # The google-genai SDK returns raw bytes; the REST shape is base64.
+            return base64.b64encode(value).decode("ascii")
+        return value if isinstance(value, str) and value else None
+
+    @staticmethod
+    def _thought_signatures(parts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Thought signatures on a model turn's parts, keyed to where they go back.
+
+        Gemini puts a signature on a part, beside its functionCall or text, and
+        expects it back on the same part. A functionCall part is identified by
+        its call ID, as derived for the unified tool call; a text part's
+        signature belongs on the turn's text.
+        """
+        signatures: list[dict[str, Any]] = []
+        for index, part in enumerate(parts):
+            signature = GeminiTranslator._part_signature(part)
+            if signature is None:
+                continue
+            function_call = GeminiTranslator._function_call(part)
+            if function_call is not None:
+                call_id = GeminiTranslator._function_call_id(function_call, index)
+                signatures.append({"tool_call_id": call_id, "signature": signature})
+            elif not part.get("thought"):
+                text = part.get("text")
+                signatures.append(
+                    {
+                        "part": "text",
+                        "text": text if isinstance(text, str) else "",
+                        "signature": signature,
+                    }
+                )
+        return signatures
+
+    @staticmethod
+    def _replayed_signatures(
+        message: Any,
+    ) -> tuple[dict[str, str] | None, dict[str, str]]:
+        """Signatures selected for replay on an assistant message.
+
+        The text signature comes with the text of the part that carried it.
+        """
+        text_signature: dict[str, str] | None = None
+        call_signatures: dict[str, str] = {}
+        for entry in message.reasoning_details or []:
+            if (
+                not isinstance(entry, dict)
+                or entry.get("type") != GEMINI_SIGNATURE_TYPE
+            ):
+                continue
+            if entry.get("tool_call_id"):
+                call_signatures[entry["tool_call_id"]] = entry["signature"]
+            else:
+                text = entry.get("text")
+                text_signature = {
+                    "signature": entry["signature"],
+                    "text": text if isinstance(text, str) else "",
+                }
+        return text_signature, call_signatures
+
+    @staticmethod
+    def _text_parts(
+        content: str | None, text_signature: dict[str, str] | None
+    ) -> list[dict[str, Any]]:
+        """A model turn's text parts, with a text signature on its own part.
+
+        Gemini rejects merging a signed part with another, and returning a
+        text signature is optional, so it goes back only where its part can
+        be rebuilt: the turn's whole text, or a trailing empty part.
+        """
+        parts: list[dict[str, Any]] = [{"text": content}] if content else []
+        if text_signature is None:
+            return parts
+        signed_text = text_signature["text"]
+        if signed_text and parts and content == signed_text:
+            parts[0]["thoughtSignature"] = text_signature["signature"]
+        elif not signed_text:
+            parts.append({"text": "", "thoughtSignature": text_signature["signature"]})
+        return parts
+
+    @staticmethod
+    def _content_parts(content: list[Any]) -> list[dict[str, Any]]:
+        parts: list[dict[str, Any]] = []
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+            if item.get("type") == "text" and item.get("text"):
+                parts.append({"text": item["text"]})
+            elif item.get("type") == "image_url":
+                image_url = item.get("image_url")
+                url = image_url.get("url") if isinstance(image_url, dict) else None
+                inline = GeminiTranslator._inline_data(url)
+                if inline is not None:
+                    parts.append({"inlineData": inline})
+        return parts
+
+    @staticmethod
+    def _inline_data(url: Any) -> dict[str, str] | None:
+        """A base64 data URL as Gemini inlineData; other URLs are refused earlier."""
+        if not isinstance(url, str) or not url.startswith("data:"):
+            return None
+        header, _, data = url[len("data:") :].partition(",")
+        mime_type, _, encoding = header.partition(";")
+        if encoding != "base64" or not mime_type or not data:
+            return None
+        return {"mimeType": mime_type, "data": data}
+
+    @staticmethod
+    def _current_turn_start(contents: list[dict[str, Any]]) -> int:
+        """Index after the latest user content other than function responses."""
+        start = 0
+        for index, content in enumerate(contents):
+            parts = content.get("parts") or []
+            if content.get("role") == "user" and any(
+                "functionResponse" not in part for part in parts
+            ):
+                start = index + 1
+        return start
+
+    @staticmethod
+    def _flatten_unsigned_steps(
+        contents: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Rewrite current-turn steps Gemini 3 would reject as narrated text.
+
+        Gemini 3 rejects a function call in the current turn, which starts at
+        the latest user message other than function responses, when the first
+        call of its step has no thought signature, as for a call another
+        model made. Each such step's calls, and the function responses
+        answering them, become text describing what happened; adjacent turns
+        of one role are then joined, so roles still alternate.
+        """
+        start = GeminiTranslator._current_turn_start(contents)
+        flattened_names: dict[str, str] = {}
+        rewritten: list[dict[str, Any]] = list(contents[:start])
+        flattened: list[bool] = [False] * start
+        for content in contents[start:]:
+            parts = content.get("parts") or []
+            calls = [part for part in parts if "functionCall" in part]
+            if (
+                content.get("role") == "model"
+                and calls
+                and "thoughtSignature" not in calls[0]
+            ):
+                new_parts: list[dict[str, Any]] = []
+                for part in parts:
+                    call = part.get("functionCall")
+                    if call is None:
+                        new_parts.append(part)
+                        continue
+                    flattened_names[call.get("id") or ""] = call.get("name", "tool")
+                    arguments = json.dumps(
+                        call.get("args", {}), ensure_ascii=False, separators=(",", ":")
+                    )
+                    new_parts.append(
+                        {"text": narrate_tool_call(call.get("name", "tool"), arguments)}
+                    )
+                rewritten.append({**content, "parts": new_parts})
+                flattened.append(True)
+                continue
+            responses = [
+                part["functionResponse"]
+                for part in parts
+                if isinstance(part.get("functionResponse"), dict)
+            ]
+            if (
+                content.get("role") == "user"
+                and responses
+                and len(responses) == len(parts)
+                and all(
+                    (response.get("id") or "") in flattened_names
+                    for response in responses
+                )
+            ):
+                new_parts = []
+                for response in responses:
+                    text, is_error = GeminiTranslator._gemini_tool_result(
+                        response.get("response")
+                    )
+                    name = flattened_names[response.get("id") or ""]
+                    new_parts.append(
+                        {
+                            "text": narrate_tool_result(
+                                name, text, is_error=bool(is_error)
+                            )
+                        }
+                    )
+                rewritten.append({**content, "parts": new_parts})
+                flattened.append(True)
+                continue
+            rewritten.append(content)
+            flattened.append(False)
+
+        joined: list[dict[str, Any]] = []
+        joined_flattened: list[bool] = []
+        for content, was_flattened in zip(rewritten, flattened):
+            if (
+                joined
+                and joined[-1].get("role") == content.get("role")
+                and (was_flattened or joined_flattened[-1])
+            ):
+                joined[-1] = {
+                    **joined[-1],
+                    "parts": [*joined[-1]["parts"], *content.get("parts", [])],
+                }
+                joined_flattened[-1] = True
+                continue
+            joined.append(content)
+            joined_flattened.append(was_flattened)
+        return joined
+
+    @staticmethod
+    def _sign_current_turn(contents: list[dict[str, Any]]) -> None:
+        """Mark the current turn's unsigned function-call steps for Gemini 3.
+
+        Gemini 3 rejects a function call in the current turn, which starts at
+        the latest user message other than function responses, when the
+        first call of its step has no thought signature. Calls another model
+        made carry none; Google documents the skip value for that history.
+        """
+        start = GeminiTranslator._current_turn_start(contents)
+        for content in contents[start:]:
+            if content.get("role") != "model":
+                continue
+            calls = [part for part in content["parts"] if "functionCall" in part]
+            if calls and not any("thoughtSignature" in part for part in calls):
+                calls[0]["thoughtSignature"] = _SKIP_SIGNATURE_VALIDATOR
 
     @staticmethod
     def _gemini_modality_str(modality: Any) -> str:

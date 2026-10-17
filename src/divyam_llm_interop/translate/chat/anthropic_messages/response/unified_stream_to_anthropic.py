@@ -6,13 +6,27 @@ import uuid
 from time import monotonic
 from typing import Any, NoReturn
 
+from divyam_llm_interop.translate.chat.anthropic_messages.response.reasoning_blocks import (
+    display_signature,
+    merge_provider_state,
+    opaque_details,
+    readable_reasoning,
+    turn_block,
+    wrap_reasoning_block,
+    wrap_signature,
+)
 from divyam_llm_interop.translate.chat.anthropic_messages.response.stream_state import (
+    ANTHROPIC_THINKING_EVENT_KEY,
     TargetStreamState,
 )
 from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
+    client_tool_id,
     is_portable_tool_name,
 )
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
+from divyam_llm_interop.translate.chat.base.reasoning_state import (
+    RESPONSE_STATE_KEY,
+)
 from divyam_llm_interop.translate.chat.base.translation_utils import (
     close_async_stream,
 )
@@ -33,7 +47,9 @@ def unified_stream_to_anthropic(
     from_response: UnifiedChatResponseStreaming, target: Model
 ) -> ChatResponseStreaming:
     async def translated_stream():
-        state = TargetStreamState(target_model=target.name)
+        state = TargetStreamState(
+            target_model=target.name, reasoning_domain=from_response.reasoning_domain
+        )
         last_output_at = monotonic()
         async for chunk in from_response.stream:
             native_error = chunk.unknowns.get(INTERNAL_STREAM_ERROR_KEY)
@@ -52,6 +68,9 @@ def unified_stream_to_anthropic(
                 yield _message_start(state)
                 last_output_at = monotonic()
             _capture_usage(chunk, state)
+            merge_provider_state(
+                state.provider_state, chunk.unknowns.get(RESPONSE_STATE_KEY)
+            )
             events = _consume_chunk(chunk, state)
             for event in events:
                 yield event
@@ -68,12 +87,9 @@ def unified_stream_to_anthropic(
             _stream_error("cannot translate an empty stream", "$")
         if not state.terminal_seen:
             _stream_error("stream ended without a terminal finish reason", "$")
-        if state.text_block_index is not None:
-            yield {
-                "type": "content_block_stop",
-                "index": state.text_block_index,
-            }
-        async for event in _flush_tool_calls(state):
+        for event in _close_open_blocks(state):
+            yield event
+        for event in _state_block(state):
             yield event
         yield _message_delta(state)
         yield {"type": "message_stop"}
@@ -114,6 +130,10 @@ def _consume_chunk(
         ):
             return events
         _stream_error("semantic chunk received after terminal finish", "$.choices")
+    native_thinking = chunk.unknowns.get(ANTHROPIC_THINKING_EVENT_KEY)
+    if isinstance(native_thinking, dict):
+        # The same chunk's reasoning_content is the text for other clients.
+        return _replay_thinking_event(native_thinking, state)
     for choice in chunk.choices:
         if choice.index != 0:
             _target_error(
@@ -124,7 +144,12 @@ def _consume_chunk(
                 "refusal blocks are outside the supported text/tool profile",
                 "$.choices[0].delta.refusal",
             )
-        if choice.delta.content is not None:
+        events.extend(_display_reasoning(choice.delta, state))
+        if choice.delta.content or choice.delta.tool_calls:
+            events.extend(_close_display_thinking(state))
+        # An empty content delta opens no block, so reasoning that follows a
+        # role-only first chunk still leads the message.
+        if choice.delta.content:
             if state.text_block_index is None:
                 state.text_block_index = state.next_block_index
                 state.next_block_index += 1
@@ -191,7 +216,153 @@ def _buffer_tool_calls(tool_calls: list[Any], state: TargetStreamState) -> None:
         buffer["arguments"] += tool_call.function.arguments
 
 
-async def _flush_tool_calls(state: TargetStreamState):
+def _replay_thinking_event(
+    event: dict[str, Any], state: TargetStreamState
+) -> list[dict[str, Any]]:
+    """Re-emit an Anthropic thinking event, renumbered and with state wrapped."""
+    domain = state.reasoning_domain
+    event_type = event.get("type")
+    if event_type == "content_block_start":
+        events = _close_open_blocks(state)
+        state.thinking_block_index = state.next_block_index
+        state.next_block_index += 1
+        state.display_thinking = False
+        block = event.get("content_block")
+        if not isinstance(block, dict):
+            _stream_error("thinking content_block must be an object", "$.content_block")
+        events.append(
+            {
+                "type": "content_block_start",
+                "index": state.thinking_block_index,
+                "content_block": wrap_reasoning_block(domain, block),
+            }
+        )
+        return events
+    if state.thinking_block_index is None:
+        _stream_error("thinking event references no open block", "$.index")
+    if event_type == "content_block_delta":
+        delta = event.get("delta")
+        if not isinstance(delta, dict):
+            _stream_error("delta must be an object", "$.delta")
+        if delta.get("type") == "signature_delta":
+            delta = {
+                **delta,
+                "signature": wrap_signature(domain, delta.get("signature")),
+            }
+        return [
+            {
+                "type": "content_block_delta",
+                "index": state.thinking_block_index,
+                "delta": delta,
+            }
+        ]
+    index = state.thinking_block_index
+    state.thinking_block_index = None
+    return [{"type": "content_block_stop", "index": index}]
+
+
+def _display_reasoning(delta: Any, state: TargetStreamState) -> list[dict[str, Any]]:
+    """Show another provider's readable reasoning as a thinking block."""
+    for detail in opaque_details(delta):
+        _merge_detail(state.reasoning_details, detail)
+    text = readable_reasoning(delta)
+    if not text:
+        return []
+    events: list[dict[str, Any]] = []
+    if state.thinking_block_index is None:
+        events.extend(_close_text_block(state))
+        state.thinking_block_index = state.next_block_index
+        state.next_block_index += 1
+        state.display_thinking = True
+        events.append(
+            {
+                "type": "content_block_start",
+                "index": state.thinking_block_index,
+                "content_block": {"type": "thinking", "thinking": "", "signature": ""},
+            }
+        )
+    events.append(
+        {
+            "type": "content_block_delta",
+            "index": state.thinking_block_index,
+            "delta": {"type": "thinking_delta", "thinking": text},
+        }
+    )
+    return events
+
+
+def _merge_detail(details: list[dict[str, Any]], detail: dict[str, Any]) -> None:
+    """Join a streamed reasoning_details piece onto the item it continues."""
+    previous = details[-1] if details else None
+    if (
+        previous is not None
+        and previous.get("type") == detail.get("type")
+        and previous.get("index") == detail.get("index")
+        and "index" in detail
+    ):
+        for key, value in detail.items():
+            if key in {"text", "summary", "data"} and isinstance(value, str):
+                previous[key] = str(previous.get(key) or "") + value
+            elif value not in (None, ""):
+                previous[key] = value
+        return
+    details.append(dict(detail))
+
+
+def _close_display_thinking(state: TargetStreamState) -> list[dict[str, Any]]:
+    if state.thinking_block_index is None or not state.display_thinking:
+        return []
+    index = state.thinking_block_index
+    state.thinking_block_index = None
+    state.display_thinking = False
+    return [
+        {
+            "type": "content_block_delta",
+            "index": index,
+            "delta": {
+                "type": "signature_delta",
+                "signature": display_signature(state.reasoning_domain),
+            },
+        },
+        {"type": "content_block_stop", "index": index},
+    ]
+
+
+def _close_text_block(state: TargetStreamState) -> list[dict[str, Any]]:
+    if state.text_block_index is None:
+        return []
+    index = state.text_block_index
+    state.text_block_index = None
+    return [{"type": "content_block_stop", "index": index}]
+
+
+def _close_open_blocks(state: TargetStreamState) -> list[dict[str, Any]]:
+    """Close the open text or reasoning block and emit buffered tool calls."""
+    events = _close_text_block(state) + _close_display_thinking(state)
+    if state.thinking_block_index is not None:
+        events.append(
+            {"type": "content_block_stop", "index": state.thinking_block_index}
+        )
+        state.thinking_block_index = None
+    return events + _flush_tool_calls(state)
+
+
+def _state_block(state: TargetStreamState) -> list[dict[str, Any]]:
+    block = turn_block(
+        state.reasoning_domain, state.reasoning_details, state.provider_state
+    )
+    if block is None:
+        return []
+    index = state.next_block_index
+    state.next_block_index += 1
+    return [
+        {"type": "content_block_start", "index": index, "content_block": block},
+        {"type": "content_block_stop", "index": index},
+    ]
+
+
+def _flush_tool_calls(state: TargetStreamState) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
     for call_index, tool_call in sorted(state.tool_calls.items()):
         if not is_portable_tool_name(tool_call["name"]):
             _stream_error(
@@ -203,32 +374,38 @@ async def _flush_tool_calls(state: TargetStreamState):
         )
         block_index = state.next_block_index
         state.next_block_index += 1
-        tool_id = tool_call["id"] or f"toolu_{uuid.uuid4().hex}"
+        tool_id = client_tool_id(tool_call["id"])
         if tool_id in state.tool_ids:
             _stream_error("tool call IDs must be unique", "$.tool_calls.id")
         state.tool_ids.add(tool_id)
-        yield {
-            "type": "content_block_start",
-            "index": block_index,
-            "content_block": {
-                "type": "tool_use",
-                "id": tool_id,
-                "name": tool_call["name"],
-                "input": {},
-                "caller": {"type": "direct"},
-            },
-        }
-        yield {
-            "type": "content_block_delta",
-            "index": block_index,
-            "delta": {
-                "type": "input_json_delta",
-                "partial_json": json.dumps(
-                    arguments, ensure_ascii=False, separators=(",", ":")
-                ),
-            },
-        }
-        yield {"type": "content_block_stop", "index": block_index}
+        events.append(
+            {
+                "type": "content_block_start",
+                "index": block_index,
+                "content_block": {
+                    "type": "tool_use",
+                    "id": tool_id,
+                    "name": tool_call["name"],
+                    "input": {},
+                    "caller": {"type": "direct"},
+                },
+            }
+        )
+        events.append(
+            {
+                "type": "content_block_delta",
+                "index": block_index,
+                "delta": {
+                    "type": "input_json_delta",
+                    "partial_json": json.dumps(
+                        arguments, ensure_ascii=False, separators=(",", ":")
+                    ),
+                },
+            }
+        )
+        events.append({"type": "content_block_stop", "index": block_index})
+    state.tool_calls = {}
+    return events
 
 
 def _message_start(state: TargetStreamState) -> dict[str, Any]:

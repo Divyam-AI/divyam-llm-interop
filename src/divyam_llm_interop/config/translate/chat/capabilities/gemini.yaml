@@ -10,6 +10,39 @@
       - gemini
 
 # ────────────────────────────────────────────────────────
+# Gemini 4
+# ────────────────────────────────────────────────────────
+
+# Thinking cannot be turned off. The 1M context window is shared by input
+# and output; synchronous output stops at 65,536 tokens.
+- selector:
+    name: gemini-4-argon
+  capabilities:
+    max_tokens: { min: 1, max: 65536 }
+    input_token_limit: 1048576
+    supports_function_calling: true
+    supports_vision: true
+    supports_reasoning: true
+    reasoning_enabled_by_default: true
+    reasoning_can_be_disabled: false
+
+# ────────────────────────────────────────────────────────
+# Gemini 3.8 / 3.7
+# ────────────────────────────────────────────────────────
+
+- selector:
+    name:
+      regex:
+        - gemini-3\.[78]-flash
+  capabilities:
+    max_tokens: { min: 1, max: 65536 }
+    input_token_limit: 1048576
+    supports_function_calling: true
+    supports_vision: true
+    supports_reasoning: true
+    reasoning_enabled_by_default: true
+
+# ────────────────────────────────────────────────────────
 # Gemini 3.6
 # ────────────────────────────────────────────────────────
 
@@ -535,3 +568,18 @@
       completions:
         drop_fields:
           - frequency_penalty
+
+# Gemini 4 and 3 return a 400 when a function call in the current turn comes
+# back without its thought signature. Gemini 3 Pro Image does not enforce it.
+- selector:
+    name:
+      regex:
+        - gemini-3.*
+        - gemini-4.*
+  capabilities:
+    tool_loop_requires_reasoning_replay: true
+
+- selector:
+    name: gemini-3-pro-image-preview
+  capabilities:
+    tool_loop_requires_reasoning_replay: false

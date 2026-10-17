@@ -5,6 +5,10 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+# A unified stream chunk field holding an Anthropic thinking event, for an
+# Anthropic client to replay; other clients read the text in reasoning_content.
+ANTHROPIC_THINKING_EVENT_KEY = "anthropic_thinking_event"
+
 
 @dataclass
 class SourceStreamState:
@@ -39,3 +43,12 @@ class TargetStreamState:
     output_tokens: int = 0
     tool_calls: dict[int, dict[str, str]] = field(default_factory=dict)
     tool_ids: set[str] = field(default_factory=set)
+    # Signing domain of the producing endpoint, for wrapping its reasoning.
+    reasoning_domain: str | None = None
+    # Index of the thinking block now open, if any.
+    thinking_block_index: int | None = None
+    # True when that block holds another provider's readable reasoning.
+    display_thinking: bool = False
+    reasoning_details: list[dict[str, Any]] = field(default_factory=list)
+    # Other opaque state the provider translator reported, by turn payload key.
+    provider_state: dict[str, list[Any]] = field(default_factory=dict)

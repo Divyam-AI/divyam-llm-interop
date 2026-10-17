@@ -1036,3 +1036,115 @@
     supports_vision: true
     supports_reasoning: true
     supports_code_execution: true
+
+# ────────────────────────────────────────────────────────
+# GPT-5.5 and later
+# ────────────────────────────────────────────────────────
+
+# Reasoning models: reasoning items carry encrypted_content, so a stateless
+# Responses request can replay them. Chat Completions takes
+# max_completion_tokens.
+- selector:
+    name:
+      regex:
+        - gpt-5\.[5-9](?:-.*)?
+        - gpt-6(?:[-.].*)?
+  capabilities:
+    strict_completions_compatibility: false
+    max_tokens: { min: 1, max: 128000 }
+    input_token_limit: 922000
+    supports_json_mode: true
+    supports_function_calling: true
+    supports_vision: true
+    supports_reasoning: true
+    supports_encrypted_reasoning: true
+    api_capabilities:
+      completions:
+        rename_fields:
+          max_tokens: max_completion_tokens
+
+# No sampling range is documented for these; they keep GPT-5's fixed
+# temperature.
+- selector:
+    name:
+      regex:
+        - gpt-5\.[5-9](?:-.*)?
+  capabilities:
+    temperature: { min: 1, max: 1 }
+
+- selector:
+    name: gpt-5.5
+  capabilities:
+    reasoning_effort:
+      options: [ "none", "low", "medium", "high", "xhigh" ]
+      default: medium
+
+# OpenAI serves it through Responses only.
+- selector:
+    name: gpt-5.5-pro
+  capabilities:
+    reasoning_effort:
+      options: [ "medium", "high", "xhigh" ]
+      default: high
+
+- selector:
+    name:
+      regex:
+        - gpt-5\.6(?:-sol|-terra|-luna)?
+  capabilities:
+    reasoning_effort:
+      options: [ "none", "low", "medium", "high", "xhigh", "max" ]
+      default: medium
+
+# OpenAI serves it through Responses only, behind separate approval.
+- selector:
+    name: gpt-5.6-cyber
+  capabilities:
+    max_tokens: { min: 1, max: 128000 }
+    input_token_limit: 272000
+
+# GPT-6 rejects temperature, top_p and logprobs at any reasoning effort other
+# than none, which Astra and 6.1 Sol do not offer and no GPT-6 model uses by
+# default.
+- selector:
+    name:
+      regex:
+        - gpt-6(?:[-.].*)?
+  capabilities:
+    api_capabilities:
+      completions:
+        drop_fields:
+          - temperature
+          - top_p
+          - logprobs
+          - top_logprobs
+      responses:
+        drop_fields:
+          - temperature
+          - top_p
+          - top_logprobs
+
+- selector:
+    name:
+      regex:
+        - gpt-6-sol
+        - gpt-6-luna
+  capabilities:
+    reasoning_effort:
+      options: [ "none", "low", "medium", "high", "xhigh", "max" ]
+      default: medium
+
+# Chat Completions takes no tools with 6.1 Sol and Astra; tool calls need
+# Responses.
+- selector:
+    name: gpt-6.1-sol
+  capabilities:
+    reasoning_effort:
+      options: [ "low", "medium", "high", "xhigh", "max" ]
+      default: medium
+
+- selector:
+    name: gpt-6-astra
+  capabilities:
+    reasoning_effort:
+      options: [ "low", "medium", "high", "xhigh", "max" ]

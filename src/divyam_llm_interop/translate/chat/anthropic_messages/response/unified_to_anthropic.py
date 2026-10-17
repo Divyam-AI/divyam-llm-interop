@@ -6,10 +6,22 @@ import json
 import uuid
 from typing import Any, NoReturn
 
+from divyam_llm_interop.translate.chat.anthropic_messages.response.reasoning_blocks import (
+    display_signature,
+    opaque_details,
+    readable_reasoning,
+    turn_block,
+    wrap_reasoning_block,
+)
 from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
+    client_tool_id,
     is_portable_tool_name,
 )
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
+from divyam_llm_interop.translate.chat.base.reasoning_state import (
+    RESPONSE_DOMAIN_KEY,
+    RESPONSE_STATE_KEY,
+)
 from divyam_llm_interop.translate.chat.translation_errors import (
     TargetCapabilityError,
 )
@@ -23,10 +35,18 @@ from divyam_llm_interop.translate.chat.unified.unified_response import (
 def unified_response_to_anthropic(
     from_response: UnifiedChatCompletionsResponse, target: Model
 ) -> ChatResponse:
+    domain = from_response.body.unknowns.get(RESPONSE_DOMAIN_KEY)
+    if not isinstance(domain, str) or not domain:
+        domain = None
     raw = from_response.body.unknowns.get("anthropic_response_raw")
     if isinstance(raw, dict):
         body = copy.deepcopy(raw)
         body["model"] = target.name
+        # The thinking text and order are kept; signatures and redacted data
+        # are wrapped so a later request returns them only to this domain.
+        body["content"] = [
+            wrap_reasoning_block(domain, block) for block in body["content"]
+        ]
         return ChatResponse(body=body, headers=copy.deepcopy(from_response.headers))
 
     if len(from_response.body.choices) != 1:
@@ -39,7 +59,9 @@ def unified_response_to_anthropic(
         "id": _message_id(from_response.body.id),
         "type": "message",
         "role": "assistant",
-        "content": _content_blocks(choice),
+        "content": _content_blocks(
+            choice, domain, from_response.body.unknowns.get(RESPONSE_STATE_KEY)
+        ),
         "model": target.name,
         "stop_reason": stop_reason,
         "stop_sequence": choice.unknowns.get("anthropic_stop_sequence"),
@@ -53,7 +75,9 @@ def unified_response_to_anthropic(
     return ChatResponse(body=body, headers=copy.deepcopy(from_response.headers))
 
 
-def _content_blocks(choice: UnifiedChoice) -> list[dict[str, Any]]:
+def _content_blocks(
+    choice: UnifiedChoice, domain: str | None, provider_state: Any
+) -> list[dict[str, Any]]:
     message = choice.message
     if message.role != "assistant":
         _target_error(
@@ -67,6 +91,15 @@ def _content_blocks(choice: UnifiedChoice) -> list[dict[str, Any]]:
 
     content: list[dict[str, Any]] = []
     tool_ids: set[str] = set()
+    reasoning = readable_reasoning(message)
+    if reasoning:
+        content.append(
+            {
+                "type": "thinking",
+                "thinking": reasoning,
+                "signature": display_signature(domain),
+            }
+        )
     if message.content is not None:
         if not isinstance(message.content, str):
             _target_error(
@@ -89,7 +122,7 @@ def _content_blocks(choice: UnifiedChoice) -> list[dict[str, Any]]:
                 "tool name must be 1 to 64 characters matching ^[A-Za-z0-9_-]+$",
                 f"$.choices[0].message.tool_calls[{index}].function.name",
             )
-        tool_id = tool_call.id or f"toolu_{uuid.uuid4().hex}"
+        tool_id = client_tool_id(tool_call.id)
         if tool_id in tool_ids:
             _target_error(
                 "tool call IDs must be unique",
@@ -105,6 +138,9 @@ def _content_blocks(choice: UnifiedChoice) -> list[dict[str, Any]]:
                 "caller": {"type": "direct"},
             }
         )
+    state_block = turn_block(domain, opaque_details(message), provider_state)
+    if state_block is not None:
+        content.append(state_block)
     return content
 
 

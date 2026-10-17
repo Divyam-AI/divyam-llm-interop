@@ -43,6 +43,9 @@ class UnifiedToCompletionsTranslator:
         unknows_to_keep = (
             [EXTRA_BODY_KEY] if target_capabilities.supports_google_extra_body else []
         )
+        # top_k is not a Chat Completions field: it reaches only endpoints whose
+        # entry declares a range for it, fitted to that range.
+        top_k = unified.unknowns.get("top_k")
 
         for key in list(unified.unknowns.keys()):
             if key not in unknows_to_keep:
@@ -79,6 +82,13 @@ class UnifiedToCompletionsTranslator:
                 unified, target_capabilities
             )
 
+        if (
+            isinstance(top_k, int)
+            and not isinstance(top_k, bool)
+            and target_capabilities.top_k is not None
+        ):
+            body["top_k"] = int(target_capabilities.top_k.fit_to_range(top_k) or top_k)
+
         # Rename deprecated fields
         target_capabilities.rename_fields_in_place(body, ModelApiType.COMPLETIONS)
 
@@ -86,6 +96,13 @@ class UnifiedToCompletionsTranslator:
         target_capabilities.drop_unsupported_fields_in_place(
             body, ModelApiType.COMPLETIONS
         )
+        if (
+            target.api_type == ModelApiType.COMPLETIONS
+            and target_capabilities.reasoning_dialect == "openrouter"
+            and body.get("reasoning_effort") is not None
+        ):
+            # OpenRouter-style gateways take effort in a reasoning object.
+            body["reasoning"] = {"effort": body.pop("reasoning_effort")}
 
         # Drop nulls for only top level parameters. It's possible internal null are required.
         # For example schema default values.

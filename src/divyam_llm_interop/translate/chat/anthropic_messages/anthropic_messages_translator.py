@@ -14,6 +14,9 @@ from divyam_llm_interop.translate.chat.anthropic_messages.request import (
 from divyam_llm_interop.translate.chat.anthropic_messages.request.anthropic_to_unified import (
     normalize_system_messages,
 )
+from divyam_llm_interop.translate.chat.anthropic_messages.request.reasoning_history import (
+    reconcile_anthropic_history,
+)
 from divyam_llm_interop.translate.chat.anthropic_messages.response import (
     anthropic_response_to_unified,
     anthropic_stream_to_unified,
@@ -28,6 +31,11 @@ from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
     validate_no_assistant_prefill,
 )
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
+from divyam_llm_interop.translate.chat.base.reasoning_state import (
+    DEFAULT_EFFORT_KEY,
+    STATE_ENTRY_TYPE,
+    reasoning_domain,
+)
 from divyam_llm_interop.translate.chat.base.translator import Translator
 from divyam_llm_interop.translate.chat.model_config.model_registry import (
     ModelRegistry,
@@ -58,7 +66,19 @@ class AnthropicMessagesTranslator(Translator):
     def prepare_translation(
         self, request: ChatRequest, source: Model, target: Model, *, native: bool
     ) -> ChatRequest:
-        return replace(request, body=normalize_system_messages(request.body))
+        body = normalize_system_messages(request.body)
+        if native:
+            # The client's own Anthropic state verifies here. Envelopes the
+            # router returned on earlier turns are restored or removed, so
+            # none reaches Anthropic; a body without any is forwarded as sent.
+            capabilities = self._model_registry.get_capabilities(target)
+            body = reconcile_anthropic_history(
+                body,
+                reasoning_domain(target, capabilities),
+                capabilities,
+                genuine_verifiable=True,
+            )
+        return replace(request, body=body)
 
     @override
     def selection_context(self, request: ChatRequest, source: Model) -> dict[str, Any]:
@@ -66,6 +86,20 @@ class AnthropicMessagesTranslator(Translator):
         # The raw envelope is for lossless serving, not a second copy of the
         # conversation for ranking. Keep it on the original request only.
         context.pop("anthropic_request_raw", None)
+        context.pop(DEFAULT_EFFORT_KEY, None)
+        # Reasoning state is opaque provider data, not conversation to rank.
+        for message in context.get("messages") or []:
+            details = [
+                entry
+                for entry in message.get("reasoning_details") or []
+                if not (
+                    isinstance(entry, dict) and entry.get("type") == STATE_ENTRY_TYPE
+                )
+            ]
+            if details:
+                message["reasoning_details"] = details
+            else:
+                message.pop("reasoning_details", None)
         return context
 
     @override

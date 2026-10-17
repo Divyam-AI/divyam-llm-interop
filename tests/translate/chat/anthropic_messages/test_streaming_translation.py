@@ -1,12 +1,20 @@
 # Copyright 2025 Divyam.ai
 # SPDX-License-Identifier: Apache-2.0
 
+import copy
 import json
 from importlib import import_module
 from typing import Any
 
 import pytest
 
+from divyam_llm_interop.translate.chat.base.reasoning_state import (
+    KIND_ANTHROPIC_REDACTED,
+    KIND_ANTHROPIC_SIGNATURE,
+    KIND_DISPLAY,
+    KIND_TURN,
+    unwrap_envelope,
+)
 from divyam_llm_interop.translate.chat.translation_errors import (
     StreamProtocolError,
     UnsupportedFeatureError,
@@ -25,26 +33,25 @@ async def _collect(response: ChatResponseStreaming) -> list[dict[str, Any]]:
 
 
 @pytest.mark.asyncio
-async def test_upstream_reasoning_keeps_anthropic_stream_alive_without_exposing_it(
-    translator, completions_model, anthropic_model, monkeypatch
+async def test_upstream_reasoning_streams_as_a_display_thinking_block(
+    translator, completions_model, anthropic_model
 ):
-    clock = [0.0]
-    module = import_module(
-        "divyam_llm_interop.translate.chat.anthropic_messages.response.unified_stream_to_anthropic"
-    )
-    monkeypatch.setattr(module, "monotonic", lambda: clock[0])
-
     async def upstream():
         source = _completions_text_stream()
         yield source[0]
-        for elapsed in (11.0, 12.0, 22.0):
-            clock[0] = elapsed
+        for text, details in (
+            (
+                "Weighing ",
+                [{"type": "reasoning.text", "index": 0, "text": "Weighing "}],
+            ),
+            ("options.", [{"type": "reasoning.text", "index": 0, "text": "options."}]),
+        ):
             yield {
                 **source[0],
                 "choices": [
                     {
                         "index": 0,
-                        "delta": {"reasoning": "private reasoning"},
+                        "delta": {"reasoning": text, "reasoning_details": details},
                         "finish_reason": None,
                     }
                 ],
@@ -57,13 +64,60 @@ async def test_upstream_reasoning_keeps_anthropic_stream_alive_without_exposing_
             ChatResponseStreaming(upstream()), completions_model, anthropic_model
         )
     )
+
+    blocks = [e["content_block"] for e in events if e["type"] == "content_block_start"]
+    assert [block["type"] for block in blocks] == [
+        "thinking",
+        "text",
+        "redacted_thinking",
+    ]
+    deltas = [e["delta"] for e in events if e["type"] == "content_block_delta"]
+    assert [delta.get("thinking") for delta in deltas[:2]] == ["Weighing ", "options."]
+    display = unwrap_envelope(deltas[2]["signature"])
+    assert display is not None and display.kind == KIND_DISPLAY
+    assert deltas[3] == {"type": "text_delta", "text": "Hello"}
+    turn = unwrap_envelope(blocks[2]["data"])
+    assert turn is not None
+    assert (turn.domain, turn.kind) == ("completions::gpt-4.1-mini", KIND_TURN)
+    assert turn.payload == {
+        "reasoning_details": [
+            {"type": "reasoning.text", "index": 0, "text": "Weighing options."}
+        ]
+    }
+    assert events[-1] == {"type": "message_stop"}
+
+
+@pytest.mark.asyncio
+async def test_buffered_tool_arguments_keep_anthropic_stream_alive(
+    translator, completions_model, anthropic_model, monkeypatch
+):
+    clock = [0.0]
+    module = import_module(
+        "divyam_llm_interop.translate.chat.anthropic_messages.response.unified_stream_to_anthropic"
+    )
+    monkeypatch.setattr(module, "monotonic", lambda: clock[0])
+    source = _completions_tool_stream('{"city":')
+    piece = copy.deepcopy(source[1])
+    piece["choices"][0]["delta"]["tool_calls"][0]["function"]["arguments"] = (
+        '"Bengaluru"}'
+    )
+
+    async def upstream():
+        yield source[0]
+        for elapsed, chunk in ((11.0, source[1]), (12.0, piece), (23.0, piece)):
+            clock[0] = elapsed
+            yield chunk if elapsed < 23.0 else {**piece, "choices": []}
+        for chunk in source[2:]:
+            yield chunk
+
+    events = await _collect(
+        translator.translate_response_streaming(
+            ChatResponseStreaming(upstream()), completions_model, anthropic_model
+        )
+    )
+
+    # Arguments are buffered until complete, so nothing else shows progress.
     assert sum(event["type"] == "ping" for event in events) == 2
-    assert "private reasoning" not in json.dumps(events)
-    assert [
-        event["delta"]["text"]
-        for event in events
-        if event["type"] == "content_block_delta"
-    ] == ["Hello"]
     assert events[-1] == {"type": "message_stop"}
 
 
@@ -328,6 +382,27 @@ async def test_completions_text_stream_maps_to_anthropic_event_grammar(
 
 
 @pytest.mark.asyncio
+async def test_completions_tool_stream_replaces_an_id_anthropic_rejects(
+    translator, completions_model, anthropic_model
+):
+    items = _completions_tool_stream()
+    items[0]["choices"][0]["delta"]["tool_calls"][0]["id"] = "Edit:0"
+    translated = translator.translate_response_streaming(
+        ChatResponseStreaming(_stream(items)), completions_model, anthropic_model
+    )
+    events = await _collect(translated)
+    tool_start = next(
+        event
+        for event in events
+        if event["type"] == "content_block_start"
+        and event["content_block"]["type"] == "tool_use"
+    )
+
+    assert tool_start["content_block"]["id"].startswith("toolu_")
+    assert ":" not in tool_start["content_block"]["id"]
+
+
+@pytest.mark.asyncio
 async def test_completions_tool_stream_buffers_only_arguments_and_preserves_id(
     translator, completions_model, anthropic_model
 ):
@@ -551,8 +626,118 @@ async def test_stream_ending_without_message_stop_is_rejected(
         await _collect(translated)
 
 
+def _anthropic_thinking_stream() -> list[dict[str, Any]]:
+    start, *rest = _anthropic_text_stream()
+    for event in rest:
+        if "index" in event:
+            event["index"] += 2
+    return [
+        start,
+        {
+            "type": "content_block_start",
+            "index": 0,
+            "content_block": {"type": "thinking", "thinking": "", "signature": ""},
+        },
+        {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "thinking_delta", "thinking": "Plan the "},
+        },
+        {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "thinking_delta", "thinking": "greeting."},
+        },
+        {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "signature_delta", "signature": "sig-stream"},
+        },
+        {"type": "content_block_stop", "index": 0},
+        {
+            "type": "content_block_start",
+            "index": 1,
+            "content_block": {"type": "redacted_thinking", "data": "opaque-stream"},
+        },
+        {"type": "content_block_stop", "index": 1},
+        *rest,
+    ]
+
+
 @pytest.mark.asyncio
-async def test_thinking_stream_block_is_rejected(
+async def test_anthropic_thinking_stream_replays_to_anthropic_client_with_wrapped_state(
+    translator, anthropic_model
+):
+    client = type(anthropic_model)("claude-client", anthropic_model.api_type)
+    translated = translator.translate_response_streaming(
+        ChatResponseStreaming(_stream(_anthropic_thinking_stream())),
+        anthropic_model,
+        client,
+    )
+    events = await _collect(translated)
+
+    domain = "anthropic_messages::claude-sonnet-test"
+    assert [(e["type"], e.get("index")) for e in events[1:6]] == [
+        ("content_block_start", 0),
+        ("content_block_delta", 0),
+        ("content_block_delta", 0),
+        ("content_block_delta", 0),
+        ("content_block_stop", 0),
+    ]
+    assert [events[2]["delta"]["thinking"], events[3]["delta"]["thinking"]] == [
+        "Plan the ",
+        "greeting.",
+    ]
+    signature = unwrap_envelope(events[4]["delta"]["signature"])
+    assert signature is not None
+    assert (signature.domain, signature.kind, signature.payload) == (
+        domain,
+        KIND_ANTHROPIC_SIGNATURE,
+        {"signature": "sig-stream"},
+    )
+    redacted = events[6]["content_block"]
+    assert events[6]["index"] == 1 and redacted["type"] == "redacted_thinking"
+    data = unwrap_envelope(redacted["data"])
+    assert data is not None
+    assert (data.kind, data.payload) == (
+        KIND_ANTHROPIC_REDACTED,
+        {"data": "opaque-stream"},
+    )
+    text_start = next(
+        e
+        for e in events
+        if e["type"] == "content_block_start" and e["content_block"]["type"] == "text"
+    )
+    assert text_start["index"] == 2
+    # The wrapped blocks carry all the state; no further block is added.
+    assert [e for e in events if e["type"] == "content_block_start"][-1] == text_start
+    assert events[-1] == {"type": "message_stop"}
+
+
+@pytest.mark.asyncio
+async def test_anthropic_thinking_stream_maps_to_completions_reasoning_content(
+    translator, anthropic_model, completions_model
+):
+    translated = translator.translate_response_streaming(
+        ChatResponseStreaming(_stream(_anthropic_thinking_stream())),
+        anthropic_model,
+        completions_model,
+    )
+    chunks = await _collect(translated)
+
+    reasoning = "".join(
+        chunk["choices"][0]["delta"].get("reasoning_content", "")
+        for chunk in chunks
+        if chunk.get("choices")
+    )
+    assert reasoning == "Plan the greeting."
+    serialized = json.dumps(chunks)
+    assert "sig-stream" not in serialized and "opaque-stream" not in serialized
+    assert "anthropic_thinking_event" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_thinking_stream_block_with_extra_fields_is_rejected(
     translator, anthropic_model, completions_model
 ):
     source = [
@@ -560,14 +745,14 @@ async def test_thinking_stream_block_is_rejected(
         {
             "type": "content_block_start",
             "index": 0,
-            "content_block": {"type": "thinking", "thinking": "secret"},
+            "content_block": {"type": "thinking", "thinking": "", "summary": "x"},
         },
     ]
     translated = translator.translate_response_streaming(
         ChatResponseStreaming(_stream(source)), anthropic_model, completions_model
     )
 
-    with pytest.raises(UnsupportedFeatureError, match="thinking"):
+    with pytest.raises(UnsupportedFeatureError, match="summary"):
         await _collect(translated)
 
 

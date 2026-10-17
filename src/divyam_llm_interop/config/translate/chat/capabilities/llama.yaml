@@ -65,3 +65,13 @@
     supported_api_types:
       - COMPLETIONS
     supports_reasoning: false
+# Llama 4 takes text and images and has no reasoning mode.
+- selector:
+    name:
+      regex:
+        - llama-4-.*
+  capabilities:
+    supported_api_types:
+      - COMPLETIONS
+    supports_reasoning: false
+    supports_vision: true

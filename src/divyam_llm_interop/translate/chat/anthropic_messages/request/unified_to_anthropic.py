@@ -5,11 +5,22 @@ import copy
 import json
 from typing import Any, NoReturn
 
+from divyam_llm_interop.translate.chat.anthropic_messages.request.reasoning_history import (
+    reconcile_anthropic_history,
+)
 from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
     is_portable_tool_name,
     validate_portable_schema,
 )
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
+from divyam_llm_interop.translate.chat.base.reasoning_state import (
+    ThinkingPlan,
+    plan_thinking,
+    reasoning_domain,
+)
+from divyam_llm_interop.translate.chat.model_config.model_capabilities import (
+    ModelCapabilities,
+)
 from divyam_llm_interop.translate.chat.model_config.model_registry import (
     ModelRegistry,
 )
@@ -31,9 +42,19 @@ def unified_request_to_anthropic(
 ) -> ChatRequest:
     raw = from_request.body.unknowns.get("anthropic_request_raw")
     if isinstance(raw, dict):
-        body = copy.deepcopy(raw)
+        capabilities = model_registry.get_capabilities(target)
+        # A translated route never shares the client's signing domain: a shared
+        # anthropic_wire_profile is forwarded natively and does not reach here.
+        body = copy.deepcopy(
+            reconcile_anthropic_history(
+                _thinking_for_target(raw, capabilities),
+                reasoning_domain(target, capabilities),
+                capabilities,
+                genuine_verifiable=False,
+            )
+        )
+        body = _fit_to_target(body, capabilities)
         body["model"] = target.name
-        _disable_default_reasoning(body, target, model_registry)
         return _copy_request_envelope(from_request, body)
 
     unified = UnifiedChatCompletionsRequestBody.from_dict(
@@ -41,8 +62,9 @@ def unified_request_to_anthropic(
     )
     _validate_unified_request(unified)
     body = _build_request_body(unified, target, model_registry)
-    _disable_default_reasoning(body, target, model_registry)
-    return _copy_request_envelope(from_request, body)
+    capabilities = model_registry.get_capabilities(target)
+    _add_thinking(body, plan_thinking(unified, target, capabilities), capabilities)
+    return _copy_request_envelope(from_request, _fit_to_target(body, capabilities))
 
 
 def _build_request_body(
@@ -207,6 +229,9 @@ def _add_optional_fields(
         value = getattr(unified, unified_name)
         if value is not None:
             body[target_name] = value
+    top_k = unified.unknowns.get("top_k")
+    if isinstance(top_k, int) and not isinstance(top_k, bool):
+        body["top_k"] = top_k
     if unified.stop is not None:
         body["stop_sequences"] = (
             [unified.stop] if isinstance(unified.stop, str) else unified.stop
@@ -311,12 +336,131 @@ def _max_tokens(
     return value
 
 
-def _disable_default_reasoning(
-    body: dict[str, Any], target: Model, model_registry: ModelRegistry
+# Thinking budgets per effort level for models without adaptive thinking.
+_EFFORT_BUDGET = {"low": 4096, "medium": 16384, "high": 32000}
+# Anthropic's smallest thinking budget.
+_MIN_THINKING_BUDGET = 1024
+
+
+def _thinking_for_target(
+    body: dict[str, Any], capabilities: ModelCapabilities
+) -> dict[str, Any]:
+    """Restate adaptive thinking as a budget for a model that only takes one.
+
+    The client chose its thinking for the model it named; a translated route
+    may serve another. The effort level picks the budget, as for a request
+    from another protocol, and is dropped since such models predate it.
+    """
+    thinking = body.get("thinking")
+    if (
+        capabilities.supports_adaptive_thinking is not False
+        or not isinstance(thinking, dict)
+        or thinking.get("type") != "adaptive"
+    ):
+        return body
+    output_config = dict(body.get("output_config") or {})
+    effort = output_config.pop("effort", None)
+    level = effort if effort in _EFFORT_BUDGET else "high" if effort else "medium"
+    budget = min(_EFFORT_BUDGET[level], body["max_tokens"] - 1)
+    result = {key: value for key, value in body.items() if key != "output_config"}
+    if output_config:
+        result["output_config"] = output_config
+    if budget < _MIN_THINKING_BUDGET:
+        result.pop("thinking")
+    else:
+        result["thinking"] = {"type": "enabled", "budget_tokens": budget}
+    return result
+
+
+def _add_thinking(
+    body: dict[str, Any], plan: ThinkingPlan, capabilities: ModelCapabilities
 ) -> None:
-    capabilities = model_registry.get_capabilities(target)
-    if capabilities.reasoning_enabled_by_default:
+    """Express the request's reasoning in Anthropic's thinking controls.
+
+    A requested effort becomes adaptive thinking with output_config.effort,
+    or, for a model that only takes a budget, enabled thinking with a budget
+    of 4096, 16384 or 32000 tokens for low, medium and high, kept below
+    max_tokens. With reasoning on, sampling controls Claude rejects alongside
+    thinking (temperature other than 1, top_p below 0.95, top_k) are dropped.
+
+    A model that reasons by default is sent thinking disabled when nothing
+    asked for reasoning, so that the request behaves as the client expects.
+    A model that cannot stop reasoning is never sent disabled, which it
+    rejects; it gets no thinking control, or the lowest effort for "none".
+    """
+    if plan.requested:
+        if capabilities.supports_adaptive_thinking is False:
+            budget = min(
+                _EFFORT_BUDGET.get(plan.effort or "medium", 16384),
+                body["max_tokens"] - 1,
+            )
+            if budget < _MIN_THINKING_BUDGET:
+                return
+            body["thinking"] = {"type": "enabled", "budget_tokens": budget}
+        else:
+            body["thinking"] = {"type": "adaptive"}
+            if plan.effort is not None:
+                body["output_config"] = {"effort": plan.effort}
+    elif plan.on:
+        if plan.effort is not None:
+            body["output_config"] = {"effort": plan.effort}
+    elif capabilities.supports_reasoning is not False and (
+        capabilities.reasoning_enabled_by_default
+    ):
         body["thinking"] = {"type": "disabled"}
+    if plan.on:
+        if body.get("temperature") not in (None, 1):
+            del body["temperature"]
+        if body.get("top_p") is not None and body["top_p"] < 0.95:
+            del body["top_p"]
+        body.pop("top_k", None)
+
+
+def _fit_to_target(
+    body: dict[str, Any], capabilities: ModelCapabilities
+) -> dict[str, Any]:
+    """Leave out what the target rejects, whatever the client asked for.
+
+    Fields the target's catalogue entry drops are removed, such as sampling
+    controls on models that take only their defaults, and top_k while the
+    model thinks, which Claude rejects. Claude also rejects a forced
+    tool_choice ("any" or a named tool) while it thinks. When the model
+    thinks only by default and can stop, thinking is turned off and the
+    forced tool kept; when thinking was asked for, or cannot be turned off,
+    the choice becomes "auto", so the model may still call the tool.
+    """
+    drop_fields = capabilities.api_capabilities[
+        ModelApiType.ANTHROPIC_MESSAGES
+    ].drop_fields
+    result = {
+        key: value for key, value in body.items() if key not in (drop_fields or [])
+    }
+    if "top_k" in result and _thinks(result, capabilities):
+        del result["top_k"]
+    choice = result.get("tool_choice")
+    if not isinstance(choice, dict) or choice.get("type") not in ("any", "tool"):
+        return result
+    thinking = result.get("thinking")
+    mode = thinking.get("type") if isinstance(thinking, dict) else None
+    if mode == "disabled" or (
+        mode is None and not capabilities.reasoning_enabled_by_default
+    ):
+        return result
+    if mode is None and capabilities.reasoning_can_be_disabled is not False:
+        return {**result, "thinking": {"type": "disabled"}}
+    auto: dict[str, Any] = {"type": "auto"}
+    if "disable_parallel_tool_use" in choice:
+        auto["disable_parallel_tool_use"] = choice["disable_parallel_tool_use"]
+    return {**result, "tool_choice": auto}
+
+
+def _thinks(body: dict[str, Any], capabilities: ModelCapabilities) -> bool:
+    """Whether the target will think on this request body."""
+    thinking = body.get("thinking")
+    mode = thinking.get("type") if isinstance(thinking, dict) else None
+    if mode is None:
+        return bool(capabilities.reasoning_enabled_by_default)
+    return mode != "disabled"
 
 
 def _validate_unified_request(unified: UnifiedChatCompletionsRequestBody) -> None:
@@ -335,8 +479,6 @@ def _validate_unified_request(unified: UnifiedChatCompletionsRequestBody) -> Non
         "audio",
         "store",
         "metadata",
-        "reasoning",
-        "reasoning_effort",
         "functions",
         "function_call",
         "echo",
