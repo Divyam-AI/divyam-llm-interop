@@ -46,3 +46,9 @@
 - name: codellama-70b-instruct
 - name: llamaguard-8b
 - name: prompt-guard-model
+- name: llama-4-scout
+  name_match:
+    regex: llama-4-scout(?:-.*)?
+- name: llama-4-maverick
+  name_match:
+    regex: llama-4-maverick(?:-.*)?

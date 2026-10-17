@@ -12,6 +12,14 @@
     regex:
       - claude-opus-5[-.]5(?:[-.@].*)?
       - anthropic[./-]claude-opus-5[-.]5(?:[-.@].*)?
+# Opus 5 itself only: a later Opus 5.x may reason differently, so it falls
+# back to the generic Claude entry instead.
+- name: claude-opus-5
+  provider: anthropic
+  name_match:
+    regex:
+      - claude-opus-5(?:@.*|-v\d.*)?
+      - anthropic[./-]claude-opus-5(?:@.*|-v\d.*)?
 - name: claude-haiku-5-5
   provider: anthropic
   name_match:
@@ -30,6 +38,12 @@
     regex:
       - claude-sonnet-5(?:[-.].*)?
       - anthropic[./-]claude-sonnet-5(?:[-.].*)?
+- name: claude-mythos
+  provider: anthropic
+  name_match:
+    regex:
+      - claude-mythos(?:[-.@].*)?
+      - anthropic[./-]claude-mythos(?:[-.@].*)?
 - name: claude-3
   provider: anthropic
   name_match:

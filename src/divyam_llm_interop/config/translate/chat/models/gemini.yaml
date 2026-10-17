@@ -1,4 +1,13 @@
-# Gemini 3.6 Generation (Latest Stable)
+# Gemini 4 Generation (Latest Stable)
+- name: gemini-4-argon
+
+# Gemini 3.8 Generation
+- name: gemini-3.8-flash
+
+# Gemini 3.7 Generation (requests are served by gemini-3.8-flash)
+- name: gemini-3.7-flash
+
+# Gemini 3.6 Generation
 - name: gemini-3.6-flash
 
 # Gemini 3.5 Generation

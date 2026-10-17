@@ -1,2 +1,6 @@
 - name: deepseek-llm-7b
 - name: deepseek-coder-6.7b
+# DeepSeek V4. deepseek-v4-flash is a legacy name served by deepseek-flash.
+- name: deepseek-flash
+- name: deepseek-v4-flash
+- name: deepseek-v4-pro

@@ -30,3 +30,221 @@
     supported_api_types:
       - COMPLETIONS
     supports_reasoning: false
+
+# xAI Grok. Reasoning models reject presence_penalty, frequency_penalty and
+# stop. On Responses, reasoning comes back as encrypted_content.
+- selector:
+    name:
+      regex:
+        - grok-.*
+  capabilities:
+    supported_api_types:
+      - COMPLETIONS
+      - RESPONSES
+    supports_function_calling: true
+    supports_vision: true
+    api_capabilities:
+      COMPLETIONS:
+        rename_fields:
+          max_tokens: max_completion_tokens
+
+- selector:
+    name:
+      regex:
+        - grok-4\.[3-7]
+        - grok-4\.20-reasoning
+  capabilities:
+    supports_reasoning: true
+    reasoning_enabled_by_default: true
+    supports_encrypted_reasoning: true
+    supports_stop_sequences: false
+    api_capabilities:
+      COMPLETIONS:
+        drop_fields:
+          - presence_penalty
+          - frequency_penalty
+      RESPONSES:
+        drop_fields:
+          - presence_penalty
+          - frequency_penalty
+
+# Reasoning cannot be disabled on Grok 4.5 and later.
+- selector:
+    name:
+      regex:
+        - grok-4\.[5-7]
+  capabilities:
+    reasoning_can_be_disabled: false
+    reasoning_effort:
+      options: [ "low", "medium", "high", "xhigh" ]
+      default: high
+
+- selector:
+    name: grok-4.3
+  capabilities:
+    reasoning_can_be_disabled: true
+    reasoning_effort:
+      options: [ "none", "low", "medium", "high", "xhigh" ]
+      default: low
+
+- selector:
+    name: grok-4.20-non-reasoning
+  capabilities:
+    supports_reasoning: false
+
+# Moonshot Kimi. Sampling parameters are fixed per thinking mode and must be
+# left out. Reasoning comes back as reasoning_content, which the turns of a
+# tool loop send back.
+- selector:
+    name:
+      regex:
+        - kimi-.*
+  capabilities:
+    supported_api_types:
+      - COMPLETIONS
+    supports_function_calling: true
+    supports_vision: true
+    supports_reasoning: true
+    reasoning_enabled_by_default: true
+    reasoning_dialect: openai
+    reasoning_content_replay: tool_loop
+    api_capabilities:
+      COMPLETIONS:
+        drop_fields:
+          - temperature
+          - top_p
+          - n
+          - presence_penalty
+          - frequency_penalty
+
+# Thinking cannot be turned off, and every earlier turn sends its
+# reasoning_content back.
+- selector:
+    name:
+      regex:
+        - kimi-k3
+        - kimi-k2\.7-code
+  capabilities:
+    reasoning_can_be_disabled: false
+    reasoning_content_replay: all
+
+- selector:
+    name: kimi-k2.6
+  capabilities:
+    reasoning_can_be_disabled: true
+
+- selector:
+    name: kimi-k3
+  capabilities:
+    max_tokens: { min: 1, max: 1048576 }
+    input_token_limit: 1048576
+    reasoning_effort:
+      options: [ "low", "high", "max" ]
+      default: max
+
+# Z.ai GLM thinks by default. Reasoning comes back as reasoning_content and
+# is sent back with the results of the tool loop it led to.
+- selector:
+    name:
+      regex:
+        - glm-5\..*
+  capabilities:
+    supported_api_types:
+      - COMPLETIONS
+    max_tokens: { min: 1, max: 131072 }
+    temperature: { min: 0, max: 1 }
+    top_p: { min: 0.01, max: 1 }
+    supports_function_calling: true
+    supports_reasoning: true
+    reasoning_enabled_by_default: true
+    reasoning_dialect: openai
+    reasoning_content_replay: tool_loop
+
+# Thinking cannot be turned off.
+- selector:
+    name: glm-5.3
+  capabilities:
+    reasoning_can_be_disabled: false
+    reasoning_effort:
+      options: [ "low", "high", "max" ]
+      default: max
+
+- selector:
+    name: glm-5.2
+  capabilities:
+    reasoning_can_be_disabled: true
+    reasoning_effort:
+      options: [ "none", "minimal", "low", "medium", "high", "xhigh", "max" ]
+      default: max
+
+# MiniMax M3 thinks by default. Temperatures outside [0, 2] are rejected.
+- selector:
+    name:
+      regex:
+        - minimax-m3.*
+  capabilities:
+    supported_api_types:
+      - COMPLETIONS
+    max_tokens: { min: 1, max: 524288 }
+    temperature: { min: 0, max: 2 }
+    supports_function_calling: true
+    supports_vision: true
+    supports_reasoning: true
+    reasoning_enabled_by_default: true
+
+- selector:
+    name: minimax-m3
+  capabilities:
+    reasoning_can_be_disabled: true
+
+# Always thinks: thinking {"type": "disabled"} returns 400.
+- selector:
+    name: minimax-m3.1-flash-preview
+  capabilities:
+    reasoning_can_be_disabled: false
+
+# Qwen 3.7 and later on Model Studio think by default and can be switched
+# off. Reasoning comes back as reasoning_content.
+- selector:
+    name:
+      regex:
+        - qwen3\.[7-9]-.*
+  capabilities:
+    supported_api_types:
+      - COMPLETIONS
+    max_tokens: { min: 1, max: 131072 }
+    supports_function_calling: true
+    supports_vision: true
+    supports_reasoning: true
+    reasoning_enabled_by_default: true
+    reasoning_can_be_disabled: true
+    reasoning_dialect: openai
+
+# Qwen 3.8 reads back the reasoning_content of every earlier assistant turn
+# by default (preserve_thinking).
+- selector:
+    name:
+      regex:
+        - qwen3\.8-.*
+  capabilities:
+    reasoning_content_replay: all
+
+# Meta Muse always reasons; reasoning_effort "none" returns 400. stop is not
+# taken by reasoning models, and logprobs returns 400.
+- selector:
+    name:
+      regex:
+        - muse-.*
+  capabilities:
+    supported_api_types:
+      - COMPLETIONS
+    supports_function_calling: true
+    supports_stop_sequences: false
+    supports_reasoning: true
+    reasoning_enabled_by_default: true
+    reasoning_can_be_disabled: false
+    api_capabilities:
+      COMPLETIONS:
+        drop_fields:
+          - logprobs
+          - top_logprobs

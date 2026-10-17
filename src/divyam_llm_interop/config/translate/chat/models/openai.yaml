@@ -1,4 +1,23 @@
-# OpenAI Model Registry - Updated May 10, 2026
+# OpenAI Model Registry - Updated October 17, 2026
+
+# GPT-6 Family. There is no bare gpt-6 model: the entry stands for the family,
+# so a GPT-6 name with no entry of its own resolves to it by name prefix.
+- name: gpt-6
+- name: gpt-6-astra
+- name: gpt-6-sol
+- name: gpt-6-luna
+- name: gpt-6.1-sol
+
+# GPT-5.6 Family. gpt-5.6 is an alias of gpt-5.6-sol.
+- name: gpt-5.6
+- name: gpt-5.6-sol
+- name: gpt-5.6-terra
+- name: gpt-5.6-luna
+- name: gpt-5.6-cyber
+
+# GPT-5.5 Family
+- name: gpt-5.5
+- name: gpt-5.5-pro
 
 # GPT-5.4 Family
 - name: gpt-5.4

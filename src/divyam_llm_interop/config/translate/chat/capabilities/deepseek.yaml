@@ -6,3 +6,41 @@
     supported_api_types:
       - COMPLETIONS
     supports_reasoning: false
+
+# DeepSeek V4 thinks by default; thinking {"type": "disabled"} turns it off.
+# Reasoning comes back as reasoning_content. Once tools are in play every
+# earlier reasoning_content must be sent back, or the API answers 400;
+# without tools it is ignored.
+- selector:
+    name:
+      regex:
+        - deepseek-flash
+        - deepseek-v4-.*
+  capabilities:
+    supported_api_types:
+      - COMPLETIONS
+    max_tokens: { min: 1, max: 393216 }
+    supports_json_mode: true
+    supports_function_calling: true
+    supports_reasoning: true
+    reasoning_enabled_by_default: true
+    reasoning_can_be_disabled: true
+    reasoning_dialect: openai
+    reasoning_content_replay: all
+    tool_loop_requires_reasoning_replay: true
+    reasoning_effort:
+      options: [ "low", "high", "max" ]
+      default: high
+
+- selector:
+    name:
+      regex:
+        - deepseek-flash
+        - deepseek-v4-flash
+  capabilities:
+    supports_vision: true
+
+- selector:
+    name: deepseek-v4-pro
+  capabilities:
+    supports_vision: false

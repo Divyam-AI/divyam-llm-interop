@@ -27,8 +27,15 @@
     # Anthropic's documented default effort; an endpoint may override it.
     default_reasoning_effort: high
 
+# Reason by default but accept thinking {"type": "disabled"}. Opus 5 and
+# Haiku 5.5 accept it only at effort high or below, which their default
+# effort is.
 - selector:
-    name: claude-sonnet-5
+    name:
+      regex:
+        - claude-sonnet-5
+        - claude-opus-5
+        - claude-haiku-5-5
   capabilities:
     reasoning_enabled_by_default: true
 
@@ -39,6 +46,7 @@
         - claude-fable-5
         - claude-opus-5-5
         - claude-sonnet-5-5
+        - claude-mythos
   capabilities:
     reasoning_enabled_by_default: true
     reasoning_can_be_disabled: false
