@@ -74,3 +74,30 @@
         - claude-haiku-5-5
   capabilities:
     default_reasoning_effort: medium
+
+# Models released after Claude Opus 4.6 reject sampling controls: any top_k,
+# and temperature or top_p other than their defaults. The model's defaults
+# apply when they are left out, through a gateway as much as directly.
+- selector:
+    name:
+      regex:
+        - claude-4-7
+        - claude-fable-5
+        - claude-opus-5
+        - claude-opus-5-5
+        - claude-haiku-5-5
+        - claude-sonnet-5
+        - claude-sonnet-5-5
+        - claude-mythos
+  capabilities:
+    api_capabilities:
+      anthropic_messages:
+        drop_fields:
+          - temperature
+          - top_p
+          - top_k
+      completions:
+        drop_fields:
+          - temperature
+          - top_p
+          - top_k

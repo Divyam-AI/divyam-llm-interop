@@ -64,6 +64,13 @@
     regex:
       - claude-(?:opus|sonnet|haiku)-4(?:[-.][015])?(?:-\d{8})?(?:@.*|-v\d.*)?
       - anthropic[./-]claude-(?:opus|sonnet|haiku)-4(?:[-.][015])?(?:-\d{8})?(?:@.*|-v\d.*)?
+# Claude 4.7 and later 4.x releases, which take only default sampling values.
+- name: claude-4-7
+  provider: anthropic
+  name_match:
+    regex:
+      - claude-(?:opus|sonnet|haiku)-4[-.][7-9](?:-\d{8})?(?:@.*|-v\d.*)?
+      - anthropic[./-]claude-(?:opus|sonnet|haiku)-4[-.][7-9](?:-\d{8})?(?:@.*|-v\d.*)?
 - name: claude
   provider: anthropic
   name_match:

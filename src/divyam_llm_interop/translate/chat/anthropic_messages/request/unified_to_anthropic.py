@@ -53,6 +53,7 @@ def unified_request_to_anthropic(
                 genuine_verifiable=False,
             )
         )
+        body = _fit_to_target(body, capabilities)
         body["model"] = target.name
         return _copy_request_envelope(from_request, body)
 
@@ -63,7 +64,7 @@ def unified_request_to_anthropic(
     body = _build_request_body(unified, target, model_registry)
     capabilities = model_registry.get_capabilities(target)
     _add_thinking(body, plan_thinking(unified, target, capabilities), capabilities)
-    return _copy_request_envelope(from_request, body)
+    return _copy_request_envelope(from_request, _fit_to_target(body, capabilities))
 
 
 def _build_request_body(
@@ -409,6 +410,41 @@ def _add_thinking(
             del body["temperature"]
         if body.get("top_p") is not None and body["top_p"] < 0.95:
             del body["top_p"]
+
+
+def _fit_to_target(
+    body: dict[str, Any], capabilities: ModelCapabilities
+) -> dict[str, Any]:
+    """Leave out what the target rejects, whatever the client asked for.
+
+    Fields the target's catalogue entry drops are removed, such as sampling
+    controls on models that take only their defaults. Claude also rejects a
+    forced tool_choice ("any" or a named tool) while it thinks. When the model
+    thinks only by default and can stop, thinking is turned off and the
+    forced tool kept; when thinking was asked for, or cannot be turned off,
+    the choice becomes "auto", so the model may still call the tool.
+    """
+    drop_fields = capabilities.api_capabilities[
+        ModelApiType.ANTHROPIC_MESSAGES
+    ].drop_fields
+    result = {
+        key: value for key, value in body.items() if key not in (drop_fields or [])
+    }
+    choice = result.get("tool_choice")
+    if not isinstance(choice, dict) or choice.get("type") not in ("any", "tool"):
+        return result
+    thinking = result.get("thinking")
+    mode = thinking.get("type") if isinstance(thinking, dict) else None
+    if mode == "disabled" or (
+        mode is None and not capabilities.reasoning_enabled_by_default
+    ):
+        return result
+    if mode is None and capabilities.reasoning_can_be_disabled is not False:
+        return {**result, "thinking": {"type": "disabled"}}
+    auto: dict[str, Any] = {"type": "auto"}
+    if "disable_parallel_tool_use" in choice:
+        auto["disable_parallel_tool_use"] = choice["disable_parallel_tool_use"]
+    return {**result, "tool_choice": auto}
 
 
 def _validate_unified_request(unified: UnifiedChatCompletionsRequestBody) -> None:

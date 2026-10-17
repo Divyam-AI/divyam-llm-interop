@@ -82,7 +82,7 @@ def registry() -> ModelRegistry:
         (
             "claude-opus-4-8",
             _ANTHROPIC,
-            "claude",
+            "claude-4-7",
             {**_REASONS_ON_REQUEST, "supports_adaptive_thinking": None},
         ),
         (

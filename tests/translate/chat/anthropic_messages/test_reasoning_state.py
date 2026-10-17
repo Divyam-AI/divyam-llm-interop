@@ -540,19 +540,102 @@ def test_every_tool_turn_without_its_reasoning_is_flattened_under_all(translator
     result = translator.translate_request(ChatRequest(body=following), _CLIENT, target)
 
     messages = result.body["messages"]
-    assert [message["role"] for message in messages] == [
-        "user",
-        "assistant",
-        "user",
-        "assistant",
-        "tool",
-    ]
-    assert "tool_calls" not in messages[1]
-    assert messages[2]["content"] == "[The tool Read returned: print(1)]"
-    assert messages[3]["reasoning_content"] == "Then b.py."
-    assert messages[3]["tool_calls"][0]["id"] == "toolu_2"
-    assert messages[4]["tool_call_id"] == "toolu_2"
+    assert [message["role"] for message in messages] == ["user", "assistant", "tool"]
+    assert messages[0]["content"].endswith("[The tool Read returned: print(1)]")
+    assert messages[1]["reasoning_content"] == "Then b.py."
+    assert messages[1]["tool_calls"][0]["id"] == "toolu_2"
+    assert messages[2]["tool_call_id"] == "toolu_2"
     assert "GPT." not in json.dumps(result.body)
+
+
+def _text_response(model: str, text: str, message_extra: dict | None = None) -> dict:
+    return {
+        "id": "chatcmpl_text",
+        "object": "chat.completion",
+        "created": 1,
+        "model": model,
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": text,
+                    **(message_extra or {}),
+                },
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+    }
+
+
+def _strict_replay_session(translator, target: Model, *, tools: bool) -> dict:
+    """GPT answers in text, then the target starts a tool loop of its own."""
+    first = _first_request()
+    if not tools:
+        first.pop("tools")
+    answer = _serve(translator, first, _GPT, _text_response("gpt-5.1", "Both print."))
+    following = copy.deepcopy(first)
+    following["messages"] += [
+        {"role": "assistant", "content": answer.body["content"]},
+        {"role": "user", "content": "Now read c.py"},
+    ]
+    if not tools:
+        return following
+    answer = _serve(
+        translator,
+        following,
+        target,
+        _completions_tool_response("toolu_2", "c.py", {"reasoning_content": "Mine."}),
+    )
+    return _continue(following, answer, "toolu_2", "print(3)")
+
+
+def test_strict_target_takes_another_models_reply_as_narration(translator):
+    target = _reasoning_content_model(
+        reasoning_content_replay="all", tool_loop_requires_reasoning_replay=True
+    )
+    following = _strict_replay_session(translator, target, tools=True)
+
+    result = translator.translate_request(ChatRequest(body=following), _CLIENT, target)
+
+    messages = result.body["messages"]
+    assert [message["role"] for message in messages] == ["user", "assistant", "tool"]
+    assert messages[0]["content"] == (
+        "Read a.py and b.py\n"
+        "[Earlier, another assistant replied: Both print.]\n"
+        "Now read c.py"
+    )
+    assert messages[1]["reasoning_content"] == "Mine."
+    assert messages[1]["tool_calls"][0]["id"] == "toolu_2"
+
+
+def test_strict_target_keeps_replies_when_the_request_has_no_tools(translator):
+    target = _reasoning_content_model(
+        reasoning_content_replay="all", tool_loop_requires_reasoning_replay=True
+    )
+    following = _strict_replay_session(translator, target, tools=False)
+
+    result = translator.translate_request(ChatRequest(body=following), _CLIENT, target)
+
+    messages = result.body["messages"]
+    assert [message["role"] for message in messages] == ["user", "assistant", "user"]
+    assert messages[1]["content"] == "Both print."
+
+
+def test_flattened_tool_turn_of_another_model_becomes_narration(translator):
+    target = _reasoning_content_model(
+        reasoning_content_replay="all", tool_loop_requires_reasoning_replay=True
+    )
+
+    result = translator.translate_request(
+        ChatRequest(body=_foreign_tool_loop(translator)), _CLIENT, target
+    )
+
+    messages = result.body["messages"]
+    assert [message["role"] for message in messages] == ["user"]
+    assert messages[0]["content"].startswith("Read a.py and b.py\n[Earlier, another")
+    assert messages[0]["content"].endswith("[The tool Read returned: print(1)]")
 
 
 def test_always_on_reasoning_flattens_a_foreign_tool_loop_without_an_effort(

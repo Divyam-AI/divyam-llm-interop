@@ -17,6 +17,7 @@ from divyam_llm_interop.translate.chat.base.reasoning_state import (
     RESPONSE_DOMAIN_KEY,
     RETURNS_STATE_KEY,
     apply_default_effort,
+    fit_requested_effort,
     plan_thinking,
     reasoning_domain,
     resolve_unified_reasoning_state,
@@ -174,6 +175,7 @@ class ChatTranslator:
 
         target_capabilities = self._model_registry.get_capabilities(target)
         apply_default_effort(unified.body, target_capabilities)
+        fit_requested_effort(unified.body, target_capabilities)
         if source.api_type == ModelApiType.ANTHROPIC_MESSAGES:
             # Anthropic-format clients send reasoning blocks back on later turns,
             # so opaque state the target returns now can be replayed to it.
@@ -190,6 +192,7 @@ class ChatTranslator:
                 target,
                 target_capabilities,
                 thinking_on=plan.on,
+                tools_present=bool(unified.body.tools),
             )
 
         source_translator.validate_translation(

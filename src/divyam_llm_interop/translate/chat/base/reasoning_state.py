@@ -20,7 +20,7 @@ untrusted: a malformed or oversized envelope is ignored, never an error.
 import base64
 import json
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
 from divyam_llm_interop.translate.chat.base.translation_utils import (
@@ -179,6 +179,64 @@ def apply_default_effort(
         unified.reasoning_effort = capabilities.default_reasoning_effort
 
 
+# Effort levels from least to most reasoning, across every provider's names.
+_EFFORT_SCALE = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
+
+
+def fit_effort(effort: str | None, capabilities: ModelCapabilities) -> str | None:
+    """The level the target offers nearest to the effort asked for.
+
+    Providers name different subsets of the scale (DeepSeek takes low, high
+    and max; some models have no "none"), and reject the rest. An effort the
+    target lists, or one off the scale, is kept; otherwise the nearest listed
+    level is used. A tie goes to the level nearer the model's default, as
+    providers fold the levels they lack (DeepSeek, defaulting to high, serves
+    xhigh as high), and then to the higher, so reasoning is not cut short.
+    "none" on a model without it becomes its lowest level.
+    """
+    config = capabilities.reasoning_effort
+    if effort is None or config is None or effort in config.options:
+        return effort
+    if effort not in _EFFORT_SCALE:
+        return effort
+    offered = [
+        _EFFORT_SCALE.index(level) for level in config.options if level in _EFFORT_SCALE
+    ]
+    if not offered:
+        return effort
+    wanted = _EFFORT_SCALE.index(effort)
+    default = (
+        _EFFORT_SCALE.index(config.default)
+        if config.default in _EFFORT_SCALE
+        else len(_EFFORT_SCALE)
+    )
+    nearest = min(
+        offered,
+        key=lambda level: (abs(level - wanted), abs(level - default), -level),
+    )
+    return _EFFORT_SCALE[nearest]
+
+
+def fit_requested_effort(
+    unified: UnifiedChatCompletionsRequestBody, capabilities: ModelCapabilities
+) -> None:
+    """Fit the request's effort, however it was given, to the target's levels."""
+    if unified.reasoning_effort is not None:
+        unified.reasoning_effort = fit_effort(unified.reasoning_effort, capabilities)
+    # Typed as UnifiedReasoning, but a request decoded from JSON may hold a dict.
+    reasoning: Any = unified.reasoning
+    if isinstance(reasoning, dict):
+        fields = cast(dict[str, Any], reasoning)
+        if isinstance(fields.get("effort"), str):
+            # A new dict: this one may be the client's own request body.
+            fitted = {**fields, "effort": fit_effort(fields["effort"], capabilities)}
+            unified.reasoning = cast(Any, fitted)
+        return
+    effort = getattr(reasoning, "effort", None)
+    if isinstance(effort, str):
+        reasoning.effort = fit_effort(effort, capabilities)
+
+
 def requested_effort(unified: UnifiedChatCompletionsRequestBody) -> str | None:
     if unified.reasoning_effort is not None:
         return unified.reasoning_effort
@@ -256,6 +314,11 @@ def narrate_tool_images(name: str) -> str:
     return f"[The tool {name} returned these images:]"
 
 
+def narrate_reply(text: str) -> str:
+    """An assistant reply the target cannot take as its own, told as narration."""
+    return f"[Earlier, another assistant replied: {text}]"
+
+
 def narrate_tool_result(name: str, result: str, *, is_error: bool = False) -> str:
     """A flattened tool result, told as a past event; see narrate_tool_call."""
     outcome = "returned an error" if is_error else "returned"
@@ -278,6 +341,7 @@ def resolve_unified_reasoning_state(
     capabilities: ModelCapabilities,
     *,
     thinking_on: bool,
+    tools_present: bool = False,
 ) -> None:
     """Keep only the target's own reasoning state on unified messages.
 
@@ -292,6 +356,9 @@ def resolve_unified_reasoning_state(
     keeps reasoning on. A Chat Completions target that requires replay and
     declares reasoning_content_replay has every tool exchange in that span
     without its own reasoning flattened the same way, since it checks each.
+    One that takes back every turn ("all") checks text turns too while the
+    request carries tools, so any assistant turn in the span still without
+    its reasoning is told, as narration, in the user turn after it.
     """
     domain = reasoning_domain(target, capabilities)
     replays_details = (
@@ -340,7 +407,11 @@ def resolve_unified_reasoning_state(
     if not (thinking_on and requires_replay):
         return
     if content_from is not None:
+        # Flattening moves messages; restored turns are tracked by identity.
+        kept = {id(messages[index]) for index in restored}
         _flatten_tool_exchanges_without_state(messages, content_from, restored)
+        if tools_present and capabilities.reasoning_content_replay == "all":
+            _narrate_turns_without_state(messages, content_from, kept)
         return
     exchange = _unfinished_tool_exchange(messages)
     if exchange is None:
@@ -461,6 +532,71 @@ def _flatten_tool_exchanges_without_state(
         if message.tool_calls and index not in restored:
             _flatten_tool_exchange(messages, index, end)
         end = index
+
+
+def _narrate_turns_without_state(
+    messages: list[Any], start: int, kept: set[int]
+) -> None:
+    """Move each assistant turn from start on that is not in kept into narration.
+
+    The turn's text opens the user turn after it, or a new one at the end,
+    and that user turn joins the one before it, so roles still alternate.
+    """
+    index = len(messages) - 1
+    while index >= start:
+        message = messages[index]
+        if message.role == "assistant" and id(message) not in kept:
+            _narrate_assistant_turn(messages, index)
+        index -= 1
+
+
+def _narrate_assistant_turn(messages: list[Any], index: int) -> None:
+    text = _content_text(messages.pop(index).content)
+    narration = narrate_reply(text) if text else ""
+    following = messages[index] if index < len(messages) else None
+    if following is not None and following.role == "user":
+        following.content = _joined_content(narration, following.content)
+    elif narration:
+        following = UnifiedMessage(role="user", content=narration)
+        messages.insert(index, following)
+    previous = messages[index - 1] if index > 0 else None
+    if (
+        previous is not None
+        and following is not None
+        and previous.role == "user"
+        and following.role == "user"
+    ):
+        following.content = _joined_content(previous.content, following.content)
+        del messages[index - 1]
+
+
+def _content_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    return "".join(
+        part.get("text", "")
+        for part in content
+        if isinstance(part, dict) and part.get("type") == "text"
+    )
+
+
+def _joined_content(first: Any, second: Any) -> Any:
+    """Two user turns' content as one, as text or as content parts."""
+    if not first:
+        return second
+    if not second:
+        return first
+    if isinstance(first, str) and isinstance(second, str):
+        return f"{first}\n{second}"
+    return [*_content_parts(first), *_content_parts(second)]
+
+
+def _content_parts(content: Any) -> list[Any]:
+    if isinstance(content, list):
+        return list(content)
+    return [{"type": "text", "text": content}]
 
 
 def _flatten_tool_exchange(messages: list[Any], assistant_index: int, end: int) -> None:
