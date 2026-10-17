@@ -20,6 +20,7 @@ from divyam_llm_interop.translate.chat.anthropic_messages.response.stream_state 
     TargetStreamState,
 )
 from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
+    client_tool_id,
     is_portable_tool_name,
 )
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
@@ -373,7 +374,7 @@ def _flush_tool_calls(state: TargetStreamState) -> list[dict[str, Any]]:
         )
         block_index = state.next_block_index
         state.next_block_index += 1
-        tool_id = tool_call["id"] or f"toolu_{uuid.uuid4().hex}"
+        tool_id = client_tool_id(tool_call["id"])
         if tool_id in state.tool_ids:
             _stream_error("tool call IDs must be unique", "$.tool_calls.id")
         state.tool_ids.add(tool_id)

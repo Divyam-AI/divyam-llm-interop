@@ -3,6 +3,7 @@
 
 import copy
 import json
+import re
 
 import pytest
 
@@ -595,3 +596,34 @@ def test_anthropic_target_rejects_duplicate_tool_call_ids(
         translator.translate_response(
             ChatResponse(body=body), completions_model, anthropic_model
         )
+
+
+@pytest.mark.parametrize("provider_id", ["Edit:0", "functions.Edit:0", None])
+def test_tool_call_id_anthropic_rejects_is_replaced(
+    translator, completions_model, anthropic_model, provider_id
+):
+    body = _completions_response()
+    body["choices"][0]["message"]["tool_calls"][0]["id"] = provider_id
+
+    result = translator.translate_response(
+        ChatResponse(body=body), completions_model, anthropic_model
+    )
+
+    tool_use = next(b for b in result.body["content"] if b["type"] == "tool_use")
+    assert tool_use["id"].startswith("toolu_")
+    assert re.fullmatch(r"[A-Za-z0-9_-]+", tool_use["id"])
+
+
+def test_per_response_tool_call_ids_differ_across_responses(
+    translator, completions_model, anthropic_model
+):
+    ids = set()
+    for _ in range(2):
+        body = _completions_response()
+        body["choices"][0]["message"]["tool_calls"][0]["id"] = "Edit:0"
+        result = translator.translate_response(
+            ChatResponse(body=body), completions_model, anthropic_model
+        )
+        ids.update(b["id"] for b in result.body["content"] if b["type"] == "tool_use")
+
+    assert len(ids) == 2

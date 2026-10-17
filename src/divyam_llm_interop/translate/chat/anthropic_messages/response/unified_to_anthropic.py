@@ -14,6 +14,7 @@ from divyam_llm_interop.translate.chat.anthropic_messages.response.reasoning_blo
     wrap_reasoning_block,
 )
 from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
+    client_tool_id,
     is_portable_tool_name,
 )
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
@@ -121,7 +122,7 @@ def _content_blocks(
                 "tool name must be 1 to 64 characters matching ^[A-Za-z0-9_-]+$",
                 f"$.choices[0].message.tool_calls[{index}].function.name",
             )
-        tool_id = tool_call.id or f"toolu_{uuid.uuid4().hex}"
+        tool_id = client_tool_id(tool_call.id)
         if tool_id in tool_ids:
             _target_error(
                 "tool call IDs must be unique",

@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import re
+import uuid
 from typing import Any, NoReturn
 
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
@@ -273,6 +274,23 @@ def is_openai_strict_schema(schema: Any) -> bool:
 
 def is_portable_tool_name(value: Any) -> bool:
     return isinstance(value, str) and _TOOL_NAME_PATTERN.fullmatch(value) is not None
+
+
+_TOOL_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def client_tool_id(provider_id: str | None) -> str:
+    """The tool_use ID an Anthropic client receives for a provider's tool call.
+
+    The provider's ID is kept when Anthropic accepts it, since replayed
+    reasoning state refers to calls by it. Any other ID is replaced by a fresh
+    one: some providers number calls within each response ("Edit:0",
+    "functions.Edit:0"), which Anthropic rejects and which repeats across a
+    conversation, so a client would drop the later call as a duplicate.
+    """
+    if provider_id and _TOOL_ID_PATTERN.fullmatch(provider_id):
+        return provider_id
+    return f"toolu_{uuid.uuid4().hex}"
 
 
 def validate_no_assistant_prefill(body: dict[str, Any]) -> None:

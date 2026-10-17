@@ -382,6 +382,27 @@ async def test_completions_text_stream_maps_to_anthropic_event_grammar(
 
 
 @pytest.mark.asyncio
+async def test_completions_tool_stream_replaces_an_id_anthropic_rejects(
+    translator, completions_model, anthropic_model
+):
+    items = _completions_tool_stream()
+    items[0]["choices"][0]["delta"]["tool_calls"][0]["id"] = "Edit:0"
+    translated = translator.translate_response_streaming(
+        ChatResponseStreaming(_stream(items)), completions_model, anthropic_model
+    )
+    events = await _collect(translated)
+    tool_start = next(
+        event
+        for event in events
+        if event["type"] == "content_block_start"
+        and event["content_block"]["type"] == "tool_use"
+    )
+
+    assert tool_start["content_block"]["id"].startswith("toolu_")
+    assert ":" not in tool_start["content_block"]["id"]
+
+
+@pytest.mark.asyncio
 async def test_completions_tool_stream_buffers_only_arguments_and_preserves_id(
     translator, completions_model, anthropic_model
 ):

@@ -370,6 +370,208 @@ def test_completions_gateway_with_openai_dialect_takes_reasoning_effort(translat
     assert "reasoning" not in result.body
 
 
+def _reasoning_content_model(provider: str = "moonshot", **overrides) -> Model:
+    # A name no catalogue entry matches, so only these overrides apply.
+    return Model(
+        "reasoner-x",
+        ModelApiType.COMPLETIONS,
+        provider=provider,
+        capability_overrides={
+            "supports_reasoning": True,
+            "reasoning_dialect": "openai",
+            **overrides,
+        },
+    )
+
+
+def _reasoning_content_tool_loop(translator, target: Model) -> dict:
+    """A request continuing a tool loop the target began with reasoning_content."""
+    first = _first_request()
+    answer = _serve(
+        translator,
+        first,
+        target,
+        _completions_tool_response(
+            "toolu_1", "a.py", {"reasoning_content": "Start with a.py."}
+        ),
+    )
+    thinking = answer.body["content"][0]
+    assert (thinking["type"], thinking["thinking"]) == ("thinking", "Start with a.py.")
+    return _continue(first, answer, "toolu_1", "print(1)")
+
+
+@pytest.mark.parametrize("policy", ["tool_loop", "all"])
+def test_reasoning_content_is_replayed_to_its_own_endpoint(translator, policy):
+    target = _reasoning_content_model(reasoning_content_replay=policy)
+    following = _reasoning_content_tool_loop(translator, target)
+
+    result = translator.translate_request(ChatRequest(body=following), _CLIENT, target)
+
+    assistant = result.body["messages"][1]
+    assert assistant["reasoning_content"] == "Start with a.py."
+    assert assistant["tool_calls"][0]["id"] == "toolu_1"
+    assert "reasoning_details" not in json.dumps(result.body)
+    assert ENVELOPE_PREFIX not in json.dumps(result.body)
+
+
+def test_reasoning_content_is_not_replayed_without_a_replay_policy(translator):
+    target = _reasoning_content_model()
+    following = _reasoning_content_tool_loop(translator, target)
+
+    result = translator.translate_request(ChatRequest(body=following), _CLIENT, target)
+
+    assert "reasoning_content" not in json.dumps(result.body)
+    assert result.body["messages"][1]["tool_calls"][0]["id"] == "toolu_1"
+
+
+def test_reasoning_content_is_not_replayed_to_another_endpoint(translator):
+    following = _reasoning_content_tool_loop(
+        translator, _reasoning_content_model(reasoning_content_replay="all")
+    )
+    elsewhere = _reasoning_content_model(
+        provider="deepinfra", reasoning_content_replay="all"
+    )
+
+    result = translator.translate_request(
+        ChatRequest(body=following), _CLIENT, elsewhere
+    )
+
+    assert "reasoning_content" not in json.dumps(result.body)
+    assert "Start with a.py." not in json.dumps(result.body)
+
+
+@pytest.mark.parametrize(("policy", "replayed"), [("tool_loop", False), ("all", True)])
+def test_tool_loop_policy_leaves_out_answered_turns(translator, policy, replayed):
+    target = _reasoning_content_model(reasoning_content_replay=policy)
+    first = _first_request()
+    answer = _serve(
+        translator,
+        first,
+        target,
+        {
+            "id": "chatcmpl_1",
+            "object": "chat.completion",
+            "created": 1,
+            "model": "reasoner-x",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": "Both files print numbers.",
+                        "reasoning_content": "Nothing to call.",
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        },
+    )
+    following = copy.deepcopy(first)
+    following["messages"] += [
+        {"role": "assistant", "content": answer.body["content"]},
+        {"role": "user", "content": "Now read c.py"},
+    ]
+
+    result = translator.translate_request(ChatRequest(body=following), _CLIENT, target)
+
+    assistant = result.body["messages"][1]
+    assert ("reasoning_content" in assistant) is replayed
+
+
+def _foreign_tool_loop(translator) -> dict:
+    """A tool loop another endpoint began, continued on the reasoning_content model."""
+    first = _first_request()
+    answer = _serve(
+        translator,
+        first,
+        _GPT,
+        _completions_tool_response("toolu_1", "a.py", {"reasoning_content": "GPT."}),
+    )
+    return _continue(first, answer, "toolu_1", "print(1)")
+
+
+def test_required_replay_flattens_a_tool_loop_the_endpoint_did_not_start(translator):
+    target = _reasoning_content_model(
+        reasoning_content_replay="tool_loop",
+        tool_loop_requires_reasoning_replay=True,
+    )
+
+    result = translator.translate_request(
+        ChatRequest(body=_foreign_tool_loop(translator)), _CLIENT, target
+    )
+
+    messages = result.body["messages"]
+    assert "tool_calls" not in messages[1]
+    assert messages[-1]["content"] == "[The tool Read returned: print(1)]"
+    assert "GPT." not in json.dumps(result.body)
+
+
+def test_required_replay_keeps_a_tool_loop_the_endpoint_started(translator):
+    target = _reasoning_content_model(
+        reasoning_content_replay="tool_loop",
+        tool_loop_requires_reasoning_replay=True,
+    )
+    following = _reasoning_content_tool_loop(translator, target)
+
+    result = translator.translate_request(ChatRequest(body=following), _CLIENT, target)
+
+    assistant = result.body["messages"][1]
+    assert assistant["reasoning_content"] == "Start with a.py."
+    assert assistant["tool_calls"][0]["id"] == "toolu_1"
+
+
+def test_every_tool_turn_without_its_reasoning_is_flattened_under_all(translator):
+    target = _reasoning_content_model(
+        reasoning_content_replay="all",
+        tool_loop_requires_reasoning_replay=True,
+    )
+    following = _foreign_tool_loop(translator)
+    answer = _serve(
+        translator,
+        following,
+        target,
+        _completions_tool_response(
+            "toolu_2", "b.py", {"reasoning_content": "Then b.py."}
+        ),
+    )
+    following = _continue(following, answer, "toolu_2", "print(2)")
+
+    result = translator.translate_request(ChatRequest(body=following), _CLIENT, target)
+
+    messages = result.body["messages"]
+    assert [message["role"] for message in messages] == [
+        "user",
+        "assistant",
+        "user",
+        "assistant",
+        "tool",
+    ]
+    assert "tool_calls" not in messages[1]
+    assert messages[2]["content"] == "[The tool Read returned: print(1)]"
+    assert messages[3]["reasoning_content"] == "Then b.py."
+    assert messages[3]["tool_calls"][0]["id"] == "toolu_2"
+    assert messages[4]["tool_call_id"] == "toolu_2"
+    assert "GPT." not in json.dumps(result.body)
+
+
+def test_always_on_reasoning_flattens_a_foreign_tool_loop_without_an_effort(
+    translator,
+):
+    target = _reasoning_content_model(
+        reasoning_content_replay="tool_loop",
+        tool_loop_requires_reasoning_replay=True,
+        reasoning_can_be_disabled=False,
+    )
+    following = _foreign_tool_loop(translator)
+    following.pop("thinking")
+    following.pop("output_config")
+
+    result = translator.translate_request(ChatRequest(body=following), _CLIENT, target)
+
+    assert "tool_calls" not in result.body["messages"][1]
+
+
 def test_native_route_restores_its_own_envelopes_and_removes_others(translator):
     native = Model(
         "claude-opus-4-7",

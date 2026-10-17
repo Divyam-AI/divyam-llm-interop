@@ -14,7 +14,9 @@ from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
 )
 from divyam_llm_interop.translate.chat.base.reasoning_state import (
     DEFAULT_EFFORT_KEY,
+    DISPLAY_TEXT_KEY,
     KIND_ANTHROPIC_GENUINE,
+    KIND_DISPLAY,
     STATE_ENTRY_TYPE,
     tool_images_label,
     unwrap_envelope,
@@ -225,12 +227,17 @@ def _reasoning_state(block: dict[str, Any]) -> dict[str, Any]:
             "domain": None,
             "kind": KIND_ANTHROPIC_GENUINE,
         }
-    return {
+    entry: dict[str, Any] = {
         "type": STATE_ENTRY_TYPE,
         "domain": envelope.domain,
         "kind": envelope.kind,
         "payload": envelope.payload,
     }
+    text = block.get("thinking")
+    if envelope.kind == KIND_DISPLAY and isinstance(text, str) and text:
+        # Readable reasoning travels in the block, not the envelope.
+        entry[DISPLAY_TEXT_KEY] = text
+    return entry
 
 
 def _user_message_to_unified(

@@ -43,7 +43,9 @@ MAX_ENVELOPE_LENGTH = 2_000_000
 KIND_ANTHROPIC_SIGNATURE = "anthropic.signature"
 # The data of a redacted_thinking block an Anthropic endpoint returned.
 KIND_ANTHROPIC_REDACTED = "anthropic.redacted"
-# Readable reasoning shown as a thinking block; it is never replayed.
+# Readable reasoning shown as a thinking block. The text is the block's own;
+# the envelope only names its domain. It is replayed to an endpoint of that
+# domain as reasoning_content, where its reasoning_content_replay allows.
 KIND_DISPLAY = "display"
 # Opaque state an endpoint returned with an assistant turn.
 KIND_TURN = "turn"
@@ -76,6 +78,8 @@ RESPONSES_OUTPUT_TYPE = "openai.responses.output"
 
 # Marks a decoded envelope, or a genuine Anthropic block, on a unified message.
 STATE_ENTRY_TYPE = "interop.reasoning_state"
+# The readable text of a display entry, taken from its thinking block.
+DISPLAY_TEXT_KEY = "text"
 # A thinking block without an envelope: Anthropic state of an unknown domain.
 KIND_ANTHROPIC_GENUINE = "anthropic.genuine"
 
@@ -196,13 +200,21 @@ def plan_thinking(
     unless the request forces a tool, which Claude rejects with thinking.
     "none" asks for no reasoning, as does an absent effort on a model that
     reasons by default; both turn thinking off where the model allows it.
-    A Chat Completions endpoint reasons when an effort is requested and it
-    declares reasoning support.
+    A Chat Completions endpoint that declares reasoning support reasons when
+    an effort is requested, when it cannot stop reasoning, and when it
+    reasons by default and no effort says otherwise.
     """
     effort = requested_effort(unified)
     if target.api_type == ModelApiType.COMPLETIONS:
-        on = effort not in (None, "none") and bool(capabilities.supports_reasoning)
-        return ThinkingPlan(on=on, requested=on, effort=effort)
+        if not capabilities.supports_reasoning:
+            return ThinkingPlan(effort=effort)
+        requested = effort not in (None, "none")
+        on = (
+            requested
+            or capabilities.reasoning_can_be_disabled is False
+            or (effort is None and bool(capabilities.reasoning_enabled_by_default))
+        )
+        return ThinkingPlan(on=on, requested=requested, effort=effort)
     if target.api_type != ModelApiType.ANTHROPIC_MESSAGES:
         return ThinkingPlan()
     always_on = capabilities.reasoning_can_be_disabled is False
@@ -270,17 +282,23 @@ def resolve_unified_reasoning_state(
     """Keep only the target's own reasoning state on unified messages.
 
     A Chat Completions endpoint with the openrouter dialect gets back the
-    reasoning_details it returned, Gemini its thought signatures and a
-    Responses endpoint its reasoning items; nothing else receives replayed
-    state. With reasoning on, a Claude target whose unfinished tool exchange
-    has no state of its own sees that exchange flattened into text, whoever
-    produced it, so it starts a fresh turn and keeps reasoning on.
+    reasoning_details it returned, and one declaring reasoning_content_replay
+    the reasoning_content it returned on the turns that setting names; Gemini
+    gets its thought signatures and a Responses endpoint its reasoning items.
+    Nothing else receives replayed state. With reasoning on, a target that
+    requires replay in a tool loop (Claude unless declared otherwise) whose
+    unfinished tool exchange has no state of its own sees that exchange
+    flattened into text, whoever produced it, so it starts a fresh turn and
+    keeps reasoning on. A Chat Completions target that requires replay and
+    declares reasoning_content_replay has every tool exchange in that span
+    without its own reasoning flattened the same way, since it checks each.
     """
     domain = reasoning_domain(target, capabilities)
     replays_details = (
         target.api_type == ModelApiType.COMPLETIONS
         and capabilities.reasoning_dialect == "openrouter"
     )
+    content_from = _reasoning_content_replay_start(messages, target, capabilities)
     restored: set[int] = set()
     for index, message in enumerate(messages):
         entries = state_entries(message)
@@ -291,8 +309,15 @@ def resolve_unified_reasoning_state(
             for entry in message.reasoning_details
             if not (isinstance(entry, dict) and entry.get("type") == STATE_ENTRY_TYPE)
         ]
+        texts: list[str] = []
         for entry in entries:
             if entry.get("domain") != domain:
+                continue
+            if entry.get("kind") == KIND_DISPLAY:
+                text = entry.get(DISPLAY_TEXT_KEY)
+                replayed = content_from is not None and index >= content_from
+                if replayed and isinstance(text, str) and text:
+                    texts.append(text)
                 continue
             payload = entry.get("payload")
             if entry.get("kind") != KIND_TURN or not isinstance(payload, dict):
@@ -302,6 +327,9 @@ def resolve_unified_reasoning_state(
                 kept.extend(replay)
                 restored.add(index)
         message.reasoning_details = kept or None
+        if texts:
+            message.reasoning_content = "\n\n".join(texts)
+            restored.add(index)
 
     # Gemini flattens per step while encoding; see GeminiTranslator.
     if target.api_type == ModelApiType.GEMINI:
@@ -311,12 +339,38 @@ def resolve_unified_reasoning_state(
         requires_replay = target.api_type == ModelApiType.ANTHROPIC_MESSAGES
     if not (thinking_on and requires_replay):
         return
+    if content_from is not None:
+        _flatten_tool_exchanges_without_state(messages, content_from, restored)
+        return
     exchange = _unfinished_tool_exchange(messages)
     if exchange is None:
         return
     assistant_index, end = exchange
     if assistant_index not in restored:
         _flatten_tool_exchange(messages, assistant_index, end)
+
+
+def _reasoning_content_replay_start(
+    messages: list[Any], target: Model, capabilities: ModelCapabilities
+) -> int | None:
+    """The first message whose reasoning_content the target gets back, if any.
+
+    The tool loop in progress starts after the last assistant turn that made
+    no tool call: that turn answered the user, and what follows is the
+    current request's work.
+    """
+    if target.api_type != ModelApiType.COMPLETIONS:
+        return None
+    policy = capabilities.reasoning_content_replay
+    if policy == "all":
+        return 0
+    if policy != "tool_loop":
+        return None
+    for index in range(len(messages) - 1, -1, -1):
+        message = messages[index]
+        if message.role == "assistant" and not message.tool_calls:
+            return index + 1
+    return 0
 
 
 def _replay_items(
@@ -389,6 +443,24 @@ def _unfinished_tool_exchange(messages: list[Any]) -> tuple[int, int] | None:
                 return index, len(messages)
             return None
     return None
+
+
+def _flatten_tool_exchanges_without_state(
+    messages: list[Any], start: int, restored: set[int]
+) -> None:
+    """Flatten each tool exchange from start on whose call turn has no state.
+
+    Exchanges are flattened from the last back, so the indices of earlier
+    ones, and those in restored, still hold.
+    """
+    end = len(messages)
+    for index in range(len(messages) - 1, start - 1, -1):
+        message = messages[index]
+        if message.role != "assistant":
+            continue
+        if message.tool_calls and index not in restored:
+            _flatten_tool_exchange(messages, index, end)
+        end = index
 
 
 def _flatten_tool_exchange(messages: list[Any], assistant_index: int, end: int) -> None:

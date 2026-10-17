@@ -210,6 +210,11 @@ class ModelCapabilities:
     # (reasoning_effort, reasoning_content) or "openrouter" (a reasoning
     # object, and reasoning_details that are replayed on assistant messages).
     reasoning_dialect: Optional[str] = None
+    # Which of its earlier assistant turns a Chat Completions endpoint gets
+    # back with the reasoning_content it returned on them: "tool_loop" (the
+    # turns of the tool loop in progress) or "all". Unset, none are: some
+    # endpoints reject reasoning_content in a request.
+    reasoning_content_replay: Optional[str] = None
     # False for a Responses endpoint that cannot return reasoning items with
     # encrypted_content, so stateless requests cannot replay its reasoning.
     supports_encrypted_reasoning: Optional[bool] = None
