@@ -152,6 +152,7 @@ def _validate_stop_details(value: Any, stop_reason: Any) -> None:
 def _message_from_content(content: list[dict[str, Any]]) -> dict[str, Any]:
     message: dict[str, Any] = {"role": "assistant"}
     text: list[str] = []
+    thinking: list[str] = []
     tool_calls: list[dict[str, Any]] = []
     saw_tool = False
     ids: set[str] = set()
@@ -174,6 +175,13 @@ def _message_from_content(content: list[dict[str, Any]]) -> dict[str, Any]:
                 _response_error("text must be a string", f"{path}.text")
             text.append(block["text"])
             continue
+        if block_type in {"thinking", "redacted_thinking"}:
+            # An Anthropic client gets the blocks from the raw response; other
+            # clients read the thinking text as reasoning_content.
+            _validate_reasoning_block(block, path)
+            if block_type == "thinking":
+                thinking.append(block["thinking"])
+            continue
         if block_type == "tool_use":
             _validate_tool_use_block(block, path, ids)
             saw_tool = True
@@ -193,9 +201,26 @@ def _message_from_content(content: list[dict[str, Any]]) -> dict[str, Any]:
         _unsupported(f"unsupported Anthropic response block {block_type!r}", path)
     if text:
         message["content"] = "".join(text)
+    if thinking:
+        message["reasoning_content"] = "".join(thinking)
     if tool_calls:
         message["tool_calls"] = tool_calls
     return message
+
+
+def _validate_reasoning_block(block: dict[str, Any], path: str) -> None:
+    field = "thinking" if block["type"] == "thinking" else "data"
+    allowed = (
+        {"type", "thinking", "signature"} if field == "thinking" else {"type", "data"}
+    )
+    unknown = set(block) - allowed
+    if unknown:
+        key = min(unknown)
+        _unsupported(f"unsupported {block['type']} field {key!r}", f"{path}.{key}")
+    if not isinstance(block.get(field), str):
+        _response_error(f"{block['type']} {field} must be a string", f"{path}.{field}")
+    if "signature" in block and not isinstance(block["signature"], str):
+        _response_error("thinking signature must be a string", f"{path}.signature")
 
 
 def _validate_tool_use_block(block: dict[str, Any], path: str, ids: set[str]) -> None:

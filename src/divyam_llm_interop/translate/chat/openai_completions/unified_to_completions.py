@@ -86,6 +86,13 @@ class UnifiedToCompletionsTranslator:
         target_capabilities.drop_unsupported_fields_in_place(
             body, ModelApiType.COMPLETIONS
         )
+        if (
+            target.api_type == ModelApiType.COMPLETIONS
+            and target_capabilities.reasoning_dialect == "openrouter"
+            and body.get("reasoning_effort") is not None
+        ):
+            # OpenRouter-style gateways take effort in a reasoning object.
+            body["reasoning"] = {"effort": body.pop("reasoning_effort")}
 
         # Drop nulls for only top level parameters. It's possible internal null are required.
         # For example schema default values.

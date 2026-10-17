@@ -5,9 +5,15 @@ import time
 import uuid
 from typing import Any
 
+from divyam_llm_interop.translate.chat.base.reasoning_state import (
+    RESPONSE_STATE_KEY,
+    STATE_RESPONSES_OUTPUT,
+)
 from divyam_llm_interop.translate.chat.base.translation_utils import (
     drop_null_values_top_level,
 )
+
+from .reasoning import reasoning_output_state, reasoning_summary_text
 
 
 def convert_responses_to_completions_response(
@@ -89,6 +95,9 @@ def convert_responses_to_completions_response(
 
     # Build message
     message = {"role": "assistant", "content": message_content}
+    summary = reasoning_summary_text(output)
+    if summary:
+        message["reasoning_content"] = summary
     if tool_calls_dict:
         message["tool_calls"] = list(tool_calls_dict.values())
         if not message_content:
@@ -155,5 +164,13 @@ def convert_responses_to_completions_response(
     # Optional system fingerprint passthrough
     if response_dict.get("system_fingerprint"):
         completion_response["system_fingerprint"] = response_dict["system_fingerprint"]
+
+    # Reasoning a client can return on its next turn; never serialized for
+    # Chat Completions clients.
+    reasoning_state = reasoning_output_state(output)
+    if reasoning_state is not None:
+        completion_response[RESPONSE_STATE_KEY] = {
+            STATE_RESPONSES_OUTPUT: reasoning_state
+        }
 
     return drop_null_values_top_level(completion_response)

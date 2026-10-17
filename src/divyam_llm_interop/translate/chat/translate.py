@@ -13,6 +13,14 @@ from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
 )
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
 from divyam_llm_interop.translate.chat.base import translation_utils
+from divyam_llm_interop.translate.chat.base.reasoning_state import (
+    RESPONSE_DOMAIN_KEY,
+    RETURNS_STATE_KEY,
+    apply_default_effort,
+    plan_thinking,
+    reasoning_domain,
+    resolve_unified_reasoning_state,
+)
 from divyam_llm_interop.translate.chat.base.translation_utils import (
     normalize_model_name,
 )
@@ -164,6 +172,26 @@ class ChatTranslator:
                 path="$.tools",
             )
 
+        target_capabilities = self._model_registry.get_capabilities(target)
+        apply_default_effort(unified.body, target_capabilities)
+        if source.api_type == ModelApiType.ANTHROPIC_MESSAGES:
+            # Anthropic-format clients send reasoning blocks back on later turns,
+            # so opaque state the target returns now can be replayed to it.
+            unified.body.unknowns[RETURNS_STATE_KEY] = True
+        if not (
+            target.api_type == ModelApiType.ANTHROPIC_MESSAGES
+            and "anthropic_request_raw" in unified.body.unknowns
+        ):
+            # The raw Anthropic route reconciles its own blocks; see
+            # reconcile_anthropic_history.
+            plan = plan_thinking(unified.body, target, target_capabilities)
+            resolve_unified_reasoning_state(
+                unified.body.messages,
+                target,
+                target_capabilities,
+                thinking_on=plan.on,
+            )
+
         source_translator.validate_translation(
             original_request, unified, source, target
         )
@@ -213,6 +241,7 @@ class ChatTranslator:
             translated = chat_response
         else:
             unified = source_translator.response_to_unified(chat_response, source)
+            unified.body.unknowns[RESPONSE_DOMAIN_KEY] = self._reasoning_domain(source)
             translated = target_translator.response_from_unified(unified, target)
         if request and request.response_adapter:
             translated = ChatResponse(
@@ -249,6 +278,7 @@ class ChatTranslator:
             unified = source_translator.stream_response_to_unified(
                 chat_response, source
             )
+            unified.reasoning_domain = self._reasoning_domain(source)
             translated = target_translator.stream_response_from_unified(unified, target)
         if request and request.response_adapter:
             translated = ChatResponseStreaming(
@@ -256,6 +286,10 @@ class ChatTranslator:
                 headers=translated.headers,
             )
         return translated
+
+    def _reasoning_domain(self, model: Model) -> str:
+        """The signing domain of the endpoint that produced a response."""
+        return reasoning_domain(model, self._model_registry.get_capabilities(model))
 
     def find_request_model(
         self,

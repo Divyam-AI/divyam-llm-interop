@@ -8,8 +8,12 @@ from typing_extensions import override
 
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
 from divyam_llm_interop.translate.chat.base import translation_utils
+from divyam_llm_interop.translate.chat.base.reasoning_state import RETURNS_STATE_KEY
 from divyam_llm_interop.translate.chat.base.translation_utils import close_async_stream
 from divyam_llm_interop.translate.chat.base.translator import Translator
+from divyam_llm_interop.translate.chat.model_config.model_capabilities import (
+    ModelCapabilities,
+)
 from divyam_llm_interop.translate.chat.model_config.model_registry import (
     ModelRegistry,
 )
@@ -65,6 +69,9 @@ from divyam_llm_interop.translate.chat.unified.unified_response import (
     UnifiedChatCompletionsStreamChunk,
     UnifiedChatResponseStreaming,
 )
+
+# Asks a Responses endpoint for reasoning items a stateless request can replay.
+ENCRYPTED_REASONING_INCLUDE = "reasoning.encrypted_content"
 
 
 class OpenAiResponsesTranslator(Translator):
@@ -177,10 +184,37 @@ class OpenAiResponsesTranslator(Translator):
         target_capabilities.drop_unsupported_fields_in_place(
             body=responses_request_body, api_type=ModelApiType.RESPONSES
         )
+        if self._returns_encrypted_reasoning(
+            from_request, responses_request_body, target_capabilities
+        ):
+            include = list(responses_request_body.get("include") or [])
+            if ENCRYPTED_REASONING_INCLUDE not in include:
+                include.append(ENCRYPTED_REASONING_INCLUDE)
+            responses_request_body["include"] = include
 
         return ChatRequest(
             body=responses_request_body,
             headers=model_specific_completions_request.headers,
+        )
+
+    @staticmethod
+    def _returns_encrypted_reasoning(
+        from_request: UnifiedChatCompletionsRequest,
+        body: dict[str, Any],
+        capabilities: ModelCapabilities,
+    ) -> bool:
+        """Whether to ask for reasoning items the client can replay statelessly.
+
+        Only a client that sends reasoning back on later turns can use them,
+        only a reasoning request produces them, and a request continuing
+        server-side state needs none.
+        """
+        return (
+            bool(from_request.body.unknowns.get(RETURNS_STATE_KEY))
+            and capabilities.supports_encrypted_reasoning is not False
+            and (capabilities.supports_reasoning is True or "reasoning" in body)
+            and body.get("store") is not True
+            and not body.get("previous_response_id")
         )
 
     @override

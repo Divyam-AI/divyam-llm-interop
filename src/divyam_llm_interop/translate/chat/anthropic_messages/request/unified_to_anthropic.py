@@ -5,11 +5,22 @@ import copy
 import json
 from typing import Any, NoReturn
 
+from divyam_llm_interop.translate.chat.anthropic_messages.request.reasoning_history import (
+    reconcile_anthropic_history,
+)
 from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
     is_portable_tool_name,
     validate_portable_schema,
 )
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
+from divyam_llm_interop.translate.chat.base.reasoning_state import (
+    ThinkingPlan,
+    plan_thinking,
+    reasoning_domain,
+)
+from divyam_llm_interop.translate.chat.model_config.model_capabilities import (
+    ModelCapabilities,
+)
 from divyam_llm_interop.translate.chat.model_config.model_registry import (
     ModelRegistry,
 )
@@ -31,9 +42,18 @@ def unified_request_to_anthropic(
 ) -> ChatRequest:
     raw = from_request.body.unknowns.get("anthropic_request_raw")
     if isinstance(raw, dict):
-        body = copy.deepcopy(raw)
+        capabilities = model_registry.get_capabilities(target)
+        # A translated route never shares the client's signing domain: a shared
+        # anthropic_wire_profile is forwarded natively and does not reach here.
+        body = copy.deepcopy(
+            reconcile_anthropic_history(
+                _thinking_for_target(raw, capabilities),
+                reasoning_domain(target, capabilities),
+                capabilities,
+                genuine_verifiable=False,
+            )
+        )
         body["model"] = target.name
-        _disable_default_reasoning(body, target, model_registry)
         return _copy_request_envelope(from_request, body)
 
     unified = UnifiedChatCompletionsRequestBody.from_dict(
@@ -41,7 +61,8 @@ def unified_request_to_anthropic(
     )
     _validate_unified_request(unified)
     body = _build_request_body(unified, target, model_registry)
-    _disable_default_reasoning(body, target, model_registry)
+    capabilities = model_registry.get_capabilities(target)
+    _add_thinking(body, plan_thinking(unified, target, capabilities), capabilities)
     return _copy_request_envelope(from_request, body)
 
 
@@ -311,12 +332,83 @@ def _max_tokens(
     return value
 
 
-def _disable_default_reasoning(
-    body: dict[str, Any], target: Model, model_registry: ModelRegistry
+# Thinking budgets per effort level for models without adaptive thinking.
+_EFFORT_BUDGET = {"low": 4096, "medium": 16384, "high": 32000}
+# Anthropic's smallest thinking budget.
+_MIN_THINKING_BUDGET = 1024
+
+
+def _thinking_for_target(
+    body: dict[str, Any], capabilities: ModelCapabilities
+) -> dict[str, Any]:
+    """Restate adaptive thinking as a budget for a model that only takes one.
+
+    The client chose its thinking for the model it named; a translated route
+    may serve another. The effort level picks the budget, as for a request
+    from another protocol, and is dropped since such models predate it.
+    """
+    thinking = body.get("thinking")
+    if (
+        capabilities.supports_adaptive_thinking is not False
+        or not isinstance(thinking, dict)
+        or thinking.get("type") != "adaptive"
+    ):
+        return body
+    output_config = dict(body.get("output_config") or {})
+    effort = output_config.pop("effort", None)
+    level = effort if effort in _EFFORT_BUDGET else "high" if effort else "medium"
+    budget = min(_EFFORT_BUDGET[level], body["max_tokens"] - 1)
+    result = {key: value for key, value in body.items() if key != "output_config"}
+    if output_config:
+        result["output_config"] = output_config
+    if budget < _MIN_THINKING_BUDGET:
+        result.pop("thinking")
+    else:
+        result["thinking"] = {"type": "enabled", "budget_tokens": budget}
+    return result
+
+
+def _add_thinking(
+    body: dict[str, Any], plan: ThinkingPlan, capabilities: ModelCapabilities
 ) -> None:
-    capabilities = model_registry.get_capabilities(target)
-    if capabilities.reasoning_enabled_by_default:
+    """Express the request's reasoning in Anthropic's thinking controls.
+
+    A requested effort becomes adaptive thinking with output_config.effort,
+    or, for a model that only takes a budget, enabled thinking with a budget
+    of 4096, 16384 or 32000 tokens for low, medium and high, kept below
+    max_tokens. With reasoning on, sampling controls Claude rejects alongside
+    thinking (temperature other than 1, top_p below 0.95) are dropped.
+
+    A model that reasons by default is sent thinking disabled when nothing
+    asked for reasoning, so that the request behaves as the client expects.
+    A model that cannot stop reasoning is never sent disabled, which it
+    rejects; it gets no thinking control, or the lowest effort for "none".
+    """
+    if plan.requested:
+        if capabilities.supports_adaptive_thinking is False:
+            budget = min(
+                _EFFORT_BUDGET.get(plan.effort or "medium", 16384),
+                body["max_tokens"] - 1,
+            )
+            if budget < _MIN_THINKING_BUDGET:
+                return
+            body["thinking"] = {"type": "enabled", "budget_tokens": budget}
+        else:
+            body["thinking"] = {"type": "adaptive"}
+            if plan.effort is not None:
+                body["output_config"] = {"effort": plan.effort}
+    elif plan.on:
+        if plan.effort is not None:
+            body["output_config"] = {"effort": plan.effort}
+    elif capabilities.supports_reasoning is not False and (
+        capabilities.reasoning_enabled_by_default
+    ):
         body["thinking"] = {"type": "disabled"}
+    if plan.on:
+        if body.get("temperature") not in (None, 1):
+            del body["temperature"]
+        if body.get("top_p") is not None and body["top_p"] < 0.95:
+            del body["top_p"]
 
 
 def _validate_unified_request(unified: UnifiedChatCompletionsRequestBody) -> None:
@@ -335,8 +427,6 @@ def _validate_unified_request(unified: UnifiedChatCompletionsRequestBody) -> Non
         "audio",
         "store",
         "metadata",
-        "reasoning",
-        "reasoning_effort",
         "functions",
         "function_call",
         "echo",

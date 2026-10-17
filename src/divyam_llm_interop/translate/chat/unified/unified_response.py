@@ -573,3 +573,5 @@ class UnifiedChatResponseStreaming:
 
     stream: AsyncGenerator[UnifiedChatCompletionsStreamChunk, None]
     headers: Optional[dict[str, str]] = None
+    # Signing domain of the endpoint that produced the stream, when known.
+    reasoning_domain: Optional[str] = None

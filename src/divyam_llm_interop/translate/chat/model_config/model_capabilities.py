@@ -198,6 +198,29 @@ class ModelCapabilities:
     supports_vision: Optional[bool] = None
     supports_reasoning: Optional[bool] = None
     reasoning_enabled_by_default: Optional[bool] = None
+    # False for models that always reason and reject thinking {"type": "disabled"}.
+    reasoning_can_be_disabled: Optional[bool] = None
+    # False for Claude models that take thinking only as an explicit token
+    # budget, not as {"type": "adaptive"} with an effort level.
+    supports_adaptive_thinking: Optional[bool] = None
+    # True when, with reasoning on, the last assistant turn of an unfinished
+    # tool loop must be replayed with the reasoning state the model returned.
+    tool_loop_requires_reasoning_replay: Optional[bool] = None
+    # How a Chat Completions endpoint takes and returns reasoning: "openai"
+    # (reasoning_effort, reasoning_content) or "openrouter" (a reasoning
+    # object, and reasoning_details that are replayed on assistant messages).
+    reasoning_dialect: Optional[str] = None
+    # False for a Responses endpoint that cannot return reasoning items with
+    # encrypted_content, so stateless requests cannot replay its reasoning.
+    supports_encrypted_reasoning: Optional[bool] = None
+    # How a Gemini endpoint that requires thought signatures receives current
+    # tool calls without one, such as calls another model made: "flatten"
+    # (default) rewrites them as text; "skip_signature" sends Google's
+    # documented skip value, which keeps the calls but costs reasoning quality.
+    gemini_foreign_call_policy: Optional[str] = None
+    # Effort to use when the client asks for adaptive thinking without a level:
+    # "low", "medium" or "high". Unset means "medium".
+    default_reasoning_effort: Optional[str] = None
     supports_code_execution: Optional[bool] = None
     supports_google_thinking_config: Optional[bool] = None
     supports_google_extra_body: Optional[bool] = None

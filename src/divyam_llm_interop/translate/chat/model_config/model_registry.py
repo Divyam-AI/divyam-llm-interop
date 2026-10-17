@@ -104,15 +104,20 @@ class ModelRegistry:
 
         This method only applies configured regex overrides. Generic runtime
         variant matching is handled separately by _find_models_by_name_best_effort.
+        When several entries match, only those with the most specific pattern
+        are returned, so a family entry wins over a broader one covering it.
         """
         normalized = normalize_model_name(model.name)
-        matches: list[Model] = []
+        scored: list[tuple[int, Model]] = []
         for selector_regex, registered in self._name_pattern_index:
             if registered.api_type != model.api_type:
                 continue
             if selector_regex.matches(normalized):
-                matches.append(registered)
-        return matches
+                scored.append((selector_regex.best_match_score(normalized), registered))
+        if not scored:
+            return []
+        best_score = max(score for score, _ in scored)
+        return [registered for score, registered in scored if score == best_score]
 
     def _find_models_by_name_best_effort(self, model: Model) -> list[Model]:
         """Best-effort fallback for runtime fine-tuned names.

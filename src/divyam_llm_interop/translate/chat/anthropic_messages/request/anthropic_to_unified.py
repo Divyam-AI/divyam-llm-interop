@@ -7,14 +7,28 @@ import json
 from typing import Any
 
 from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
+    is_openai_strict_schema,
     text_from_blocks,
     validate_anthropic_request,
+    without_null_fields,
+)
+from divyam_llm_interop.translate.chat.base.reasoning_state import (
+    DEFAULT_EFFORT_KEY,
+    KIND_ANTHROPIC_GENUINE,
+    STATE_ENTRY_TYPE,
+    tool_images_label,
+    unwrap_envelope,
 )
 from divyam_llm_interop.translate.chat.types import ChatRequest, Model
 from divyam_llm_interop.translate.chat.unified.unified_request import (
     UnifiedChatCompletionsRequest,
     UnifiedChatCompletionsRequestBody,
 )
+
+# Effort above "high" has no portable equivalent; "high" is the closest control.
+_PORTABLE_EFFORT = {"xhigh": "high", "max": "high"}
+# Upper thinking budget for each effort level; larger budgets map to "high".
+_BUDGET_EFFORT = ((4096, "low"), (16384, "medium"))
 
 
 def normalize_system_messages(body: dict[str, Any]) -> dict[str, Any]:
@@ -64,7 +78,7 @@ def normalize_system_messages(body: dict[str, Any]) -> dict[str, Any]:
 def anthropic_request_to_unified(
     chat_request: ChatRequest, source: Model
 ) -> UnifiedChatCompletionsRequest:
-    body = normalize_system_messages(chat_request.body)
+    body = normalize_system_messages(without_null_fields(chat_request.body))
     validate_anthropic_request(body)
 
     unified_body: dict[str, Any] = {
@@ -79,9 +93,13 @@ def anthropic_request_to_unified(
     if user_id is not None:
         # Stable pseudonymous IDs preserve correlation without exposing raw identity.
         unified_body["user"] = hashlib.sha256(user_id.encode()).hexdigest()
+    reasoning_effort = _reasoning_effort(body)
+    if reasoning_effort is not None:
+        unified_body["reasoning_effort"] = reasoning_effort
+    if _is_default_effort(body):
+        # The target's own default replaces it once the target is known.
+        unified_body[DEFAULT_EFFORT_KEY] = True
     output_config = body.get("output_config") or {}
-    if output_config.get("effort") is not None:
-        unified_body["reasoning_effort"] = output_config["effort"]
     if "format" in output_config:
         unified_body["response_format"] = {
             "type": "json_schema",
@@ -98,6 +116,37 @@ def anthropic_request_to_unified(
         query_parameters=copy.deepcopy(chat_request.query_parameters),
         path_parameters=copy.deepcopy(chat_request.path_parameters),
     )
+
+
+def _reasoning_effort(body: dict[str, Any]) -> str | None:
+    """Map Anthropic effort and thinking onto the portable effort control.
+
+    An explicit effort wins. An enabled thinking budget is bucketed by size:
+    up to 4096 tokens is low, up to 16384 medium, anything larger high.
+    Adaptive thinking asks for reasoning without a level: it maps to medium
+    here, and to the target's default_reasoning_effort when it declares one,
+    so that a target which reasons only on request does.
+    Disabled thinking has no portable off switch and sets no effort. Targets
+    without a reasoning control drop the effort when they encode the request.
+    """
+    effort = (body.get("output_config") or {}).get("effort")
+    if effort is not None:
+        return _PORTABLE_EFFORT.get(effort, effort)
+    thinking = body.get("thinking") or {}
+    if thinking.get("type") == "adaptive":
+        return "medium"
+    if thinking.get("type") != "enabled":
+        return None
+    for budget, budget_effort in _BUDGET_EFFORT:
+        if thinking["budget_tokens"] <= budget:
+            return budget_effort
+    return "high"
+
+
+def _is_default_effort(body: dict[str, Any]) -> bool:
+    thinking = body.get("thinking") or {}
+    explicit = (body.get("output_config") or {}).get("effort")
+    return thinking.get("type") == "adaptive" and explicit is None
 
 
 def _messages_to_unified(body: dict[str, Any]) -> list[dict[str, Any]]:
@@ -128,9 +177,16 @@ def _messages_to_unified(body: dict[str, Any]) -> list[dict[str, Any]]:
 def _assistant_message_to_unified(
     blocks: list[dict[str, Any]], message_index: int, tool_names: dict[str, str]
 ) -> dict[str, Any]:
+    # Thinking blocks leave the text: only the model that wrote them can read
+    # them. Their reasoning state is recorded for the target to select from.
     message: dict[str, Any] = {"role": "assistant"}
+    state = [_reasoning_state(block) for block in blocks if block["type"] in _REASONING]
+    if state:
+        message["reasoning_details"] = state
     text = "".join(block["text"] for block in blocks if block["type"] == "text")
-    if text:
+    has_tool_use = any(block["type"] == "tool_use" for block in blocks)
+    if text or not has_tool_use:
+        # A turn left empty keeps its place, so user and assistant still alternate.
         message["content"] = text
 
     tool_calls: list[dict[str, Any]] = []
@@ -155,31 +211,102 @@ def _assistant_message_to_unified(
     return message
 
 
+_REASONING = {"thinking", "redacted_thinking"}
+
+
+def _reasoning_state(block: dict[str, Any]) -> dict[str, Any]:
+    value = block.get("signature" if block["type"] == "thinking" else "data")
+    envelope = unwrap_envelope(value)
+    if envelope is None:
+        # Genuine Anthropic state, or an envelope that is not readable: neither
+        # is known to belong to any target.
+        return {
+            "type": STATE_ENTRY_TYPE,
+            "domain": None,
+            "kind": KIND_ANTHROPIC_GENUINE,
+        }
+    return {
+        "type": STATE_ENTRY_TYPE,
+        "domain": envelope.domain,
+        "kind": envelope.kind,
+        "payload": envelope.payload,
+    }
+
+
 def _user_message_to_unified(
     blocks: list[dict[str, Any]], message_index: int, tool_names: dict[str, str]
 ) -> list[dict[str, Any]]:
     messages: list[dict[str, Any]] = []
-    text = ""
+    # Chat Completions tool messages carry text only, and every tool message
+    # must directly follow its assistant turn. Tool images therefore lead the
+    # user message that follows all of the turn's tool messages.
+    tool_image_parts: list[dict[str, Any]] = []
+    user_parts: list[dict[str, Any]] = []
     for block_index, block in enumerate(blocks):
         if block["type"] == "text":
-            text += block["text"]
+            user_parts.append({"type": "text", "text": block["text"]})
+            continue
+        if block["type"] == "image":
+            user_parts.append(_image_part(block))
             continue
         tool_use_id = block["tool_use_id"]
+        text, image_parts = _tool_result_to_unified(
+            block.get("content"),
+            f"$.messages[{message_index}].content[{block_index}].content",
+        )
+        if image_parts:
+            text = text or "[image result]"
+            tool_image_parts.append(
+                {
+                    "type": "text",
+                    "text": tool_images_label(tool_use_id),
+                }
+            )
+            tool_image_parts.extend(image_parts)
         messages.append(
             {
                 "role": "tool",
                 "tool_call_id": tool_use_id,
                 "tool_name": tool_names[tool_use_id],
                 "tool_result_is_error": block.get("is_error"),
-                "content": text_from_blocks(
-                    block.get("content"),
-                    f"$.messages[{message_index}].content[{block_index}].content",
-                ),
+                "content": text,
             }
         )
-    if text:
-        messages.append({"role": "user", "content": text})
+    parts = tool_image_parts + user_parts
+    if any(part["type"] == "image_url" for part in parts):
+        messages.append(
+            {
+                "role": "user",
+                "content": [
+                    part for part in parts if part["type"] != "text" or part["text"]
+                ],
+            }
+        )
+    else:
+        text = "".join(part["text"] for part in user_parts)
+        if text:
+            messages.append({"role": "user", "content": text})
     return messages
+
+
+def _tool_result_to_unified(
+    content: Any, path: str
+) -> tuple[str, list[dict[str, Any]]]:
+    """Split tool_result content into its text and its images as content parts."""
+    if not isinstance(content, list):
+        return text_from_blocks(content, path), []
+    text = "".join(block["text"] for block in content if block["type"] == "text")
+    images = [_image_part(block) for block in content if block["type"] == "image"]
+    return text, images
+
+
+def _image_part(block: dict[str, Any]) -> dict[str, Any]:
+    source = block["source"]
+    if source["type"] == "base64":
+        url = f"data:{source['media_type']};base64,{source['data']}"
+    else:
+        url = source["url"]
+    return {"type": "image_url", "image_url": {"url": url}}
 
 
 def _copy_sampling_fields(body: dict[str, Any], unified_body: dict[str, Any]) -> None:
@@ -202,8 +329,11 @@ def _copy_tools(body: dict[str, Any], unified_body: dict[str, Any]) -> None:
                     "name": tool["name"],
                     "description": tool.get("description", ""),
                     "parameters": copy.deepcopy(tool["input_schema"]),
-                    # Responses otherwise normalizes optional fields into strict inputs.
-                    "strict": False,
+                    # Responses otherwise normalizes optional fields into strict
+                    # inputs. Strict mode is kept only for a schema OpenAI
+                    # accepts in strict mode, which it otherwise rejects.
+                    "strict": tool.get("strict") is True
+                    and is_openai_strict_schema(tool["input_schema"]),
                 },
             }
             for tool in body["tools"]
