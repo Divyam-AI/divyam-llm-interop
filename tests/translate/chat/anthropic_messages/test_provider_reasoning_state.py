@@ -17,7 +17,6 @@ from divyam_llm_interop.translate.chat.base.reasoning_state import (
     narrate_tool_result,
     unwrap_envelope,
 )
-from divyam_llm_interop.translate.chat.translation_errors import TargetCapabilityError
 from divyam_llm_interop.translate.chat.types import (
     ChatRequest,
     ChatResponse,
@@ -720,7 +719,7 @@ def test_tool_result_images_reach_gemini_inline(translator):
     }
 
 
-def test_url_images_are_still_refused_for_native_gemini(translator):
+def test_url_images_reach_native_gemini_as_file_data(translator):
     body = _request()
     body["messages"] = [
         {
@@ -734,8 +733,11 @@ def test_url_images_are_still_refused_for_native_gemini(translator):
         }
     ]
 
-    with pytest.raises(TargetCapabilityError, match="inline"):
-        translator.translate_request(ChatRequest(body=body), _CLIENT, _GEMINI)
+    result = translator.translate_request(ChatRequest(body=body), _CLIENT, _GEMINI)
+
+    assert result.body["contents"][0]["parts"] == [
+        {"fileData": {"fileUri": "https://example.test/a.png", "mimeType": "image/png"}}
+    ]
 
 
 def test_narrated_tool_steps_carry_no_call_ids():

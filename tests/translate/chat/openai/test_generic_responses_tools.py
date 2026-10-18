@@ -1,3 +1,6 @@
+# Copyright 2025 Divyam.ai
+# SPDX-License-Identifier: Apache-2.0
+
 import json
 from copy import deepcopy
 
@@ -570,12 +573,7 @@ async def test_streamed_reasoning_survives_conversion():
             "input": [
                 {
                     "role": "user",
-                    "content": [
-                        {
-                            "type": "input_image",
-                            "image_url": "https://example.invalid/a.png",
-                        }
-                    ],
+                    "content": [{"type": "input_image", "file_id": "file_1"}],
                 }
             ]
         },

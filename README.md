@@ -447,15 +447,37 @@ pytest -m integration -k tool_call          # only tool call tests
 | `GEMINI_BASE_URL`          | `https://generativelanguage.googleapis.com/v1beta` | Override for Vertex               |
 | `GEMINI_MODEL`             | `gemini-2.5-flash`                                 | Model for Gemini calls            |
 
-## Publishing to PyPI
+## Releasing
 
-> **Note:** Publishing should typically be done through CI/build scripts.
+Releases are published to PyPI by the **Release** GitHub workflow
+(`.github/workflows/release.yml`), never from a local machine: a local
+`uv publish` skips CI and leaves the published version without a tag.
 
-```shell
-rm -rf dist/
-uv build
-uv publish
-```
+To release, run the workflow from `main` (Actions → Release → Run workflow):
+
+- **version** — leave empty to release `main`'s version if it is not yet on
+  PyPI, or otherwise the next patch. Set it (for example `0.4.0`) to choose the
+  version instead.
+- **test-pypi** — publish to TestPyPI only, as a dry run. `main` is not bumped
+  and nothing is tagged.
+
+The workflow refuses a version already on PyPI or not higher than the latest,
+and a run from any branch but `main`. After CI passes it commits the version to
+`pyproject.toml` and `uv.lock` on `main`, tags that commit `vX.Y.Z`, then builds
+and publishes the tagged commit and creates the GitHub release. The commit and
+the tag are pushed together, before publishing: if `main` moved while CI ran,
+the push is refused and nothing is published, so run the workflow again. If a
+run fails after tagging, running it again with the same version releases the
+existing tag.
+
+Pushing a `vX.Y.Z` tag yourself also releases it, provided the tagged commit is
+on `main` and its `pyproject.toml` already names that version.
+
+After a release, raise the pin in the consumers, which pin an exact version:
+`divyam-llm-interop` in `divyam_python_libs/pyproject.toml` and
+`divyam_router_controller/pyproject.toml`, then relock both
+(`poetry lock`). Bump them together: the Router depends on both, so differing
+pins do not resolve.
 
 ## License
 

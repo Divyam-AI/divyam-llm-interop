@@ -1,7 +1,7 @@
 version: 1.0.0
 # Registers divyam-llm-interop as a ci_deploy artifact (Divyam-AI/divyam_router_cd) so the sandbox dev
 # loop can build, test and publish it to the sandbox devpi index alongside its dependents — divyamlibs
-# consumes it (`divyam-llm-interop = ">=0.2.2"`), so a change here needs to be buildable in the same
+# and the Router each pin an exact version of it, so a change here needs to be buildable in the same
 # loop as the repos that break when it lands.
 #
 # Scope: SANDBOX ONLY. This repo is deliberately NOT added to the nightly pipeline's upstream set.

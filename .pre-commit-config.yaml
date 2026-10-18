@@ -17,3 +17,6 @@ repos:
           - LICENSE_HEADER.txt
           - --comment-style
           - "#"
+          # Accept any year an existing header names and leave it as written;
+          # a file without a header gets the template's.
+          - --allow-past-years
