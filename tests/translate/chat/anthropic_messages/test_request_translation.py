@@ -897,15 +897,23 @@ def test_undeclared_vision_target_receives_anthropic_images(
     }
 
 
-def test_native_gemini_refuses_anthropic_images(
+def test_native_gemini_takes_anthropic_images_inline_or_by_url(
     translator, anthropic_model, gemini_model
 ):
-    with pytest.raises(TargetCapabilityError, match="image input"):
-        translator.translate_request(
-            ChatRequest(body=_anthropic_image_tool_result_request()),
-            anthropic_model,
-            gemini_model,
-        )
+    result = translator.translate_request(
+        ChatRequest(body=_anthropic_image_tool_result_request()),
+        anthropic_model,
+        gemini_model,
+    )
+
+    parts = [part for content in result.body["contents"] for part in content["parts"]]
+    assert any("inlineData" in part for part in parts)
+    assert {
+        "fileData": {
+            "fileUri": "https://example.test/map.png",
+            "mimeType": "image/png",
+        }
+    } in parts
 
 
 @pytest.mark.parametrize("field", ["grounding_metadata"])
@@ -1074,7 +1082,7 @@ def test_malformed_anthropic_output_format_is_invalid(
         )
 
 
-def test_native_gemini_does_not_silently_drop_anthropic_output_format(
+def test_native_gemini_keeps_anthropic_output_format(
     translator, anthropic_model, gemini_model
 ):
     body = _anthropic_text_request()
@@ -1088,10 +1096,16 @@ def test_native_gemini_does_not_silently_drop_anthropic_output_format(
             },
         }
     }
-    with pytest.raises(TargetCapabilityError, match="structured output"):
-        translator.translate_request(
-            ChatRequest(body=body), anthropic_model, gemini_model
-        )
+    result = translator.translate_request(
+        ChatRequest(body=body), anthropic_model, gemini_model
+    )
+
+    assert result.body["generationConfig"]["responseMimeType"] == "application/json"
+    assert result.body["generationConfig"]["responseJsonSchema"] == {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": False,
+    }
 
 
 def test_programmatic_tool_caller_fails_closed(

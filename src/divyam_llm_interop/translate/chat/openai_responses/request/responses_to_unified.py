@@ -4,6 +4,7 @@
 import json
 from typing import Any
 
+from divyam_llm_interop.translate.chat.api_types import ModelApiType
 from divyam_llm_interop.translate.chat.base.translation_utils import (
     drop_null_values_top_level,
 )
@@ -25,6 +26,40 @@ def readable_reasoning_text(item: dict[str, Any]) -> str:
     ):
         raise UnsupportedFeatureError("Unknown reasoning content cannot be translated")
     return "\n".join(part["text"] for part in parts if part.get("text"))
+
+
+def _content_parts(content: list[Any], item_index: int) -> list[dict[str, Any]]:
+    """A Responses message's content as Chat Completions content parts."""
+    parts: list[dict[str, Any]] = []
+    for part_index, part in enumerate(content):
+        ptype = part.get("type")
+        if ptype in ("input_text", "output_text", "text"):
+            parts.append({"type": "text", "text": part.get("text", "")})
+        elif ptype == "input_image":
+            url = _image_url(part)
+            if not url:
+                # A file_id names an upload only the Responses endpoint can read.
+                raise UnsupportedFeatureError(
+                    "Responses image input given by file_id cannot be translated",
+                    source_api_type=ModelApiType.RESPONSES,
+                    path=f"$.input[{item_index}].content[{part_index}]",
+                )
+            image_url: dict[str, Any] = {"url": url}
+            if part.get("detail") in ("auto", "low", "high"):
+                image_url["detail"] = part["detail"]
+            parts.append({"type": "image_url", "image_url": image_url})
+        elif ptype == "input_file":
+            filename = part.get("filename", "unknown")
+            parts.append({"type": "text", "text": f"[File: {filename}]"})
+    return parts
+
+
+def _image_url(part: dict[str, Any]) -> str:
+    """The URL of an input_image part: a string, or an object with a url."""
+    image_url = part.get("image_url")
+    if isinstance(image_url, dict):
+        image_url = image_url.get("url")
+    return image_url if isinstance(image_url, str) else ""
 
 
 def convert_responses_to_completions_request(
@@ -85,7 +120,7 @@ def convert_responses_to_completions_request(
                 messages.append(message)
                 pending_function_calls.clear()
 
-            for item in input_data:
+            for item_index, item in enumerate(input_data):
                 if item.get("type") == "reasoning":
                     flush_function_calls()
                     text = readable_reasoning_text(item)
@@ -156,16 +191,18 @@ def convert_responses_to_completions_request(
                 # Convert structured content
                 if isinstance(content, str):
                     msg["content"] = content
+                elif isinstance(content, list) and any(
+                    part.get("type") == "input_image" for part in content
+                ):
+                    # Chat Completions carries images as content parts, so a
+                    # message with one keeps its parts rather than its text.
+                    msg["content"] = _content_parts(content, item_index)
                 elif isinstance(content, list):
                     parts_texts = []
                     for part in content:
                         ptype = part.get("type")
                         if ptype == "input_text" or ptype == "output_text":
                             parts_texts.append(part.get("text", ""))
-                        elif ptype == "input_image":
-                            url = part.get("image_url")
-                            if url:
-                                parts_texts.append(f"[Image: {url}]")
                         elif ptype == "input_file":
                             filename = part.get("filename", "unknown")
                             parts_texts.append(f"[File: {filename}]")

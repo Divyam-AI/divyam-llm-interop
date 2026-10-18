@@ -145,13 +145,10 @@ def test_vision_request():
     assert len(completion_req_vision["messages"]) == 1
     assert completion_req_vision["messages"][0]["role"] == "user"
 
-    # Content must be a string
-    content_str = completion_req_vision["messages"][0]["content"]
-    assert isinstance(content_str, str)
-
-    # Flattened content should include all parts
-    assert "What's in this image?" in content_str
-    assert "https://example.com/image.jpg" in content_str
+    assert completion_req_vision["messages"][0]["content"] == [
+        {"type": "text", "text": "What's in this image?"},
+        {"type": "image_url", "image_url": {"url": "https://example.com/image.jpg"}},
+    ]
 
 
 def test_streaming_structured_output():
@@ -310,13 +307,11 @@ def test_complex_input_with_file():
     assert len(completion_req_complex["messages"]) == 2  # system + user
     assert completion_req_complex["messages"][0]["role"] == "system"
     assert completion_req_complex["messages"][1]["role"] == "user"
-    # Content must be a string
-    content_str = completion_req_complex["messages"][1]["content"]
-    assert isinstance(content_str, str)
-    # Flattened content should include all parts
-    assert "Analyze this image and document:" in content_str
-    assert "https://example.com/chart.jpg" in content_str
-    assert "[File: report.pdf]" in content_str
+    assert completion_req_complex["messages"][1]["content"] == [
+        {"type": "text", "text": "Analyze this image and document:"},
+        {"type": "image_url", "image_url": {"url": "https://example.com/chart.jpg"}},
+        {"type": "text", "text": "[File: report.pdf]"},
+    ]
 
 
 def test_multi_tool_parallel():

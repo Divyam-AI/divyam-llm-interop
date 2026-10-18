@@ -75,10 +75,7 @@ def validate_portable_target_capabilities(
     _validate_tools(unified, target, capabilities)
     _validate_image_input(unified, target, capabilities)
     _validate_parallel_tool_calls(unified.parallel_tool_calls, target)
-    if unified.response_format is not None and (
-        target.api_type == ModelApiType.GEMINI
-        or capabilities.supports_json_mode is False
-    ):
+    if unified.response_format is not None and capabilities.supports_json_mode is False:
         _target_error(
             "target cannot preserve structured output", target, "$.output_config.format"
         )
@@ -217,32 +214,9 @@ def _validate_image_input(
 ) -> None:
     if not any(_has_image_part(message.content) for message in unified.messages):
         return
-    if target.api_type == ModelApiType.GEMINI and any(
-        not url.startswith("data:")
-        for message in unified.messages
-        for url in _image_urls(message.content)
-    ):
-        # Gemini takes images inline; a URL would need an uploaded file.
-        _target_error(
-            "native Gemini can carry only inline (base64) image input",
-            target,
-            "$.messages",
-        )
     # An undeclared endpoint is attempted; only a text-only declaration refuses.
     if capabilities.supports_vision is False:
         _target_error("target does not support image input", target, "$.messages")
-
-
-def _image_urls(content: Any) -> list[str]:
-    if not isinstance(content, list):
-        return []
-    urls: list[str] = []
-    for part in content:
-        if isinstance(part, dict) and part.get("type") == "image_url":
-            image_url = part.get("image_url")
-            url = image_url.get("url") if isinstance(image_url, dict) else None
-            urls.append(url if isinstance(url, str) else "")
-    return urls
 
 
 def _has_image_part(content: Any) -> bool:

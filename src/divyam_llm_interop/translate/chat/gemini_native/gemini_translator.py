@@ -53,6 +53,18 @@ from divyam_llm_interop.translate.chat.unified.unified_response import (
 _SKIP_SIGNATURE_VALIDATOR = "skip_thought_signature_validator"
 
 
+# Image MIME types by file extension, for fileData parts named by URL.
+_IMAGE_MIME_TYPES = {
+    "png": "image/png",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "gif": "image/gif",
+    "webp": "image/webp",
+    "heic": "image/heic",
+    "heif": "image/heif",
+}
+
+
 class GeminiTranslator(Translator):
     """Translator for Gemini native API payloads (Vertex / AI Studio style)."""
 
@@ -266,7 +278,7 @@ class GeminiTranslator(Translator):
             text_signature, call_signatures = self._replayed_signatures(message)
             content: Any = message.content
             if isinstance(content, list):
-                # Chat Completions content parts: text and inline images.
+                # Chat Completions content parts: text and images.
                 parts.extend(self._content_parts(content))
             else:
                 parts.extend(self._text_parts(content, text_signature))
@@ -320,6 +332,7 @@ class GeminiTranslator(Translator):
             generation_config["topK"] = unified.unknowns.get("top_k")
         if unified.seed is not None:
             generation_config["seed"] = unified.seed
+        generation_config.update(self._structured_output(unified))
 
         if generation_config:
             request_body["generationConfig"] = generation_config
@@ -1054,14 +1067,55 @@ class GeminiTranslator(Translator):
             elif item.get("type") == "image_url":
                 image_url = item.get("image_url")
                 url = image_url.get("url") if isinstance(image_url, dict) else None
-                inline = GeminiTranslator._inline_data(url)
-                if inline is not None:
-                    parts.append({"inlineData": inline})
+                part = GeminiTranslator._image_part(url)
+                if part is not None:
+                    parts.append(part)
         return parts
 
     @staticmethod
+    def _image_part(url: Any) -> dict[str, Any] | None:
+        """An image as a Gemini part: inline when base64, else by reference.
+
+        A base64 data URL becomes inlineData. Any other URL (https, gs://, a
+        Files API URI) becomes fileData, which Gemini fetches itself; a URL it
+        cannot read fails there, as a provider error, rather than the image
+        being dropped here. Gemini infers the MIME type when none is known.
+        """
+        if not isinstance(url, str) or not url:
+            return None
+        if url.startswith("data:"):
+            inline = GeminiTranslator._inline_data(url)
+            return {"inlineData": inline} if inline is not None else None
+        file_data: dict[str, str] = {"fileUri": url}
+        mime_type = _IMAGE_MIME_TYPES.get(
+            url.split("?", 1)[0].rsplit(".", 1)[-1].lower()
+        )
+        if mime_type is not None:
+            file_data["mimeType"] = mime_type
+        return {"fileData": file_data}
+
+    @staticmethod
+    def _structured_output(
+        unified: UnifiedChatCompletionsRequestBody,
+    ) -> dict[str, Any]:
+        """Gemini's structured-output controls for a Chat Completions response_format.
+
+        JSON mode sets the JSON MIME type. A JSON Schema goes unchanged in
+        responseJsonSchema, which takes JSON Schema itself, rather than being
+        cut down to responseSchema's OpenAPI subset.
+        """
+        response_format = unified.response_format
+        if response_format is None or response_format.type == "text":
+            return {}
+        config: dict[str, Any] = {"responseMimeType": "application/json"}
+        json_schema = response_format.json_schema
+        if response_format.type == "json_schema" and json_schema is not None:
+            config["responseJsonSchema"] = json_schema.schema.to_dict()
+        return config
+
+    @staticmethod
     def _inline_data(url: Any) -> dict[str, str] | None:
-        """A base64 data URL as Gemini inlineData; other URLs are refused earlier."""
+        """A base64 data URL as Gemini inlineData."""
         if not isinstance(url, str) or not url.startswith("data:"):
             return None
         header, _, data = url[len("data:") :].partition(",")

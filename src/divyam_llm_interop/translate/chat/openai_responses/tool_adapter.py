@@ -1,4 +1,4 @@
-# Copyright 2026 Divyam.ai
+# Copyright 2025 Divyam.ai
 # SPDX-License-Identifier: Apache-2.0
 
 """Request-scoped adaptation of Responses tools to portable function tools.
@@ -294,8 +294,11 @@ class ResponsesToolAdapter:
                     )
             elif kind == "message":
                 content = item.get("content")
+                # Images become Chat Completions image parts; see
+                # convert_responses_to_completions_request.
                 if isinstance(content, list) and any(
-                    p.get("type") not in {"input_text", "output_text", "text"}
+                    p.get("type")
+                    not in {"input_text", "output_text", "text", "input_image"}
                     for p in content
                 ):
                     raise UnsupportedFeatureError(
