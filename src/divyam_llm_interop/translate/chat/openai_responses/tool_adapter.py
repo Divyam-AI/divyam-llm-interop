@@ -1,4 +1,4 @@
-# Copyright 2025 Divyam.ai
+# Copyright 2026 Divyam.ai
 # SPDX-License-Identifier: Apache-2.0
 
 """Request-scoped adaptation of Responses tools to portable function tools.
