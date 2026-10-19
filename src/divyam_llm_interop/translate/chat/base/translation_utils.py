@@ -4,6 +4,8 @@
 import copy
 import inspect
 import json
+import re
+import uuid
 from typing import Any
 
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
@@ -25,6 +27,23 @@ from divyam_llm_interop.translate.chat.unified.unified_response import (
     UnifiedChatCompletionsStreamChunk,
     UnifiedChatResponseStreaming,
 )
+
+_CLIENT_CALL_ID = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def client_call_id(provider_id: str | None, prefix: str) -> str:
+    """The ID a client receives for a provider's tool call.
+
+    The provider's ID is kept when it is a plain token, since replayed
+    reasoning state refers to calls by it. Any other ID is replaced by a
+    fresh one carrying prefix: some providers number calls within each
+    response ("Edit:0", "functions.Edit:0"), so the same ID recurs across a
+    conversation, and a client that matches outputs to calls by ID pairs
+    them wrongly or drops the later call as a duplicate.
+    """
+    if provider_id and _CLIENT_CALL_ID.fullmatch(provider_id):
+        return provider_id
+    return f"{prefix}{uuid.uuid4().hex}"
 
 
 def normalize_model_name(model_name: str):

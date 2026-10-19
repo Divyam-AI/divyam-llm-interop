@@ -7,6 +7,8 @@ from collections.abc import AsyncGenerator
 from copy import deepcopy
 from typing import Any, Optional
 
+from divyam_llm_interop.translate.chat.base.translation_utils import client_call_id
+
 from .reasoning import readable_reasoning
 
 
@@ -47,6 +49,8 @@ class CompletionsToResponsesStreamConverter:
         accumulated_content: list[dict[str, Any]] = []
 
         tool_calls_buffer: dict[int, dict[str, Any]] = {}
+        # The provider's ID for each call, to tell a repeat from a new one.
+        provider_call_ids: dict[int, Optional[str]] = {}
         tool_output_indices: dict[int, int] = {}
         next_output_index = 0
 
@@ -216,7 +220,10 @@ class CompletionsToResponsesStreamConverter:
                     content_part_open = False
 
                 if tc_index not in tool_calls_buffer:
-                    call_id = tool_call_delta.get("id", f"call_{uuid.uuid4().hex[:24]}")
+                    # The client's ID is settled here, with the first chunk,
+                    # since it goes out in output_item.added; see client_call_id.
+                    provider_call_ids[tc_index] = tool_call_delta.get("id")
+                    call_id = client_call_id(provider_call_ids[tc_index], "call_")
                     func = tool_call_delta.get("function", {})
                     tc_item = {
                         "id": f"fc_{uuid.uuid4().hex}",
@@ -240,8 +247,12 @@ class CompletionsToResponsesStreamConverter:
                     }
 
                 else:
-                    if tool_call_delta.get("id"):
-                        tool_calls_buffer[tc_index]["call_id"] = tool_call_delta["id"]
+                    provider_id = tool_call_delta.get("id")
+                    if provider_id and provider_id != provider_call_ids.get(tc_index):
+                        provider_call_ids[tc_index] = provider_id
+                        tool_calls_buffer[tc_index]["call_id"] = client_call_id(
+                            provider_id, "call_"
+                        )
                     name_delta = tool_call_delta.get("function", {}).get("name")
                     if name_delta and name_delta != tool_calls_buffer[tc_index]["name"]:
                         # Ignore repeated complete names while retaining fragments.

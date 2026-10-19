@@ -7,6 +7,7 @@ from typing import Any
 
 from divyam_llm_interop.interop_logging import logger
 from divyam_llm_interop.translate.chat.base.translation_utils import (
+    client_call_id,
     drop_null_values_top_level,
 )
 
@@ -160,7 +161,7 @@ def convert_completions_to_responses_response(
             responses_response["parallel_tool_calls"] = len(tool_calls) > 1
             responses_response["tool_choice"] = "auto"
             for tool_call in tool_calls:
-                call_id = tool_call.get("id", f"call_{uuid.uuid4().hex[:24]}")
+                call_id = client_call_id(tool_call.get("id"), "call_")
                 function = tool_call.get("function", {})
                 name = function.get("name", "")
                 arguments = function.get("arguments", "")
