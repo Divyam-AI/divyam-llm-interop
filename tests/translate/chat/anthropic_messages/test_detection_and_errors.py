@@ -15,8 +15,13 @@ from divyam_llm_interop.translate.chat.translate import ChatTranslator
 from divyam_llm_interop.translate.chat.translation_errors import (
     InvalidProtocolRequestError,
     StreamProtocolError,
+    UnsupportedFeatureError,
 )
-from divyam_llm_interop.translate.chat.types import ChatRequest, ChatResponseStreaming
+from divyam_llm_interop.translate.chat.types import (
+    ChatRequest,
+    ChatResponseStreaming,
+    Model,
+)
 
 
 @pytest.mark.parametrize(
@@ -119,6 +124,54 @@ def test_explicit_api_type_selects_anthropic_without_model_name_heuristics(
     )
 
     assert model.api_type == ModelApiType.ANTHROPIC_MESSAGES
+
+
+def _claude_code_body() -> dict:
+    """Claude Code's shape: system text both top-level and among the turns."""
+    return {
+        "model": "claude-sonnet-test",
+        "max_tokens": 64,
+        "system": [{"type": "text", "text": "You are Claude Code."}],
+        "messages": [
+            {"role": "user", "content": "Read a.py"},
+            {
+                "role": "system",
+                "content": "<system-reminder>a.py changed</system-reminder>",
+            },
+            {"role": "assistant", "content": "Reading it."},
+            {"role": "user", "content": "Go on"},
+        ],
+    }
+
+
+def test_explicit_api_type_accepts_system_messages_among_turns(translator):
+    """A request translation serves is identified alike, e.g. when a log is read back."""
+    body = _claude_code_body()
+
+    model = translator.find_request_model(
+        body["model"], body, ModelApiType.ANTHROPIC_MESSAGES
+    )
+    translated = translator.translate_request(
+        ChatRequest(body=body),
+        model,
+        Model("gpt-4.1-mini", ModelApiType.COMPLETIONS),
+    )
+
+    assert model.api_type == ModelApiType.ANTHROPIC_MESSAGES
+    assert body["messages"][1]["role"] == "system"
+    system = translated.body["messages"][0]
+    assert system["role"] == "system"
+    assert "a.py changed" in system["content"]
+
+
+def test_explicit_api_type_still_refuses_a_malformed_system_message(translator):
+    body = _claude_code_body()
+    body["messages"][1]["name"] = "reminder"
+
+    with pytest.raises(UnsupportedFeatureError, match="name"):
+        translator.find_request_model(
+            body["model"], body, ModelApiType.ANTHROPIC_MESSAGES
+        )
 
 
 def test_claude_name_does_not_change_legacy_detection(translator):

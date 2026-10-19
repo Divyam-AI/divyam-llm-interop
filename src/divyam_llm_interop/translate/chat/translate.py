@@ -8,8 +8,12 @@ from typing import Any
 from divyam_llm_interop.translate.chat.anthropic_messages import (
     AnthropicMessagesTranslator,
 )
+from divyam_llm_interop.translate.chat.anthropic_messages.request.anthropic_to_unified import (
+    normalize_system_messages,
+)
 from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
     validate_anthropic_request,
+    without_null_fields,
 )
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
 from divyam_llm_interop.translate.chat.base import translation_utils
@@ -315,7 +319,12 @@ class ChatTranslator:
         request_body: dict[str, Any], api_type: ModelApiType
     ) -> None:
         if api_type == ModelApiType.ANTHROPIC_MESSAGES:
-            validate_anthropic_request(request_body)
+            # Checked in the form translation reads it: system messages a client
+            # sends among the turns, as Claude Code does, are lifted into the
+            # system field first, so a request served is never refused here.
+            validate_anthropic_request(
+                normalize_system_messages(without_null_fields(request_body))
+            )
             return
         required_field = {
             ModelApiType.COMPLETIONS: "messages",
