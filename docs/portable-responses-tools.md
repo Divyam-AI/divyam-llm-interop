@@ -53,7 +53,8 @@ on account or deployment boundaries; profiles must reflect those boundaries.
 
 Without a matching native profile, the portable adapter rejects encrypted
 reasoning input, stored conversations, `previous_response_id`, background work,
-`store=True`, built-in tools and non-text input/tool results. Readable reasoning
+`store=True`, built-in tools (but see [Provider-hosted tools](#provider-hosted-tools))
+and non-text input/tool results. Readable reasoning
 is attached to its assistant message as `reasoning_content` on the Chat
 Completions path, never presented as a user-visible answer. Other target adapters
 that cannot retain that field reject the route. Endpoint conformance checks must
@@ -76,6 +77,70 @@ requests to compatible native routes. The router must filter incompatible
 candidates before selection; an otherwise cheaper model does not justify
 discarding state. Unexpected opaque output fails even after a paid provider call,
 so accurate endpoint capability registration is required to avoid that failure.
+
+## Provider-hosted tools
+
+Some tools run on the provider's own servers: OpenAI's hosted tools
+(`web_search`, `file_search`, `code_interpreter`, `image_generation`, remote
+`mcp`), Anthropic's server tools (`web_search_*`, `web_fetch_*`,
+`code_execution_*`, `tool_search_tool_*`) and Gemini's built-in tools
+(`google_search`, `url_context`, `code_execution`, `file_search`). Each maps
+onto a portable kind:
+`web_search`, `web_fetch`, `file_search`, `code_execution`, `image_generation`,
+`mcp` or `tool_search`.
+
+An endpoint declares the kinds it runs in its `hosted_tools` capability, for
+example `capability_overrides={"hosted_tools": ["web_search"]}`. Support is
+often per provider rather than per model, so an override replaces the list from
+the model's configuration rather than adding to it, and `[]` declares none. An
+unknown name is rejected rather than read as an endpoint without the tool.
+The bundled capability files declare it from each provider's model
+documentation, listing only kinds the documentation confirms; a kind left
+out is dropped or refused, never sent to an endpoint that may not run it.
+
+A translated request keeps a hosted tool when its target declares the kind and
+the route is between two endpoints of one API, so the target's hosted tool
+output reaches the client in its own form:
+
+* Responses to Responses: the response is not translated.
+* Anthropic to Anthropic: the response is rebuilt with the server tool blocks
+  (`server_tool_use` and their `*_tool_result` blocks), citations and a
+  `pause_turn` stop reason intact, whole and streamed.
+* Gemini to Gemini is always native, so built-in tools and their output, such
+  as `groundingMetadata` and code execution parts, pass through as sent.
+
+Between two APIs a declaration does not keep a tool, since its output would
+need translating into another API's form, which is not supported. A hosted
+tool that is not kept is refused, Gemini's included. For the same reason a response carrying server tool blocks, citations or
+`pause_turn` is refused when the client is not an Anthropic client, rather
+than answered without them.
+
+`ChatTranslateConfig(drop_provider_hosted_tools=True)` serves the request
+without such tools instead. Coding harnesses such as Codex declare `web_search`
+on every request, so without this option or a target that runs it, none of
+their requests can be translated. Earlier calls to a kept or dropped kind in the
+history (`web_search_call` and the other hosted call items; Anthropic
+`server_tool_use` blocks and their `*_tool_result` blocks; Gemini code execution
+parts) are narrated as past
+events, as other turns the target did not produce are. Opaque payloads such as
+encrypted search content and generated images are not carried over.
+
+A request whose `tool_choice` forces a dropped tool, by naming it or by
+requiring a tool when only hosted ones were declared, is still refused:
+answering without the tool would claim a search that never ran. A forced tool
+that is kept stays forced.
+
+Requests served natively are forwarded as sent, hosted tools included, whatever
+the setting. Which hosted tools a caller is willing to have run, and pay for,
+is the caller's decision, made before the request reaches the translator.
+`selection_context` and `find_request_model` read a request without its
+hosted tools whatever the setting: the projection is never served, and the
+request-type check concerns the API's shape, while whether a hosted tool can
+be served depends on the route, which translation decides.
+
+Tools that the client runs are not hosted, even when the provider defines them,
+such as OpenAI's `local_shell` or Anthropic's `bash_20250124`; they keep their
+existing handling.
 
 ## Upgrade compatibility
 

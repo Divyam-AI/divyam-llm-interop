@@ -5,13 +5,21 @@ import json
 from typing import Any, NoReturn
 
 from divyam_llm_interop.translate.chat.anthropic_messages.response.stream_state import (
+    ANTHROPIC_CITATION_KEY,
+    ANTHROPIC_SERVER_EVENT_KEY,
     ANTHROPIC_THINKING_EVENT_KEY,
     SourceStreamState,
+)
+from divyam_llm_interop.translate.chat.anthropic_messages.response.usage import (
+    unified_usage,
 )
 from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
     is_portable_tool_name,
 )
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
+from divyam_llm_interop.translate.chat.base.provider_hosted_tools import (
+    is_anthropic_server_block,
+)
 from divyam_llm_interop.translate.chat.base.translation_utils import (
     close_async_stream,
 )
@@ -103,7 +111,7 @@ def _message_start(event: dict[str, Any], state: SourceStreamState) -> dict[str,
     usage = message.get("usage") or {}
     if not isinstance(usage, dict):
         _stream_error("message usage must be an object", "$.message.usage")
-    state.input_tokens = _token_count(usage, "input_tokens", "$.message.usage")
+    _read_input_usage(usage, state, "$.message.usage")
     state.output_tokens = _token_count(usage, "output_tokens", "$.message.usage")
     state.started = True
     return _chunk(state, delta={"role": "assistant"})
@@ -124,6 +132,9 @@ def _content_block_start(
     if not isinstance(block, dict):
         _stream_error("content_block must be an object", "$.content_block")
     block_type = block.get("type")
+    if is_anthropic_server_block(block):
+        state.blocks[index] = {"type": "server", "open": True}
+        return [_server_chunk(state, event)]
     if block_type in {"thinking", "redacted_thinking"}:
         _validate_reasoning_block_start(block)
         state.blocks[index] = {"type": block_type, "open": True}
@@ -134,11 +145,6 @@ def _content_block_start(
     if block_type == "text":
         if state.saw_tool_block:
             _stream_error("text blocks must precede tool_use blocks", "$.index")
-        if block.get("citations"):
-            _unsupported(
-                "citations are outside the supported text/tool profile",
-                "$.content_block.citations",
-            )
         text = block.get("text", "")
         if not isinstance(text, str):
             _stream_error("text must be a string", "$.content_block.text")
@@ -199,6 +205,10 @@ def _content_block_delta(
     delta = event.get("delta")
     if not isinstance(delta, dict):
         _stream_error("delta must be an object", "$.delta")
+    if block["type"] == "server":
+        return _server_chunk(state, event)
+    if block["type"] == "text" and delta.get("type") == "citations_delta":
+        return _chunk(state, delta={}, chunk_unknowns={ANTHROPIC_CITATION_KEY: delta})
     if block["type"] == "text" and delta.get("type") == "text_delta":
         text = delta.get("text")
         if not isinstance(text, str):
@@ -253,6 +263,8 @@ def _content_block_stop(
     block["open"] = False
     if block["type"] in {"thinking", "redacted_thinking"}:
         return [_thinking_chunk(state, event, {})]
+    if block["type"] == "server":
+        return [_server_chunk(state, event)]
     return []
 
 
@@ -271,6 +283,13 @@ def _validate_reasoning_block_start(block: dict[str, Any]) -> None:
         _stream_error(f"{field} must be a string", f"$.content_block.{field}")
     if not isinstance(block.get("signature", ""), str):
         _stream_error("signature must be a string", "$.content_block.signature")
+
+
+def _server_chunk(state: SourceStreamState, event: dict[str, Any]) -> dict[str, Any]:
+    """A server tool block event, for an Anthropic client to replay."""
+    # The block index is renumbered by whoever re-emits the event.
+    native = {key: value for key, value in event.items() if key != "index"}
+    return _chunk(state, delta={}, chunk_unknowns={ANTHROPIC_SERVER_EVENT_KEY: native})
 
 
 def _thinking_chunk(
@@ -294,11 +313,6 @@ def _message_delta(event: dict[str, Any], state: SourceStreamState) -> dict[str,
     stop_reason = delta.get("stop_reason")
     if stop_reason is None:
         _stream_error("message_delta requires stop_reason", "$.delta.stop_reason")
-    if stop_reason == "pause_turn":
-        _unsupported(
-            "pause_turn is outside the supported text/tool profile",
-            "$.delta.stop_reason",
-        )
     finish_reason = _finish_reason_to_unified(stop_reason)
     if stop_reason is not None and finish_reason is None:
         _stream_error("unknown Anthropic stop_reason", "$.delta.stop_reason")
@@ -323,6 +337,9 @@ def _message_delta(event: dict[str, Any], state: SourceStreamState) -> dict[str,
         stop_reason,
         "$.delta.stop_details",
     )
+    # The final usage restates input when it differs, e.g. after tool search.
+    if any(key in usage for key in _INPUT_FIELDS):
+        _read_input_usage(usage, state, "$.usage")
     state.output_tokens = _token_count(usage, "output_tokens", "$.usage")
     state.terminal_delta = True
     return _chunk(
@@ -362,15 +379,18 @@ def _chunk(
         "model": state.model,
         "choices": [choice],
         "anthropic_input_tokens": state.input_tokens,
+        "anthropic_cache_read_input_tokens": state.cache_read_tokens,
+        "anthropic_cache_creation_input_tokens": state.cache_write_tokens,
     }
     if chunk_unknowns:
         chunk.update(chunk_unknowns)
     if include_usage:
-        chunk["usage"] = {
-            "prompt_tokens": state.input_tokens,
-            "completion_tokens": state.output_tokens,
-            "total_tokens": state.input_tokens + state.output_tokens,
-        }
+        chunk["usage"] = unified_usage(
+            state.input_tokens,
+            state.cache_read_tokens,
+            state.cache_write_tokens,
+            state.output_tokens,
+        )
     return chunk
 
 
@@ -409,6 +429,8 @@ def _finish_reason_to_unified(reason: Any) -> str | None:
         "model_context_window_exceeded": "length",
         "tool_use": "tool_calls",
         "refusal": "content_filter",
+        # A server tool's turn paused before finishing; the client resends it.
+        "pause_turn": "stop",
     }.get(reason)
 
 
@@ -464,8 +486,24 @@ def _validate_complete_tool_json(value: str) -> None:
         )
 
 
+_INPUT_FIELDS = (
+    "input_tokens",
+    "cache_read_input_tokens",
+    "cache_creation_input_tokens",
+)
+
+
+def _read_input_usage(
+    usage: dict[str, Any], state: SourceStreamState, path: str
+) -> None:
+    state.input_tokens = _token_count(usage, "input_tokens", path)
+    state.cache_read_tokens = _token_count(usage, "cache_read_input_tokens", path)
+    state.cache_write_tokens = _token_count(usage, "cache_creation_input_tokens", path)
+
+
 def _token_count(usage: dict[str, Any], field: str, path: str) -> int:
-    value = usage.get(field, 0)
+    # A count sent as null, as cache counts can be, is none counted.
+    value = usage.get(field) or 0
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         _stream_error("token count must be a non-negative integer", f"{path}.{field}")
     return value

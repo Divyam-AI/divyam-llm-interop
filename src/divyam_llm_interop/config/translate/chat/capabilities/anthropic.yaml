@@ -101,3 +101,21 @@
           - temperature
           - top_p
           - top_k
+
+# Server tools these families run, per Anthropic's web search, web fetch, code
+# execution and tool search pages. claude-4 is left out: it spans retired
+# versions, 4.5, which runs only code execution and tool search, and 4.6 on,
+# which runs all four. See provider_hosted_tools.
+- selector:
+    name:
+      regex:
+        - claude-4-7
+        - claude-fable-5
+        - claude-haiku-5-5
+        - claude-mythos
+        - claude-opus-5
+        - claude-opus-5-5
+        - claude-sonnet-5
+        - claude-sonnet-5-5
+  capabilities:
+    hosted_tools: [ "web_search", "web_fetch", "code_execution", "tool_search" ]

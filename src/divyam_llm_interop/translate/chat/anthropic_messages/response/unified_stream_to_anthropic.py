@@ -16,8 +16,14 @@ from divyam_llm_interop.translate.chat.anthropic_messages.response.reasoning_blo
     wrap_signature,
 )
 from divyam_llm_interop.translate.chat.anthropic_messages.response.stream_state import (
+    ANTHROPIC_CITATION_KEY,
+    ANTHROPIC_SERVER_EVENT_KEY,
     ANTHROPIC_THINKING_EVENT_KEY,
     TargetStreamState,
+)
+from divyam_llm_interop.translate.chat.anthropic_messages.response.usage import (
+    anthropic_usage,
+    input_split,
 )
 from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
     client_tool_id,
@@ -134,6 +140,12 @@ def _consume_chunk(
     if isinstance(native_thinking, dict):
         # The same chunk's reasoning_content is the text for other clients.
         return _replay_thinking_event(native_thinking, state)
+    native_server = chunk.unknowns.get(ANTHROPIC_SERVER_EVENT_KEY)
+    if isinstance(native_server, dict):
+        return _replay_server_event(native_server, state)
+    citation = chunk.unknowns.get(ANTHROPIC_CITATION_KEY)
+    if isinstance(citation, dict):
+        return _replay_citation(citation, state)
     for choice in chunk.choices:
         if choice.index != 0:
             _target_error(
@@ -214,6 +226,48 @@ def _buffer_tool_calls(tool_calls: list[Any], state: TargetStreamState) -> None:
                 )
             buffer["name"] = tool_call.function.name
         buffer["arguments"] += tool_call.function.arguments
+
+
+def _replay_server_event(
+    event: dict[str, Any], state: TargetStreamState
+) -> list[dict[str, Any]]:
+    """Re-emit an event of a server tool's call or result block, renumbered."""
+    if event.get("type") == "content_block_start":
+        events = _close_open_blocks(state)
+        state.server_block_index = state.next_block_index
+        state.next_block_index += 1
+        return events + [{**event, "index": state.server_block_index}]
+    index = state.server_block_index
+    if index is None:
+        _stream_error("server tool event references no open block", "$.index")
+    if event.get("type") == "content_block_stop":
+        state.server_block_index = None
+    return [{**event, "index": index}]
+
+
+def _replay_citation(
+    delta: dict[str, Any], state: TargetStreamState
+) -> list[dict[str, Any]]:
+    """Re-emit a citation on the text block it belongs to, opening it if needed.
+
+    A cited passage's citations arrive before its text, so the block may not
+    be open yet.
+    """
+    events = _close_display_thinking(state)
+    if state.text_block_index is None:
+        state.text_block_index = state.next_block_index
+        state.next_block_index += 1
+        events.append(
+            {
+                "type": "content_block_start",
+                "index": state.text_block_index,
+                "content_block": {"type": "text", "text": ""},
+            }
+        )
+    events.append(
+        {"type": "content_block_delta", "index": state.text_block_index, "delta": delta}
+    )
+    return events
 
 
 def _replay_thinking_event(
@@ -420,10 +474,12 @@ def _message_start(state: TargetStreamState) -> dict[str, Any]:
             "stop_reason": None,
             "stop_sequence": None,
             "stop_details": None,
-            "usage": {
-                "input_tokens": state.input_tokens,
-                "output_tokens": 0,
-            },
+            "usage": anthropic_usage(
+                state.input_tokens,
+                state.cache_read_tokens,
+                state.cache_write_tokens,
+                0,
+            ),
         },
     }
 
@@ -464,10 +520,12 @@ def _message_delta(state: TargetStreamState) -> dict[str, Any]:
             "stop_sequence": state.stop_sequence,
             "stop_details": stop_details,
         },
-        "usage": {
-            "input_tokens": state.input_tokens,
-            "output_tokens": state.output_tokens,
-        },
+        "usage": anthropic_usage(
+            state.input_tokens,
+            state.cache_read_tokens,
+            state.cache_write_tokens,
+            state.output_tokens,
+        ),
     }
 
 
@@ -494,15 +552,39 @@ def _target_stop_details(value: Any, stop_reason: str) -> dict[str, Any] | None:
 def _capture_usage(
     chunk: UnifiedChatCompletionsStreamChunk, state: TargetStreamState
 ) -> None:
-    anthropic_input_tokens = chunk.unknowns.get("anthropic_input_tokens")
-    if isinstance(anthropic_input_tokens, int) and not isinstance(
-        anthropic_input_tokens, bool
-    ):
-        state.input_tokens = anthropic_input_tokens
+    # An Anthropic source states its input split exactly, from message_start
+    # on; any other source's is derived from OpenAI-style usage.
+    split = _anthropic_input_split(chunk)
+    if split is not None:
+        state.input_tokens, state.cache_read_tokens, state.cache_write_tokens = split
     if chunk.usage is None:
         return
-    state.input_tokens = chunk.usage.prompt_tokens
+    if split is None:
+        (
+            state.input_tokens,
+            state.cache_read_tokens,
+            state.cache_write_tokens,
+        ) = input_split(chunk.usage)
     state.output_tokens = chunk.usage.completion_tokens
+
+
+def _anthropic_input_split(
+    chunk: UnifiedChatCompletionsStreamChunk,
+) -> tuple[int, int, int] | None:
+    values = [
+        chunk.unknowns.get(key)
+        for key in (
+            "anthropic_input_tokens",
+            "anthropic_cache_read_input_tokens",
+            "anthropic_cache_creation_input_tokens",
+        )
+    ]
+    if not isinstance(values[0], int) or isinstance(values[0], bool):
+        return None
+    counts = [
+        v if isinstance(v, int) and not isinstance(v, bool) else 0 for v in values
+    ]
+    return counts[0], counts[1], counts[2]
 
 
 def _json_object(value: str, path: str) -> dict[str, Any]:

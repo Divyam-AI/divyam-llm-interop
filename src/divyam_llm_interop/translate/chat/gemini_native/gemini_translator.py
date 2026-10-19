@@ -44,6 +44,7 @@ from divyam_llm_interop.translate.chat.unified.unified_response import (
     UnifiedChatCompletionsResponse,
     UnifiedChatCompletionsStreamChunk,
     UnifiedChatResponseStreaming,
+    UnifiedUsage,
 )
 
 # Google's documented thought signature for function calls a Gemini model did
@@ -410,7 +411,7 @@ class GeminiTranslator(Translator):
             choice_entry: dict[str, Any] = {
                 "index": candidate.get("index", index),
                 "message": message,
-                "finish_reason": self._map_finish_reason_to_openai(finish),
+                "finish_reason": self._openai_finish_reason(finish, bool(tool_calls)),
             }
             gemini_finish = GeminiTranslator._finish_reason_str(finish)
             if gemini_finish:
@@ -497,11 +498,7 @@ class GeminiTranslator(Translator):
         }
 
         if from_response.body.usage:
-            body["usageMetadata"] = {
-                "promptTokenCount": from_response.body.usage.prompt_tokens,
-                "candidatesTokenCount": from_response.body.usage.completion_tokens,
-                "totalTokenCount": from_response.body.usage.total_tokens,
-            }
+            body["usageMetadata"] = self._gemini_usage(from_response.body.usage)
 
         return ChatResponse(body=body, headers=from_response.headers)
 
@@ -510,10 +507,13 @@ class GeminiTranslator(Translator):
         self, chat_response: ChatResponseStreaming, source: Model
     ) -> UnifiedChatResponseStreaming:
         async def unified_stream():
+            # Candidates that called a tool earlier in the stream: Gemini sends
+            # the call and the finish reason in different chunks.
+            called: set[int] = set()
             try:
                 async for chunk in chat_response.stream:
                     yield UnifiedChatCompletionsStreamChunk.from_dict(
-                        self._gemini_stream_chunk_to_unified_dict(chunk, source)
+                        self._gemini_stream_chunk_to_unified_dict(chunk, source, called)
                     )
             finally:
                 await close_async_stream(chat_response.stream)
@@ -609,11 +609,9 @@ class GeminiTranslator(Translator):
                 if candidates:
                     body["candidates"] = candidates
                 if unified_chunk.usage:
-                    body["usageMetadata"] = {
-                        "promptTokenCount": unified_chunk.usage.prompt_tokens,
-                        "candidatesTokenCount": unified_chunk.usage.completion_tokens,
-                        "totalTokenCount": unified_chunk.usage.total_tokens,
-                    }
+                    body["usageMetadata"] = GeminiTranslator._gemini_usage(
+                        unified_chunk.usage
+                    )
 
                 # Only yield chunks that carry meaningful content — skip
                 # empty intermediate tool-call delta chunks.
@@ -639,9 +637,14 @@ class GeminiTranslator(Translator):
 
     @staticmethod
     def _gemini_stream_chunk_to_unified_dict(
-        body: dict[str, Any], source: Model
+        body: dict[str, Any], source: Model, called: set[int] | None = None
     ) -> dict[str, Any]:
-        """Map one native Gemini stream chunk to OpenAI-style stream chunk dict."""
+        """Map one native Gemini stream chunk to OpenAI-style stream chunk dict.
+
+        ``called`` collects the candidates that have called a tool so far in
+        the stream, so the chunk that finishes one reports tool_calls.
+        """
+        called = set() if called is None else called
         candidates = body.get("candidates", [])
         signatures: list[dict[str, Any]] = []
         choices: list[dict[str, Any]] = []
@@ -673,13 +676,16 @@ class GeminiTranslator(Translator):
             finish_message = GeminiTranslator._candidate_field(
                 candidate, "finishMessage", "finish_message"
             )
+            candidate_index = candidate.get("index", index)
+            if tool_calls:
+                called.add(candidate_index)
             choice_entry: dict[str, Any] = {
-                "index": candidate.get("index", index),
+                "index": candidate_index,
                 "delta": delta,
             }
             if finish is not None:
-                choice_entry["finish_reason"] = (
-                    GeminiTranslator._map_finish_reason_to_openai(finish)
+                choice_entry["finish_reason"] = GeminiTranslator._openai_finish_reason(
+                    finish, candidate_index in called
                 )
                 gemini_finish = GeminiTranslator._finish_reason_str(finish)
                 if gemini_finish:
@@ -760,11 +766,7 @@ class GeminiTranslator(Translator):
         if candidates:
             body["candidates"] = candidates
         if unified_chunk.usage:
-            body["usageMetadata"] = {
-                "promptTokenCount": unified_chunk.usage.prompt_tokens,
-                "candidatesTokenCount": unified_chunk.usage.completion_tokens,
-                "totalTokenCount": unified_chunk.usage.total_tokens,
-            }
+            body["usageMetadata"] = GeminiTranslator._gemini_usage(unified_chunk.usage)
         return body
 
     @staticmethod
@@ -1300,6 +1302,31 @@ class GeminiTranslator(Translator):
         return details
 
     @staticmethod
+    def _gemini_usage(usage: UnifiedUsage) -> dict[str, Any]:
+        """Gemini usageMetadata for OpenAI-style usage.
+
+        Reasoning tokens are Gemini's thoughts, counted apart from the
+        candidates; cached prompt tokens are its cached content.
+        """
+        details = usage.completion_tokens_details
+        thoughts = (details.reasoning_tokens if details else None) or 0
+        metadata: dict[str, Any] = {
+            "promptTokenCount": usage.prompt_tokens,
+            "candidatesTokenCount": usage.completion_tokens - thoughts,
+            "totalTokenCount": usage.total_tokens,
+        }
+        if thoughts:
+            metadata["thoughtsTokenCount"] = thoughts
+        cached = (
+            usage.prompt_tokens_details.cached_tokens
+            if usage.prompt_tokens_details
+            else None
+        )
+        if cached:
+            metadata["cachedContentTokenCount"] = cached
+        return metadata
+
+    @staticmethod
     def _openai_usage_from_gemini_body(
         body: dict[str, Any],
     ) -> dict[str, Any] | None:
@@ -1321,23 +1348,48 @@ class GeminiTranslator(Translator):
             except (TypeError, ValueError):
                 return 0
 
+        # Gemini counts thinking apart from the candidates; OpenAI counts it
+        # within completion_tokens and breaks it out as reasoning_tokens.
+        thoughts = _as_int(
+            meta.get("thoughtsTokenCount", meta.get("thoughts_token_count"))
+        )
         usage: dict[str, Any] = {
             "prompt_tokens": _as_int(
                 meta.get("promptTokenCount", meta.get("prompt_token_count"))
             ),
             "completion_tokens": _as_int(
                 meta.get("candidatesTokenCount", meta.get("candidates_token_count"))
-            ),
+            )
+            + thoughts,
             "total_tokens": _as_int(
                 meta.get("totalTokenCount", meta.get("total_token_count"))
             ),
         }
+        if thoughts:
+            usage["completion_tokens_details"] = {"reasoning_tokens": thoughts}
 
         ptd = GeminiTranslator._openai_prompt_tokens_details_from_gemini_usage(meta)
+        # promptTokenCount includes context served from cache, which Gemini
+        # states as cachedContentTokenCount.
+        cached = _as_int(
+            meta.get("cachedContentTokenCount", meta.get("cached_content_token_count"))
+        )
+        if cached and not (ptd or {}).get("cached_tokens"):
+            ptd = {**(ptd or {}), "cached_tokens": cached}
         if ptd is not None:
             usage["prompt_tokens_details"] = ptd
 
         return usage
+
+    @staticmethod
+    def _openai_finish_reason(finish_reason: Any, called_tool: bool) -> str:
+        """OpenAI finish_reason for a candidate.
+
+        Gemini ends a turn that calls a function with STOP; OpenAI reports
+        such a turn as tool_calls, which clients read to run the tools.
+        """
+        mapped = GeminiTranslator._map_finish_reason_to_openai(finish_reason)
+        return "tool_calls" if called_tool and mapped == "stop" else mapped
 
     @staticmethod
     def _map_finish_reason_to_openai(finish_reason: Any) -> str:

@@ -6,10 +6,19 @@ import json
 import time
 from typing import Any, NoReturn
 
+from divyam_llm_interop.translate.chat.anthropic_messages.response.stream_state import (
+    ANTHROPIC_ONLY_CONTENT_KEY,
+)
+from divyam_llm_interop.translate.chat.anthropic_messages.response.usage import (
+    unified_usage,
+)
 from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
     is_portable_tool_name,
 )
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
+from divyam_llm_interop.translate.chat.base.provider_hosted_tools import (
+    is_anthropic_server_block,
+)
 from divyam_llm_interop.translate.chat.translation_errors import (
     ResponseTranslationError,
     UnsupportedFeatureError,
@@ -29,6 +38,8 @@ _RESPONSE_FIELDS = {
     "stop_details",
     "stop_sequence",
     "usage",
+    # The container a code execution ran in, for the client to reuse.
+    "container",
 }
 
 
@@ -41,6 +52,8 @@ def anthropic_response_to_unified(
     usage = body.get("usage") or {}
     input_tokens = _token_count(usage, "input_tokens")
     output_tokens = _token_count(usage, "output_tokens")
+    cache_read = _token_count(usage, "cache_read_input_tokens")
+    cache_write = _token_count(usage, "cache_creation_input_tokens")
     choice: dict[str, Any] = {
         "index": 0,
         "message": message,
@@ -52,17 +65,29 @@ def anthropic_response_to_unified(
         "created": int(time.time()),
         "model": body.get("model", source.name),
         "choices": [choice],
-        "usage": {
-            "prompt_tokens": input_tokens,
-            "completion_tokens": output_tokens,
-            "total_tokens": input_tokens + output_tokens,
-        },
+        "usage": unified_usage(input_tokens, cache_read, cache_write, output_tokens),
         "anthropic_response_raw": copy.deepcopy(body),
     }
+    anthropic_only = _anthropic_only_content(body)
+    if anthropic_only:
+        unified_body[ANTHROPIC_ONLY_CONTENT_KEY] = anthropic_only
     return UnifiedChatCompletionsResponse.from_dict(
         {"body": unified_body, "headers": copy.deepcopy(chat_response.headers)},
         headers=copy.deepcopy(chat_response.headers),
     )
+
+
+def _anthropic_only_content(body: dict[str, Any]) -> list[str]:
+    """What in the response only an Anthropic client has a form for."""
+    content = [block for block in body["content"] if isinstance(block, dict)]
+    found: list[str] = []
+    if any(is_anthropic_server_block(block) for block in content):
+        found.append("server tool blocks")
+    if any(block.get("type") == "text" and block.get("citations") for block in content):
+        found.append("citations")
+    if body.get("stop_reason") == "pause_turn":
+        found.append("pause_turn")
+    return found
 
 
 def _validate_response(body: Any) -> None:
@@ -92,12 +117,9 @@ def _validate_response(body: Any) -> None:
         "tool_use",
         "refusal",
         "model_context_window_exceeded",
+        # A server tool's turn paused before finishing; the client resends it.
+        "pause_turn",
     }:
-        if body.get("stop_reason") == "pause_turn":
-            _unsupported(
-                "pause_turn is outside the supported text/tool profile",
-                "$.stop_reason",
-            )
         _response_error("unknown or missing Anthropic stop_reason", "$.stop_reason")
     if body.get("stop_sequence") is not None and not isinstance(
         body["stop_sequence"], str
@@ -161,14 +183,15 @@ def _message_from_content(content: list[dict[str, Any]]) -> dict[str, Any]:
         if not isinstance(block, dict):
             _response_error("content block must be an object", path)
         block_type = block.get("type")
+        if is_anthropic_server_block(block):
+            # A server tool's call or result. An Anthropic client gets it from
+            # the raw response; for any other the answer's text carries it.
+            continue
         if block_type == "text":
+            # Citations point into server tool results; an Anthropic client
+            # gets them from the raw response, any other reads the text.
             if set(block) - {"type", "text", "citations"}:
                 _unsupported("unsupported text block metadata", path)
-            if block.get("citations"):
-                _unsupported(
-                    "citations are outside the supported text/tool profile",
-                    f"{path}.citations",
-                )
             if saw_tool:
                 _response_error("text blocks must precede tool_use blocks", path)
             if not isinstance(block.get("text"), str):
@@ -261,7 +284,8 @@ def _validate_direct_tool_caller(value: Any, path: str) -> None:
 
 
 def _token_count(usage: dict[str, Any], field: str) -> int:
-    value = usage.get(field, 0)
+    # A count sent as null, as cache counts can be, is none counted.
+    value = usage.get(field) or 0
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         _response_error(
             "token count must be a non-negative integer", f"$.usage.{field}"
@@ -278,6 +302,7 @@ def _finish_reason_to_unified(reason: Any) -> str | None:
         "model_context_window_exceeded": "length",
         "tool_use": "tool_calls",
         "refusal": "content_filter",
+        "pause_turn": "stop",
     }.get(reason)
 
 
