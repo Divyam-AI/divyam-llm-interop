@@ -8,6 +8,9 @@ from divyam_llm_interop.translate.chat.anthropic_messages.response.stream_state 
     ANTHROPIC_THINKING_EVENT_KEY,
     SourceStreamState,
 )
+from divyam_llm_interop.translate.chat.anthropic_messages.response.usage import (
+    unified_usage,
+)
 from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
     is_portable_tool_name,
 )
@@ -103,7 +106,7 @@ def _message_start(event: dict[str, Any], state: SourceStreamState) -> dict[str,
     usage = message.get("usage") or {}
     if not isinstance(usage, dict):
         _stream_error("message usage must be an object", "$.message.usage")
-    state.input_tokens = _token_count(usage, "input_tokens", "$.message.usage")
+    _read_input_usage(usage, state, "$.message.usage")
     state.output_tokens = _token_count(usage, "output_tokens", "$.message.usage")
     state.started = True
     return _chunk(state, delta={"role": "assistant"})
@@ -323,6 +326,9 @@ def _message_delta(event: dict[str, Any], state: SourceStreamState) -> dict[str,
         stop_reason,
         "$.delta.stop_details",
     )
+    # The final usage restates input when it differs, e.g. after tool search.
+    if any(key in usage for key in _INPUT_FIELDS):
+        _read_input_usage(usage, state, "$.usage")
     state.output_tokens = _token_count(usage, "output_tokens", "$.usage")
     state.terminal_delta = True
     return _chunk(
@@ -362,15 +368,18 @@ def _chunk(
         "model": state.model,
         "choices": [choice],
         "anthropic_input_tokens": state.input_tokens,
+        "anthropic_cache_read_input_tokens": state.cache_read_tokens,
+        "anthropic_cache_creation_input_tokens": state.cache_write_tokens,
     }
     if chunk_unknowns:
         chunk.update(chunk_unknowns)
     if include_usage:
-        chunk["usage"] = {
-            "prompt_tokens": state.input_tokens,
-            "completion_tokens": state.output_tokens,
-            "total_tokens": state.input_tokens + state.output_tokens,
-        }
+        chunk["usage"] = unified_usage(
+            state.input_tokens,
+            state.cache_read_tokens,
+            state.cache_write_tokens,
+            state.output_tokens,
+        )
     return chunk
 
 
@@ -464,8 +473,24 @@ def _validate_complete_tool_json(value: str) -> None:
         )
 
 
+_INPUT_FIELDS = (
+    "input_tokens",
+    "cache_read_input_tokens",
+    "cache_creation_input_tokens",
+)
+
+
+def _read_input_usage(
+    usage: dict[str, Any], state: SourceStreamState, path: str
+) -> None:
+    state.input_tokens = _token_count(usage, "input_tokens", path)
+    state.cache_read_tokens = _token_count(usage, "cache_read_input_tokens", path)
+    state.cache_write_tokens = _token_count(usage, "cache_creation_input_tokens", path)
+
+
 def _token_count(usage: dict[str, Any], field: str, path: str) -> int:
-    value = usage.get(field, 0)
+    # A count sent as null, as cache counts can be, is none counted.
+    value = usage.get(field) or 0
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         _stream_error("token count must be a non-negative integer", f"{path}.{field}")
     return value

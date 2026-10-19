@@ -6,6 +6,9 @@ import json
 import time
 from typing import Any, NoReturn
 
+from divyam_llm_interop.translate.chat.anthropic_messages.response.usage import (
+    unified_usage,
+)
 from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
     is_portable_tool_name,
 )
@@ -41,6 +44,8 @@ def anthropic_response_to_unified(
     usage = body.get("usage") or {}
     input_tokens = _token_count(usage, "input_tokens")
     output_tokens = _token_count(usage, "output_tokens")
+    cache_read = _token_count(usage, "cache_read_input_tokens")
+    cache_write = _token_count(usage, "cache_creation_input_tokens")
     choice: dict[str, Any] = {
         "index": 0,
         "message": message,
@@ -52,11 +57,7 @@ def anthropic_response_to_unified(
         "created": int(time.time()),
         "model": body.get("model", source.name),
         "choices": [choice],
-        "usage": {
-            "prompt_tokens": input_tokens,
-            "completion_tokens": output_tokens,
-            "total_tokens": input_tokens + output_tokens,
-        },
+        "usage": unified_usage(input_tokens, cache_read, cache_write, output_tokens),
         "anthropic_response_raw": copy.deepcopy(body),
     }
     return UnifiedChatCompletionsResponse.from_dict(
@@ -261,7 +262,8 @@ def _validate_direct_tool_caller(value: Any, path: str) -> None:
 
 
 def _token_count(usage: dict[str, Any], field: str) -> int:
-    value = usage.get(field, 0)
+    # A count sent as null, as cache counts can be, is none counted.
+    value = usage.get(field) or 0
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         _response_error(
             "token count must be a non-negative integer", f"$.usage.{field}"

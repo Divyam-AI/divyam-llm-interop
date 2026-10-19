@@ -19,6 +19,10 @@ from divyam_llm_interop.translate.chat.anthropic_messages.response.stream_state 
     ANTHROPIC_THINKING_EVENT_KEY,
     TargetStreamState,
 )
+from divyam_llm_interop.translate.chat.anthropic_messages.response.usage import (
+    anthropic_usage,
+    input_split,
+)
 from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
     client_tool_id,
     is_portable_tool_name,
@@ -420,10 +424,12 @@ def _message_start(state: TargetStreamState) -> dict[str, Any]:
             "stop_reason": None,
             "stop_sequence": None,
             "stop_details": None,
-            "usage": {
-                "input_tokens": state.input_tokens,
-                "output_tokens": 0,
-            },
+            "usage": anthropic_usage(
+                state.input_tokens,
+                state.cache_read_tokens,
+                state.cache_write_tokens,
+                0,
+            ),
         },
     }
 
@@ -464,10 +470,12 @@ def _message_delta(state: TargetStreamState) -> dict[str, Any]:
             "stop_sequence": state.stop_sequence,
             "stop_details": stop_details,
         },
-        "usage": {
-            "input_tokens": state.input_tokens,
-            "output_tokens": state.output_tokens,
-        },
+        "usage": anthropic_usage(
+            state.input_tokens,
+            state.cache_read_tokens,
+            state.cache_write_tokens,
+            state.output_tokens,
+        ),
     }
 
 
@@ -494,15 +502,39 @@ def _target_stop_details(value: Any, stop_reason: str) -> dict[str, Any] | None:
 def _capture_usage(
     chunk: UnifiedChatCompletionsStreamChunk, state: TargetStreamState
 ) -> None:
-    anthropic_input_tokens = chunk.unknowns.get("anthropic_input_tokens")
-    if isinstance(anthropic_input_tokens, int) and not isinstance(
-        anthropic_input_tokens, bool
-    ):
-        state.input_tokens = anthropic_input_tokens
+    # An Anthropic source states its input split exactly, from message_start
+    # on; any other source's is derived from OpenAI-style usage.
+    split = _anthropic_input_split(chunk)
+    if split is not None:
+        state.input_tokens, state.cache_read_tokens, state.cache_write_tokens = split
     if chunk.usage is None:
         return
-    state.input_tokens = chunk.usage.prompt_tokens
+    if split is None:
+        (
+            state.input_tokens,
+            state.cache_read_tokens,
+            state.cache_write_tokens,
+        ) = input_split(chunk.usage)
     state.output_tokens = chunk.usage.completion_tokens
+
+
+def _anthropic_input_split(
+    chunk: UnifiedChatCompletionsStreamChunk,
+) -> tuple[int, int, int] | None:
+    values = [
+        chunk.unknowns.get(key)
+        for key in (
+            "anthropic_input_tokens",
+            "anthropic_cache_read_input_tokens",
+            "anthropic_cache_creation_input_tokens",
+        )
+    ]
+    if not isinstance(values[0], int) or isinstance(values[0], bool):
+        return None
+    counts = [
+        v if isinstance(v, int) and not isinstance(v, bool) else 0 for v in values
+    ]
+    return counts[0], counts[1], counts[2]
 
 
 def _json_object(value: str, path: str) -> dict[str, Any]:

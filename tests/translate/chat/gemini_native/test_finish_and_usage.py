@@ -156,3 +156,51 @@ def test_reasoning_tokens_reach_a_gemini_client_as_thoughts(translator):
         "thoughtsTokenCount": 12,
         "totalTokenCount": 80,
     }
+
+
+def test_cached_content_counts_as_cached_prompt_tokens(translator):
+    body = _body(
+        [{"text": "Done."}],
+        promptTokenCount=50,
+        cachedContentTokenCount=30,
+        candidatesTokenCount=18,
+        totalTokenCount=68,
+    )
+
+    result = translator.translate_response(
+        ChatResponse(body=body), _GEMINI, _COMPLETIONS
+    )
+
+    usage = result.body["usage"]
+    assert usage["prompt_tokens"] == 50
+    assert usage["prompt_tokens_details"]["cached_tokens"] == 30
+
+
+def test_cached_prompt_tokens_reach_a_gemini_client_as_cached_content(translator):
+    completion = {
+        "id": "c1",
+        "object": "chat.completion",
+        "created": 1,
+        "model": "gpt-5.1",
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": "Done."},
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": {
+            "prompt_tokens": 50,
+            "completion_tokens": 18,
+            "total_tokens": 68,
+            "prompt_tokens_details": {"cached_tokens": 30},
+        },
+    }
+
+    result = translator.translate_response(
+        ChatResponse(body=completion),
+        Model("gpt-5.1", ModelApiType.COMPLETIONS),
+        _GEMINI,
+    )
+
+    assert result.body["usageMetadata"]["cachedContentTokenCount"] == 30

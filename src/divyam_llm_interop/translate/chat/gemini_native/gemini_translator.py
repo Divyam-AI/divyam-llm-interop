@@ -1303,7 +1303,11 @@ class GeminiTranslator(Translator):
 
     @staticmethod
     def _gemini_usage(usage: UnifiedUsage) -> dict[str, Any]:
-        """Gemini usageMetadata for OpenAI-style usage: reasoning is thoughts."""
+        """Gemini usageMetadata for OpenAI-style usage.
+
+        Reasoning tokens are Gemini's thoughts, counted apart from the
+        candidates; cached prompt tokens are its cached content.
+        """
         details = usage.completion_tokens_details
         thoughts = (details.reasoning_tokens if details else None) or 0
         metadata: dict[str, Any] = {
@@ -1313,6 +1317,13 @@ class GeminiTranslator(Translator):
         }
         if thoughts:
             metadata["thoughtsTokenCount"] = thoughts
+        cached = (
+            usage.prompt_tokens_details.cached_tokens
+            if usage.prompt_tokens_details
+            else None
+        )
+        if cached:
+            metadata["cachedContentTokenCount"] = cached
         return metadata
 
     @staticmethod
@@ -1358,6 +1369,13 @@ class GeminiTranslator(Translator):
             usage["completion_tokens_details"] = {"reasoning_tokens": thoughts}
 
         ptd = GeminiTranslator._openai_prompt_tokens_details_from_gemini_usage(meta)
+        # promptTokenCount includes context served from cache, which Gemini
+        # states as cachedContentTokenCount.
+        cached = _as_int(
+            meta.get("cachedContentTokenCount", meta.get("cached_content_token_count"))
+        )
+        if cached and not (ptd or {}).get("cached_tokens"):
+            ptd = {**(ptd or {}), "cached_tokens": cached}
         if ptd is not None:
             usage["prompt_tokens_details"] = ptd
 

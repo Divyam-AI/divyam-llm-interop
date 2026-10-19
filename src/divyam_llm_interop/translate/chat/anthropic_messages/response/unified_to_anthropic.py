@@ -13,6 +13,10 @@ from divyam_llm_interop.translate.chat.anthropic_messages.response.reasoning_blo
     turn_block,
     wrap_reasoning_block,
 )
+from divyam_llm_interop.translate.chat.anthropic_messages.response.usage import (
+    anthropic_usage,
+    input_split,
+)
 from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
     client_tool_id,
     is_portable_tool_name,
@@ -202,10 +206,7 @@ def _usage(from_response: UnifiedChatCompletionsResponse) -> dict[str, int]:
     usage = from_response.body.usage
     if usage is None:
         return {"input_tokens": 0, "output_tokens": 0}
-    return {
-        "input_tokens": usage.prompt_tokens,
-        "output_tokens": usage.completion_tokens,
-    }
+    return anthropic_usage(*input_split(usage), usage.completion_tokens)
 
 
 def _message_id(value: str) -> str:

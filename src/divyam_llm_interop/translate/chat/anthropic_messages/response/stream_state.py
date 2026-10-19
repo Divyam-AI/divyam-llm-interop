@@ -17,6 +17,8 @@ class SourceStreamState:
     message_id: str = ""
     model: str = ""
     input_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
     output_tokens: int = 0
     started: bool = False
     terminal_delta: bool = False
@@ -40,6 +42,8 @@ class TargetStreamState:
     stop_sequence: str | None = None
     stop_details: dict[str, Any] | None = None
     input_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
     output_tokens: int = 0
     tool_calls: dict[int, dict[str, str]] = field(default_factory=dict)
     tool_ids: set[str] = field(default_factory=set)
