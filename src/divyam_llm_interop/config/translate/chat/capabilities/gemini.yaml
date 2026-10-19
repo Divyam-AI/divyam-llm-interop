@@ -1,3 +1,7 @@
+# hosted_tools lists the built-in tools a model runs on Google's servers, as
+# its model page states them: Google Search grounding as web_search, URL
+# context as web_fetch. A kind the docs do not confirm is left out; see
+# provider_hosted_tools.
 - selector:
     name:
       regex: gemini.*
@@ -18,6 +22,7 @@
 - selector:
     name: gemini-4-argon
   capabilities:
+    hosted_tools: [ "web_search", "web_fetch", "code_execution", "file_search" ]
     max_tokens: { min: 1, max: 65536 }
     input_token_limit: 1048576
     supports_function_calling: true
@@ -35,6 +40,7 @@
       regex:
         - gemini-3\.[78]-flash
   capabilities:
+    hosted_tools: [ "web_search", "web_fetch", "code_execution", "file_search" ]
     max_tokens: { min: 1, max: 65536 }
     input_token_limit: 1048576
     supports_function_calling: true
@@ -49,6 +55,7 @@
 - selector:
     name: gemini-3.6-flash
   capabilities:
+    hosted_tools: [ "web_search", "web_fetch", "code_execution", "file_search" ]
     max_tokens: { min: 1, max: 65536 }
     input_token_limit: 1048576
     temperature: { min: 0.0, max: 2.0 }
@@ -76,6 +83,7 @@
 - selector:
     name: gemini-3.5-flash
   capabilities:
+    hosted_tools: [ "web_search", "web_fetch", "code_execution", "file_search" ]
     max_tokens: { min: 1, max: 65536 }
     input_token_limit: 1048576
     temperature: { min: 0.0, max: 2.0 }
@@ -99,6 +107,7 @@
 - selector:
     name: gemini-3.5-flash-lite
   capabilities:
+    hosted_tools: [ "web_search", "web_fetch", "code_execution", "file_search" ]
     max_tokens: { min: 1, max: 65536 }
     input_token_limit: 1048576
     temperature: { min: 0.0, max: 2.0 }
@@ -126,6 +135,7 @@
 - selector:
     name: gemini-3.1-pro
   capabilities:
+    hosted_tools: [ "web_search", "web_fetch", "code_execution", "file_search" ]
     max_tokens: { min: 1, max: 65536 }
     input_token_limit: 1048576
     temperature: { min: 0.0, max: 2.0 }
@@ -149,6 +159,7 @@
 - selector:
     name: gemini-3.1-flash-lite
   capabilities:
+    hosted_tools: [ "web_search", "web_fetch", "code_execution", "file_search" ]
     max_tokens: { min: 1, max: 65536 }
     input_token_limit: 1048576
     temperature: { min: 0.0, max: 2.0 }
@@ -176,6 +187,7 @@
 - selector:
     name: gemini-3-pro
   capabilities:
+    hosted_tools: [ "web_search", "web_fetch", "code_execution", "file_search" ]
     max_tokens: { min: 1, max: 65536 }
     input_token_limit: 1048576
     temperature: { min: 0.0, max: 2.0 }
@@ -199,6 +211,7 @@
 - selector:
     name: gemini-3-flash
   capabilities:
+    hosted_tools: [ "web_search", "web_fetch", "code_execution", "file_search" ]
     max_tokens: { min: 1, max: 65536 }
     input_token_limit: 1048576
     temperature: { min: 0.0, max: 2.0 }
@@ -262,6 +275,7 @@
 - selector:
     name: gemini-2.5-pro
   capabilities:
+    hosted_tools: [ "web_search", "web_fetch", "code_execution", "file_search" ]
     max_tokens: { min: 1, max: 65536 }
     input_token_limit: 1048576
     temperature: { min: 0.0, max: 2.0 }
@@ -285,6 +299,7 @@
 - selector:
     name: gemini-2.5-flash
   capabilities:
+    hosted_tools: [ "web_search", "web_fetch", "code_execution", "file_search" ]
     max_tokens: { min: 1, max: 65536 }
     input_token_limit: 1048576
     temperature: { min: 0.0, max: 2.0 }
@@ -308,6 +323,7 @@
 - selector:
     name: gemini-2.5-flash-lite
   capabilities:
+    hosted_tools: [ "web_search", "web_fetch", "code_execution", "file_search" ]
     max_tokens: { min: 1, max: 65536 }
     input_token_limit: 1048576
     temperature: { min: 0.0, max: 2.0 }
@@ -428,6 +444,7 @@
 - selector:
     name: gemini-2.0-flash
   capabilities:
+    hosted_tools: [ "web_search", "code_execution" ]
     max_tokens: { min: 1, max: 8192 }
     input_token_limit: 1048576
     temperature: { min: 0.0, max: 2.0 }

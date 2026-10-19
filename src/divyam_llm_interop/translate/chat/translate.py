@@ -11,12 +11,18 @@ from divyam_llm_interop.translate.chat.anthropic_messages import (
 from divyam_llm_interop.translate.chat.anthropic_messages.request.anthropic_to_unified import (
     normalize_system_messages,
 )
+from divyam_llm_interop.translate.chat.anthropic_messages.response.stream_state import (
+    anthropic_only_content,
+)
 from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
     validate_anthropic_request,
     without_null_fields,
 )
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
 from divyam_llm_interop.translate.chat.base import translation_utils
+from divyam_llm_interop.translate.chat.base.provider_hosted_tools import (
+    split_provider_hosted_tools,
+)
 from divyam_llm_interop.translate.chat.base.reasoning_state import (
     RESPONSE_DOMAIN_KEY,
     RETURNS_STATE_KEY,
@@ -46,6 +52,7 @@ from divyam_llm_interop.translate.chat.translation_errors import (
     InteropTranslationError,
     InvalidProtocolRequestError,
     TargetCapabilityError,
+    UnsupportedFeatureError,
 )
 from divyam_llm_interop.translate.chat.types import (
     ChatRequest,
@@ -53,6 +60,36 @@ from divyam_llm_interop.translate.chat.types import (
     ChatResponseStreaming,
     Model,
 )
+from divyam_llm_interop.translate.chat.unified.unified_response import (
+    UnifiedChatCompletionsStreamChunk,
+)
+
+
+def _refuse_anthropic_only(unknowns: dict[str, Any], client: Model) -> None:
+    """Refuse what only an Anthropic client has a form for, rather than lose it.
+
+    Server tool blocks, citations and a paused turn arrive only from a server
+    tool, which runs on an Anthropic-to-Anthropic route; see
+    provider_hosted_tools. Answered to another API, they would be dropped.
+    """
+    found = anthropic_only_content(unknowns)
+    if found is not None:
+        raise UnsupportedFeatureError(
+            f"Anthropic {found} have no form in {client.api_type.value} and are "
+            "outside the supported text/tool profile",
+            target_api_type=client.api_type,
+        )
+
+
+async def _anthropic_only_refused(
+    stream: AsyncGenerator[UnifiedChatCompletionsStreamChunk, None], client: Model
+) -> AsyncGenerator[UnifiedChatCompletionsStreamChunk, None]:
+    try:
+        async for chunk in stream:
+            _refuse_anthropic_only(chunk.unknowns, client)
+            yield chunk
+    finally:
+        await translation_utils.close_async_stream(stream)
 
 
 @dataclass
@@ -63,6 +100,14 @@ class ChatTranslateConfig:
     # Serving routers require declared endpoint support; standalone translators
     # retain their existing best-effort behavior for ordinary function tools.
     require_declared_capabilities: bool = False
+    # Tools a provider runs on its own servers, such as OpenAI's web_search or
+    # Anthropic's web_search_20250305. A translated request keeps those its
+    # target declares in hosted_tools, where the route can carry them. The
+    # rest are refused; with this set, they are removed instead and earlier
+    # calls to them narrated, unless tool_choice forces one. See
+    # provider_hosted_tools. Requests served natively forward them as sent
+    # whatever the setting.
+    drop_provider_hosted_tools: bool = False
 
 
 class ChatTranslator:
@@ -109,6 +154,15 @@ class ChatTranslator:
     ) -> dict[str, Any]:
         """Project readable input using the source protocol, independently of serving."""
         source = Model(name=request.body.get("model", ""), api_type=api_type)
+        # Hosted tools are read past whatever the setting: the projection is
+        # never served, and selection precedes the route that decides whether
+        # one is kept, dropped or refused.
+        request = replace(
+            request,
+            body=split_provider_hosted_tools(
+                request.body, api_type, drop=True, refuse_forced=False
+            ).body,
+        )
         return self._translators[api_type].selection_context(request, source)
 
     async def encode_response_stream(
@@ -157,6 +211,13 @@ class ChatTranslator:
                 chat_request, source, target, native=True
             )
 
+        hosted = split_provider_hosted_tools(
+            chat_request.body,
+            source.api_type,
+            keep=self._carried_hosted_tools(source, target),
+            drop=self._config.drop_provider_hosted_tools,
+        )
+        chat_request = replace(chat_request, body=hosted.body)
         target_translator.validate_source_request(chat_request, source)
         original_request = chat_request
         chat_request = source_translator.prepare_translation(
@@ -207,6 +268,12 @@ class ChatTranslator:
                 original_request, unified, source, target
             )
         translated = target_translator.request_from_unified(unified, target)
+        if hosted.tools:
+            body = dict(translated.body)
+            body["tools"] = [*(body.get("tools") or []), *hosted.tools]
+            if hosted.tool_choice is not None:
+                body["tool_choice"] = hosted.tool_choice
+            translated = replace(translated, body=body)
         if original_request.api_type is not None:
             translated = self.prepare_request(
                 replace(
@@ -248,6 +315,8 @@ class ChatTranslator:
             translated = chat_response
         else:
             unified = source_translator.response_to_unified(chat_response, source)
+            if target.api_type != ModelApiType.ANTHROPIC_MESSAGES:
+                _refuse_anthropic_only(unified.body.unknowns, target)
             unified.body.unknowns[RESPONSE_DOMAIN_KEY] = self._reasoning_domain(source)
             translated = target_translator.response_from_unified(unified, target)
         if request and request.response_adapter:
@@ -286,6 +355,11 @@ class ChatTranslator:
                 chat_response, source
             )
             unified.reasoning_domain = self._reasoning_domain(source)
+            if (
+                source.api_type == ModelApiType.ANTHROPIC_MESSAGES
+                and target.api_type != ModelApiType.ANTHROPIC_MESSAGES
+            ):
+                unified.stream = _anthropic_only_refused(unified.stream, target)
             translated = target_translator.stream_response_from_unified(unified, target)
         if request and request.response_adapter:
             translated = ChatResponseStreaming(
@@ -293,6 +367,25 @@ class ChatTranslator:
                 headers=translated.headers,
             )
         return translated
+
+    def _carried_hosted_tools(self, source: Model, target: Model) -> frozenset[str]:
+        """The hosted tool kinds a translated route keeps for its target.
+
+        A route between two endpoints of one API carries them: the target's
+        hosted tool output reaches the client in the client's own form, its
+        response passed through (Responses) or rebuilt with those blocks
+        intact (Anthropic). A Gemini route of that kind is always native. A
+        route between two APIs would have to translate that output into
+        another API's form, which is not supported, so there the target's
+        declaration keeps no tool.
+        """
+        if source.api_type != target.api_type or source.api_type not in (
+            ModelApiType.RESPONSES,
+            ModelApiType.ANTHROPIC_MESSAGES,
+        ):
+            return frozenset()
+        declared = self._model_registry.get_capabilities(target).hosted_tools
+        return frozenset(declared or [])
 
     def _reasoning_domain(self, model: Model) -> str:
         """The signing domain of the endpoint that produced a response."""
@@ -307,7 +400,15 @@ class ChatTranslator:
         if api_type is None:
             api_type = translation_utils.detect_request_api_type(request_body)
         else:
-            self._validate_explicit_request_type(request_body, api_type)
+            # The shape of the API is checked here; whether a hosted tool can be
+            # served depends on the route, which translation decides. A native
+            # route receives the request with its hosted tools.
+            self._validate_explicit_request_type(
+                split_provider_hosted_tools(
+                    request_body, api_type, drop=True, refuse_forced=False
+                ).body,
+                api_type,
+            )
         model = Model(name=model_name, api_type=api_type)
 
         self._find_matching_model(model)

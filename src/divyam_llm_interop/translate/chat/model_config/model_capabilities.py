@@ -18,6 +18,21 @@ from divyam_llm_interop.translate.chat.unified.unified_request import (
     UnifiedChatCompletionsRequestBody,
 )
 
+#: Provider-independent names for tools a provider runs on its own servers,
+#: as an endpoint declares them in `hosted_tools`. Each provider's own tool
+#: types map onto these; see provider_hosted_tools.
+HOSTED_TOOL_KINDS = frozenset(
+    {
+        "web_search",
+        "web_fetch",
+        "file_search",
+        "code_execution",
+        "image_generation",
+        "mcp",
+        "tool_search",
+    }
+)
+
 
 @dataclass
 class RangeConfig:
@@ -227,6 +242,11 @@ class ModelCapabilities:
     # "low", "medium" or "high". Unset means "medium".
     default_reasoning_effort: Optional[str] = None
     supports_code_execution: Optional[bool] = None
+    # The provider-hosted tools this endpoint runs, by their names in
+    # HOSTED_TOOL_KINDS. Support is often per provider rather than per model,
+    # so an endpoint override replaces the list rather than adding to it.
+    # Unset or empty, the endpoint runs none.
+    hosted_tools: Optional[list[str]] = None
     supports_google_thinking_config: Optional[bool] = None
     supports_google_extra_body: Optional[bool] = None
 
@@ -245,6 +265,13 @@ class ModelCapabilities:
         for api_type in ModelApiType:
             if api_type not in self.api_capabilities:
                 self.api_capabilities[api_type] = ApiTypeSpecificRules()
+        unknown = set(self.hosted_tools or []) - HOSTED_TOOL_KINDS
+        if unknown:
+            # A misspelt name would otherwise read as an endpoint without the tool.
+            raise ValueError(
+                f"Unknown hosted tool(s): {', '.join(sorted(unknown))}; "
+                f"expected one of {', '.join(sorted(HOSTED_TOOL_KINDS))}"
+            )
 
     @staticmethod
     def _parse_api_type(value) -> ModelApiType:

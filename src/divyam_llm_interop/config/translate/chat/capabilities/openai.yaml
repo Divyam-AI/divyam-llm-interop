@@ -1,3 +1,6 @@
+# hosted_tools lists the provider-hosted tools a model's Responses API runs,
+# as OpenAI's model pages state them. A kind the docs do not confirm is left
+# out, so it is dropped or refused rather than sent; see provider_hosted_tools.
 - selector:
     name:
       regex:
@@ -257,6 +260,7 @@
 - selector:
     name: gpt-5
   capabilities:
+    hosted_tools: [ "web_search", "image_generation" ]
     strict_completions_compatibility: false
     max_tokens:
       min: 1
@@ -286,6 +290,7 @@
 - selector:
     name: gpt-5-nano
   capabilities:
+    hosted_tools: [ "image_generation" ]
     strict_completions_compatibility: false
     max_tokens:
       min: 1
@@ -382,6 +387,7 @@
 - selector:
     name: gpt-4.1
   capabilities:
+    hosted_tools: [ "web_search", "image_generation" ]
     strict_completions_compatibility: false
     max_tokens:
       min: 1
@@ -438,6 +444,7 @@
 - selector:
     name: gpt-4.1-mini
   capabilities:
+    hosted_tools: [ "web_search", "image_generation" ]
     strict_completions_compatibility: false
     max_tokens:
       min: 1
@@ -466,6 +473,7 @@
 - selector:
     name: gpt-4.1-nano
   capabilities:
+    hosted_tools: [ "image_generation" ]
     strict_completions_compatibility: false
     max_tokens:
       min: 1
@@ -494,6 +502,7 @@
 - selector:
     name: o3
   capabilities:
+    hosted_tools: [ "image_generation" ]
     strict_completions_compatibility: false
     max_tokens:
       min: 1
@@ -572,6 +581,7 @@
 - selector:
     name: o4-mini
   capabilities:
+    hosted_tools: [ "web_search" ]
     strict_completions_compatibility: false
     max_tokens:
       min: 1
@@ -668,6 +678,7 @@
 - selector:
     name: gpt-4o
   capabilities:
+    hosted_tools: [ "image_generation" ]
     strict_completions_compatibility: false
     max_tokens:
       min: 1
@@ -696,6 +707,7 @@
 - selector:
     name: gpt-4o-mini
   capabilities:
+    hosted_tools: [ "image_generation" ]
     strict_completions_compatibility: false
     max_tokens:
       min: 1
@@ -863,6 +875,7 @@
 - selector:
     name: gpt-5.2
   capabilities:
+    hosted_tools: [ "image_generation", "mcp" ]
     max_completion_tokens: { min: 1, max: 131072 }
     top_p: { min: 1, max: 1 }
     input_token_limit: 272000
@@ -875,6 +888,7 @@
 - selector:
     name: gpt-5.4-pro
   capabilities:
+    hosted_tools: [ "web_search", "file_search", "image_generation", "mcp" ]
     strict_completions_compatibility: false
     max_completion_tokens: { min: 1, max: 128000 }
     top_p: { min: 1, max: 1 }
@@ -895,6 +909,7 @@
 - selector:
     name: gpt-5.4
   capabilities:
+    hosted_tools: [ "web_search", "file_search", "code_execution", "image_generation", "mcp" ]
     strict_completions_compatibility: false
     max_completion_tokens: { min: 1, max: 128000 }
     top_p: { min: 1, max: 1 }
@@ -915,6 +930,7 @@
 - selector:
     name: gpt-5.4-mini
   capabilities:
+    hosted_tools: [ "web_search", "file_search", "code_execution", "image_generation", "mcp" ]
     strict_completions_compatibility: false
     max_completion_tokens: { min: 1, max: 128000 }
     top_p: { min: 1, max: 1 }
@@ -933,6 +949,7 @@
 - selector:
     name: gpt-5.4-nano
   capabilities:
+    hosted_tools: [ "web_search", "file_search", "code_execution", "image_generation", "mcp" ]
     strict_completions_compatibility: false
     max_completion_tokens: { min: 1, max: 128000 }
     top_p: { min: 1, max: 1 }
@@ -1075,6 +1092,7 @@
 - selector:
     name: gpt-5.5
   capabilities:
+    hosted_tools: [ "web_search", "file_search", "code_execution", "image_generation", "mcp" ]
     reasoning_effort:
       options: [ "none", "low", "medium", "high", "xhigh" ]
       default: medium
@@ -1083,6 +1101,7 @@
 - selector:
     name: gpt-5.5-pro
   capabilities:
+    hosted_tools: [ "web_search", "file_search", "code_execution", "image_generation", "mcp" ]
     reasoning_effort:
       options: [ "medium", "high", "xhigh" ]
       default: high
@@ -1092,6 +1111,7 @@
       regex:
         - gpt-5\.6(?:-sol|-terra|-luna)?
   capabilities:
+    hosted_tools: [ "web_search", "file_search", "code_execution", "image_generation", "mcp" ]
     reasoning_effort:
       options: [ "none", "low", "medium", "high", "xhigh", "max" ]
       default: medium
@@ -1100,6 +1120,7 @@
 - selector:
     name: gpt-5.6-cyber
   capabilities:
+    hosted_tools: [ "web_search", "file_search", "code_execution", "image_generation", "mcp" ]
     max_tokens: { min: 1, max: 128000 }
     input_token_limit: 272000
 
@@ -1130,6 +1151,7 @@
         - gpt-6-sol
         - gpt-6-luna
   capabilities:
+    hosted_tools: [ "web_search", "file_search", "code_execution", "image_generation", "mcp" ]
     reasoning_effort:
       options: [ "none", "low", "medium", "high", "xhigh", "max" ]
       default: medium
@@ -1139,6 +1161,7 @@
 - selector:
     name: gpt-6.1-sol
   capabilities:
+    hosted_tools: [ "web_search", "file_search", "code_execution", "image_generation", "mcp" ]
     reasoning_effort:
       options: [ "low", "medium", "high", "xhigh", "max" ]
       default: medium
@@ -1146,5 +1169,6 @@
 - selector:
     name: gpt-6-astra
   capabilities:
+    hosted_tools: [ "web_search", "file_search", "code_execution", "image_generation", "mcp" ]
     reasoning_effort:
       options: [ "low", "medium", "high", "xhigh", "max" ]

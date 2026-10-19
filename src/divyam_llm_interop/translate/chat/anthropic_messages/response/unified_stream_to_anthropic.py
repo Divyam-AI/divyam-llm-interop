@@ -16,6 +16,8 @@ from divyam_llm_interop.translate.chat.anthropic_messages.response.reasoning_blo
     wrap_signature,
 )
 from divyam_llm_interop.translate.chat.anthropic_messages.response.stream_state import (
+    ANTHROPIC_CITATION_KEY,
+    ANTHROPIC_SERVER_EVENT_KEY,
     ANTHROPIC_THINKING_EVENT_KEY,
     TargetStreamState,
 )
@@ -138,6 +140,12 @@ def _consume_chunk(
     if isinstance(native_thinking, dict):
         # The same chunk's reasoning_content is the text for other clients.
         return _replay_thinking_event(native_thinking, state)
+    native_server = chunk.unknowns.get(ANTHROPIC_SERVER_EVENT_KEY)
+    if isinstance(native_server, dict):
+        return _replay_server_event(native_server, state)
+    citation = chunk.unknowns.get(ANTHROPIC_CITATION_KEY)
+    if isinstance(citation, dict):
+        return _replay_citation(citation, state)
     for choice in chunk.choices:
         if choice.index != 0:
             _target_error(
@@ -218,6 +226,48 @@ def _buffer_tool_calls(tool_calls: list[Any], state: TargetStreamState) -> None:
                 )
             buffer["name"] = tool_call.function.name
         buffer["arguments"] += tool_call.function.arguments
+
+
+def _replay_server_event(
+    event: dict[str, Any], state: TargetStreamState
+) -> list[dict[str, Any]]:
+    """Re-emit an event of a server tool's call or result block, renumbered."""
+    if event.get("type") == "content_block_start":
+        events = _close_open_blocks(state)
+        state.server_block_index = state.next_block_index
+        state.next_block_index += 1
+        return events + [{**event, "index": state.server_block_index}]
+    index = state.server_block_index
+    if index is None:
+        _stream_error("server tool event references no open block", "$.index")
+    if event.get("type") == "content_block_stop":
+        state.server_block_index = None
+    return [{**event, "index": index}]
+
+
+def _replay_citation(
+    delta: dict[str, Any], state: TargetStreamState
+) -> list[dict[str, Any]]:
+    """Re-emit a citation on the text block it belongs to, opening it if needed.
+
+    A cited passage's citations arrive before its text, so the block may not
+    be open yet.
+    """
+    events = _close_display_thinking(state)
+    if state.text_block_index is None:
+        state.text_block_index = state.next_block_index
+        state.next_block_index += 1
+        events.append(
+            {
+                "type": "content_block_start",
+                "index": state.text_block_index,
+                "content_block": {"type": "text", "text": ""},
+            }
+        )
+    events.append(
+        {"type": "content_block_delta", "index": state.text_block_index, "delta": delta}
+    )
+    return events
 
 
 def _replay_thinking_event(
