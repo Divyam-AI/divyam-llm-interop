@@ -139,6 +139,10 @@ def convert_responses_to_completions_response(
             comp_usage["prompt_tokens_details"] = {
                 "cached_tokens": input_details["cached_tokens"]
             }
+            if input_details.get("cache_write_tokens"):
+                comp_usage["prompt_tokens_details"]["cache_write_tokens"] = (
+                    input_details["cache_write_tokens"]
+                )
 
         # Map output_tokens_details -> completion_tokens_details
         out_details = usage.get("output_tokens_details")

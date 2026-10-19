@@ -236,6 +236,10 @@ def convert_completions_to_responses_response(
             usage_out["input_tokens_details"] = {
                 "cached_tokens": prompt_details["cached_tokens"]
             }
+        if prompt_details and "cache_write_tokens" in prompt_details:
+            usage_out["input_tokens_details"]["cache_write_tokens"] = prompt_details[
+                "cache_write_tokens"
+            ]
 
         # Handle output details (reasoning, tool output, etc.)
         completion_details = usage.get("completion_tokens_details", {})

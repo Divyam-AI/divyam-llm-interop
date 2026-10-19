@@ -3,7 +3,12 @@
 
 from typing import Any
 
-from divyam_llm_interop.translate.chat.types import ChatResponse, ChatResponseStreaming
+from divyam_llm_interop.translate.chat.api_types import ModelApiType
+from divyam_llm_interop.translate.chat.types import (
+    ChatResponse,
+    ChatResponseStreaming,
+    Model,
+)
 
 _CACHED = {
     "input_tokens": 10,
@@ -97,7 +102,12 @@ def test_cached_input_counts_as_prompt_tokens(
         usage["completion_tokens"],
         usage["total_tokens"],
     ) == (130, 30, 160)
-    assert usage["prompt_tokens_details"]["cached_tokens"] == 100
+    assert usage["prompt_tokens_details"] == {
+        "cached_tokens": 100,
+        "cache_write_tokens": 20,
+    }
+    # Nothing in an OpenAI-format answer names the provider that served it.
+    assert "anthropic" not in str(usage)
 
 
 def test_null_cache_counts_count_as_none(
@@ -197,5 +207,34 @@ async def test_streamed_openai_cached_tokens_reach_an_anthropic_client(
     assert delta == {
         "input_tokens": 30,
         "cache_read_input_tokens": 100,
+        "output_tokens": 30,
+    }
+
+
+def test_cache_writes_reach_a_responses_client_and_an_anthropic_one_back(
+    translator, anthropic_model, completions_model
+):
+    responses_model = Model("gpt-5.1", ModelApiType.RESPONSES)
+    with_writes = {
+        **_OPENAI_CACHED,
+        "prompt_tokens_details": {"cached_tokens": 100, "cache_write_tokens": 20},
+    }
+
+    as_responses = translator.translate_response(
+        ChatResponse(body=_message(_CACHED)), anthropic_model, responses_model
+    )
+    back = translator.translate_response(
+        ChatResponse(body=_completion(with_writes)), completions_model, anthropic_model
+    )
+
+    assert as_responses.body["usage"]["input_tokens"] == 130
+    assert as_responses.body["usage"]["input_tokens_details"] == {
+        "cached_tokens": 100,
+        "cache_write_tokens": 20,
+    }
+    assert back.body["usage"] == {
+        "input_tokens": 10,
+        "cache_read_input_tokens": 100,
+        "cache_creation_input_tokens": 20,
         "output_tokens": 30,
     }
