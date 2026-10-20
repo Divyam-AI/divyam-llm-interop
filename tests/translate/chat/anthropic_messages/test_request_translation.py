@@ -1255,7 +1255,7 @@ def test_tool_use_ids_remain_unique_across_completed_turns(
         )
 
 
-def test_target_anthropic_rejects_reused_tool_call_ids_across_completed_turns(
+def test_target_anthropic_renames_reused_tool_call_ids_across_completed_turns(
     translator, completions_model, anthropic_model
 ):
     call = {
@@ -1275,10 +1275,27 @@ def test_target_anthropic_rejects_reused_tool_call_ids_across_completed_turns(
         ],
     }
 
-    with pytest.raises(TargetCapabilityError, match="unique across the request"):
-        translator.translate_request(
-            ChatRequest(body=body), completions_model, anthropic_model
-        )
+    translated = translator.translate_request(
+        ChatRequest(body=body), completions_model, anthropic_model
+    ).body["messages"]
+
+    first_call, second_call = (
+        block["id"]
+        for message in translated
+        if message["role"] == "assistant"
+        for block in message["content"]
+        if block["type"] == "tool_use"
+    )
+    first_result, second_result = (
+        block["tool_use_id"]
+        for message in translated
+        if message["role"] == "user" and isinstance(message["content"], list)
+        for block in message["content"]
+        if block["type"] == "tool_result"
+    )
+    # The first keeps its ID; the repeat gets its own, and so does its result.
+    assert first_call == first_result == "call_weather"
+    assert second_call == second_result != "call_weather"
 
 
 def test_tool_results_must_immediately_follow_their_tool_use_turn(
@@ -1703,7 +1720,7 @@ def test_responses_native_tool_is_rejected_before_anthropic_translation(
         )
 
 
-def test_responses_reasoning_input_item_is_rejected_before_anthropic_translation(
+def test_responses_reasoning_input_item_does_not_reach_an_anthropic_target(
     translator, responses_model, anthropic_model
 ):
     source = {
@@ -1718,10 +1735,12 @@ def test_responses_reasoning_input_item_is_rejected_before_anthropic_translation
         ],
     }
 
-    with pytest.raises(UnsupportedFeatureError, match="provider-native"):
-        translator.translate_request(
-            ChatRequest(body=source), responses_model, anthropic_model
-        )
+    translated = translator.translate_request(
+        ChatRequest(body=source), responses_model, anthropic_model
+    ).body
+
+    # Another model's reasoning is not Claude's to replay.
+    assert "rs_1" not in str(translated["messages"])
 
 
 def test_gemini_media_part_is_rejected_before_anthropic_translation(
@@ -1778,7 +1797,6 @@ def test_nonportable_completions_controls_fail_before_anthropic_translation(
     ("field", "value"),
     [
         ("previous_response_id", "resp_previous"),
-        ("prompt_cache_key", "cache-key"),
         ("text", {"format": {"type": "json_schema"}}),
         ("top_logprobs", 3),
         ("store", True),
@@ -1853,7 +1871,7 @@ def test_nonportable_gemini_tool_choice_fails_before_translation(
         )
 
 
-def test_strict_function_schema_is_not_silently_dropped_for_anthropic_target(
+def test_strict_function_schema_reaches_an_anthropic_target(
     translator, completions_model, anthropic_model
 ):
     source = {
@@ -1872,10 +1890,11 @@ def test_strict_function_schema_is_not_silently_dropped_for_anthropic_target(
         ],
     }
 
-    with pytest.raises(TargetCapabilityError, match="strict"):
-        translator.translate_request(
-            ChatRequest(body=source), completions_model, anthropic_model
-        )
+    (tool,) = translator.translate_request(
+        ChatRequest(body=source), completions_model, anthropic_model
+    ).body["tools"]
+
+    assert tool["strict"] is True
 
 
 def test_completions_stream_options_cannot_suppress_anthropic_usage(

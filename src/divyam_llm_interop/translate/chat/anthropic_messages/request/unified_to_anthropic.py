@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import copy
+import hashlib
 import json
+import re
 from typing import Any, NoReturn
 
 from divyam_llm_interop.translate.chat.anthropic_messages.request.reasoning_history import (
@@ -85,13 +87,74 @@ def _build_request_body(
     return body
 
 
+#: Roles whose messages are instructions, which Claude takes as its system
+#: prompt. OpenAI names them developer as well as system; Codex uses developer.
+_INSTRUCTION_ROLES = ("system", "developer")
+
+
+def _instruction_text(content: Any) -> str:
+    """An instruction message's text, whether a string or a list of parts."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            str(part.get("text", ""))
+            for part in content
+            if isinstance(part, dict) and isinstance(part.get("text"), str)
+        )
+    return ""
+
+
+#: The tool-use IDs Anthropic accepts.
+_ANTHROPIC_ID = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def _anthropic_call_ids(unified_messages: list[UnifiedMessage]) -> None:
+    """Give every tool call an ID Anthropic accepts, and its results with it.
+
+    Anthropic takes only plain-token IDs, unique across the request. History
+    from other providers can repeat one -- some number calls within each
+    response, "exec_command:0" -- or use characters Anthropic refuses. Such a
+    call gets a fresh ID, and the results that answer it, which follow its
+    turn, are renamed to match.
+    """
+    seen: set[str] = set()
+    renamed: dict[str, str] = {}
+    for position, message in enumerate(unified_messages):
+        if message.role == "tool":
+            if message.tool_call_id in renamed:
+                message.tool_call_id = renamed[message.tool_call_id]
+            continue
+        renamed = {}
+        for index, tool_call in enumerate(message.tool_calls or []):
+            original = tool_call.id
+            fresh = original if original and _ANTHROPIC_ID.fullmatch(original) else ""
+            if not fresh or fresh in seen:
+                # Derived from where the call sits, never drawn at random: a
+                # client resends its history every turn, and the same history
+                # must read the same, or every turn misses the prompt cache.
+                digest = hashlib.sha256(
+                    f"{position}:{index}:{original}".encode()
+                ).hexdigest()
+                fresh = f"toolu_{digest[:24]}"
+            if original and fresh != original:
+                renamed[original] = fresh
+            tool_call.id = fresh
+            seen.add(fresh)
+
+
 def _build_messages(
     unified_messages: list[UnifiedMessage],
 ) -> tuple[list[dict[str, Any]], str]:
+    _anthropic_call_ids(unified_messages)
     system = "\n".join(
-        message.content or ""
-        for message in unified_messages
-        if message.role == "system"
+        text
+        for text in (
+            _instruction_text(message.content)
+            for message in unified_messages
+            if message.role in _INSTRUCTION_ROLES
+        )
+        if text
     )
     messages: list[dict[str, Any]] = []
     call_names: dict[str, str] = {}
@@ -99,7 +162,7 @@ def _build_messages(
     index = 0
     while index < len(unified_messages):
         message = unified_messages[index]
-        if message.role == "system":
+        if message.role in _INSTRUCTION_ROLES:
             index += 1
             continue
         if message.role == "tool":
@@ -247,8 +310,11 @@ def _add_tools(
         for index, tool in enumerate(unified.tools):
             if tool.type != "function":
                 _target_error("only function tools are supported", f"$.tools[{index}]")
-            if tool.function.unknowns:
-                key = min(tool.function.unknowns)
+            # Anthropic takes strict too; false is its default, so is left out.
+            strict = tool.function.unknowns.get("strict")
+            unknown = set(tool.function.unknowns) - {"strict"}
+            if unknown or not isinstance(strict, (bool, type(None))):
+                key = min(unknown or {"strict"})
                 _target_error(
                     f"tool field {key!r} is outside the supported text/tool profile",
                     f"$.tools[{index}].function.{key}",
@@ -265,10 +331,13 @@ def _add_tools(
                     f"$.tools[{index}].function.name",
                 )
             tool_names.add(tool.function.name)
+            # Anthropic's input_schema is JSON Schema, so it takes the
+            # constraint keywords other OpenAI-format routes keep.
             validate_portable_schema(
                 schema,
                 f"$.tools[{index}].function.parameters",
                 require_object_root=True,
+                allow_constraints=True,
             )
             encoded_tool: dict[str, Any] = {
                 "name": tool.function.name,
@@ -281,6 +350,8 @@ def _add_tools(
                         f"$.tools[{index}].function.description",
                     )
                 encoded_tool["description"] = tool.function.description
+            if strict is True:
+                encoded_tool["strict"] = True
             tools.append(encoded_tool)
         body["tools"] = tools
 

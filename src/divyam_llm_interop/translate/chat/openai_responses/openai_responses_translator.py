@@ -110,9 +110,14 @@ class OpenAiResponsesTranslator(Translator):
         source: Model,
         target: Model,
     ) -> None:
+        # Readable reasoning rides as reasoning_content to Chat Completions. An
+        # Anthropic target keeps only its own signed thinking, restored from the
+        # turn's state, and is never sent another model's; see
+        # resolve_unified_reasoning_state. Any other target has no place for it.
         if (
             source.api_type == ModelApiType.RESPONSES
-            and target.api_type != ModelApiType.COMPLETIONS
+            and target.api_type
+            not in (ModelApiType.COMPLETIONS, ModelApiType.ANTHROPIC_MESSAGES)
             and any(message.reasoning_content for message in unified.body.messages)
         ):
             raise TargetCapabilityError(
