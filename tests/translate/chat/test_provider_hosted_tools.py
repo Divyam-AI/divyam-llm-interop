@@ -821,3 +821,12 @@ async def test_streamed_server_tool_blocks_are_refused_for_a_client_of_another_a
 
     with pytest.raises(UnsupportedFeatureError, match="server tool blocks"):
         _ = [event async for event in streamed.stream]
+
+
+def test_the_refusal_names_the_hosted_tool() -> None:
+    with pytest.raises(
+        UnsupportedFeatureError, match="web_search runs on the provider"
+    ):
+        _translator(drop=False).translate_request(
+            ChatRequest(_codex_request()), RESPONSES, COMPLETIONS
+        )
