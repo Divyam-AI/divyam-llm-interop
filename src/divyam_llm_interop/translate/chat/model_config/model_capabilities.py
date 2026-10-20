@@ -241,6 +241,8 @@ class ModelCapabilities:
     # Effort to use when the client asks for adaptive thinking without a level:
     # "low", "medium" or "high". Unset means "medium".
     default_reasoning_effort: Optional[str] = None
+    # Superseded by hosted_tools ("code_execution"); still accepted, so an
+    # endpoint override naming it is not refused, and read by nothing.
     supports_code_execution: Optional[bool] = None
     # The provider-hosted tools this endpoint runs, by their names in
     # HOSTED_TOOL_KINDS. Support is often per provider rather than per model,

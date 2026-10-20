@@ -68,15 +68,15 @@ async def test_upstream_reasoning_streams_as_a_display_thinking_block(
     blocks = [e["content_block"] for e in events if e["type"] == "content_block_start"]
     assert [block["type"] for block in blocks] == [
         "thinking",
-        "text",
         "redacted_thinking",
+        "text",
     ]
     deltas = [e["delta"] for e in events if e["type"] == "content_block_delta"]
     assert [delta.get("thinking") for delta in deltas[:2]] == ["Weighing ", "options."]
     display = unwrap_envelope(deltas[2]["signature"])
     assert display is not None and display.kind == KIND_DISPLAY
     assert deltas[3] == {"type": "text_delta", "text": "Hello"}
-    turn = unwrap_envelope(blocks[2]["data"])
+    turn = unwrap_envelope(blocks[1]["data"])
     assert turn is not None
     assert (turn.domain, turn.kind) == ("completions::gpt-4.1-mini", KIND_TURN)
     assert turn.payload == {

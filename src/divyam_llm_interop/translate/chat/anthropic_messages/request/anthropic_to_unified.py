@@ -7,6 +7,7 @@ import json
 from typing import Any
 
 from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
+    DOCUMENT_BLOCK_TYPES,
     is_openai_strict_schema,
     text_from_blocks,
     validate_anthropic_request,
@@ -256,6 +257,9 @@ def _user_message_to_unified(
         if block["type"] == "image":
             user_parts.append(_image_part(block))
             continue
+        if block["type"] in DOCUMENT_BLOCK_TYPES:
+            user_parts.append({"type": "text", "text": document_text(block)})
+            continue
         tool_use_id = block["tool_use_id"]
         text, image_parts = _tool_result_to_unified(
             block.get("content"),
@@ -302,9 +306,48 @@ def _tool_result_to_unified(
     """Split tool_result content into its text and its images as content parts."""
     if not isinstance(content, list):
         return text_from_blocks(content, path), []
-    text = "".join(block["text"] for block in content if block["type"] == "text")
+    text = "".join(
+        block["text"] if block["type"] == "text" else document_text(block)
+        for block in content
+        if block["type"] == "text" or block["type"] in DOCUMENT_BLOCK_TYPES
+    )
     images = [_image_part(block) for block in content if block["type"] == "image"]
     return text, images
+
+
+def document_text(block: dict[str, Any]) -> str:
+    """A document or search result as text a model behind another API reads.
+
+    A text document carries its text and a search result its content, each
+    under a line naming it. A PDF or a document only reachable by URL has no
+    text here, so the conversation is told it was attached.
+    """
+    title = block.get("title")
+    named = f": {title}" if isinstance(title, str) and title else ""
+    if block["type"] == "search_result":
+        source = block.get("source")
+        where = f" ({source})" if isinstance(source, str) and source else ""
+        body = "".join(
+            str(part.get("text", ""))
+            for part in block.get("content") or []
+            if isinstance(part, dict) and part.get("type") == "text"
+        )
+        return f"[Search result{named}{where}]\n{body}\n"
+    source = block.get("source") or {}
+    kind = source.get("type")
+    if kind == "text" and isinstance(source.get("data"), str):
+        return f"[Document{named}]\n{source['data']}\n"
+    if kind == "content" and isinstance(source.get("content"), list):
+        body = "".join(
+            str(part.get("text", ""))
+            for part in source["content"]
+            if isinstance(part, dict) and part.get("type") == "text"
+        )
+        return f"[Document{named}]\n{body}\n"
+    media = source.get("media_type") or "file"
+    return (
+        f"[A document{named} ({media}) was attached here; this model cannot read it.]\n"
+    )
 
 
 def _image_part(block: dict[str, Any]) -> dict[str, Any]:

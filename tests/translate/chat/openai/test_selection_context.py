@@ -1,3 +1,6 @@
+# Copyright 2025 Divyam.ai
+# SPDX-License-Identifier: Apache-2.0
+
 from copy import deepcopy
 
 import pytest
@@ -53,14 +56,17 @@ def test_selector_reads_history_without_changing_opaque_serving_state():
     assert messages[4]["tool_call_id"] == "c1"
     assert "private-opaque-state" not in str(context)
     assert body == original
-    with pytest.raises(UnsupportedFeatureError, match="Opaque reasoning"):
-        ChatTranslator(
-            ChatTranslateConfig(allow_generic_translate=True)
-        ).translate_request(
-            ChatRequest(body),
-            Model("baseline", ModelApiType.RESPONSES),
-            Model("other", ModelApiType.COMPLETIONS),
-        )
+    # Serving another endpoint leaves the opaque state out of the request.
+    served = ChatTranslator(
+        ChatTranslateConfig(allow_generic_translate=True)
+    ).translate_request(
+        ChatRequest(body),
+        Model("baseline", ModelApiType.RESPONSES),
+        Model("other", ModelApiType.COMPLETIONS),
+    )
+    assert "opaque-state" not in str(served.body) and "more-state" not in str(
+        served.body
+    )
     messages[1]["content"] = "changed"
     assert body == original
 

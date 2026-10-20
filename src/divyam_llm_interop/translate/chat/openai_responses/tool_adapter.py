@@ -18,6 +18,9 @@ from typing import Any
 
 from lark import Lark, LarkError
 
+from divyam_llm_interop.translate.chat.base.provider_hosted_tools import (
+    responses_tool_kind,
+)
 from divyam_llm_interop.translate.chat.openai_responses.item_ids import (
     normalize_custom_tool_item_id,
 )
@@ -112,6 +115,13 @@ class ResponsesToolAdapter:
         for tool in tools:
             kind = tool.get("type")
             name = tool.get("name")
+            if responses_tool_kind(tool) is not None:
+                raise UnsupportedFeatureError(
+                    f"{kind} runs on the provider's servers, and this route's "
+                    "model cannot run it; drop_provider_hosted_tools serves the "
+                    "request without it",
+                    path="$.tools",
+                )
             if not isinstance(name, str) or not name:
                 raise UnsupportedFeatureError("Portable tools require a name")
             if kind == "namespace":
@@ -285,8 +295,11 @@ class ResponsesToolAdapter:
                     raise UnsupportedFeatureError(
                         "Tool output must be text or text parts"
                     )
+                # Images follow the turn's tool messages; see
+                # convert_responses_to_completions_request.
                 if isinstance(output, list) and any(
-                    p.get("type") not in {"input_text", "output_text", "text"}
+                    p.get("type")
+                    not in {"input_text", "output_text", "text", "input_image"}
                     for p in output
                 ):
                     raise UnsupportedFeatureError(

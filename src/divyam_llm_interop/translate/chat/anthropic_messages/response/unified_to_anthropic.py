@@ -144,7 +144,17 @@ def _content_blocks(
         )
     state_block = turn_block(domain, opaque_details(message), provider_state)
     if state_block is not None:
-        content.append(state_block)
+        # Ahead of the answer, after any thinking, where Claude puts its own:
+        # clients read the answer from the blocks after the reasoning.
+        answer_at = next(
+            (
+                index
+                for index, block in enumerate(content)
+                if block.get("type") not in ("thinking", "redacted_thinking")
+            ),
+            len(content),
+        )
+        content.insert(answer_at, state_block)
     return content
 
 

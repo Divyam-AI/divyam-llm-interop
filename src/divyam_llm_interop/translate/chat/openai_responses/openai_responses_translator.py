@@ -110,16 +110,17 @@ class OpenAiResponsesTranslator(Translator):
         source: Model,
         target: Model,
     ) -> None:
-        if (
-            source.api_type == ModelApiType.RESPONSES
-            and target.api_type != ModelApiType.COMPLETIONS
-            and any(message.reasoning_content for message in unified.body.messages)
+        # Readable reasoning rides as reasoning_content to Chat Completions. An
+        # Anthropic target keeps only its own signed thinking, restored from the
+        # turn's state, and is never sent another model's; see
+        # resolve_unified_reasoning_state. Any other target has no place for it,
+        # so the turns are served without it, as they are to Anthropic.
+        if source.api_type == ModelApiType.RESPONSES and target.api_type not in (
+            ModelApiType.COMPLETIONS,
+            ModelApiType.ANTHROPIC_MESSAGES,
         ):
-            raise TargetCapabilityError(
-                "Target adapter cannot preserve readable reasoning history",
-                target_api_type=target.api_type,
-                path="$.input",
-            )
+            for message in unified.body.messages:
+                message.reasoning_content = None
 
     @override
     def format_stream_error(self, error: InteropTranslationError) -> str:

@@ -52,6 +52,20 @@ _RESPONSES_FIELDS = {
     "tool_choice",
     "parallel_tool_calls",
     "reasoning",
+    # OpenAI's own bookkeeping, which a stateless harness such as Codex sends
+    # on every request and no other provider has a use for: conversion leaves
+    # each out. store is refused when true, before this; see
+    # ResponsesToolAdapter.normalize.
+    "store",
+    "include",
+    "prompt_cache_key",
+    "prompt_cache_retention",
+    "client_metadata",
+    "safety_identifier",
+    "service_tier",
+    "truncation",
+    "user",
+    "metadata",
 }
 _GEMINI_FIELDS = {
     "model",
@@ -103,7 +117,11 @@ def validate_source_profile_for_anthropic_target(
     if source.api_type == ModelApiType.RESPONSES:
         _reject_unknown_source_fields(body, _RESPONSES_FIELDS, source)
         _validate_responses_input(body.get("input"), source)
-        _validate_function_tools(body.get("tools"), source, "$.tools")
+        # Custom tools and namespaces become function tools in the tool
+        # adapter, which runs after this check.
+        _validate_function_tools(
+            body.get("tools"), source, "$.tools", {"function", "custom", "namespace"}
+        )
         return
     if source.api_type == ModelApiType.GEMINI:
         _reject_unknown_source_fields(body, _GEMINI_FIELDS, source)
@@ -258,7 +276,18 @@ def _validate_openai_message_content(messages: Any, source: Model) -> None:
 def _validate_responses_input(input_value: Any, source: Model) -> None:
     if not isinstance(input_value, list):
         return
-    allowed_items = {None, "message", "function_call", "function_call_output"}
+    # Custom tool calls and reasoning are prepared for translation after this
+    # check: the tool adapter turns the former into function calls, and the
+    # reasoning-history adapter decides what of the latter the target keeps.
+    allowed_items = {
+        None,
+        "message",
+        "function_call",
+        "function_call_output",
+        "custom_tool_call",
+        "custom_tool_call_output",
+        "reasoning",
+    }
     for item_index, item in enumerate(input_value):
         path = f"$.input[{item_index}]"
         if not isinstance(item, dict):
@@ -270,6 +299,8 @@ def _validate_responses_input(input_value: Any, source: Model) -> None:
                 path,
             )
         item_type = item.get("type")
+        if item_type in {"reasoning", "custom_tool_call", "custom_tool_call_output"}:
+            continue
         if item_type == "function_call":
             _validate_responses_function_call_item(item, source, path)
         elif item_type == "function_call_output":
@@ -291,7 +322,9 @@ def _validate_responses_input(input_value: Any, source: Model) -> None:
                     source,
                     part_path,
                 )
-            if set(part) - {"type", "text"}:
+            # Annotations and logprobs describe a reply's text; the text alone
+            # is what a target reads, so they are left behind.
+            if set(part) - {"type", "text", "annotations", "logprobs"}:
                 _source_unsupported(
                     "Responses text annotations and metadata are outside the supported text/tool profile",
                     source,
@@ -307,6 +340,7 @@ def _validate_responses_function_call_item(
         "id",
         "call_id",
         "name",
+        "namespace",
         "arguments",
         "status",
     }
@@ -359,11 +393,16 @@ def _validate_responses_message_item(
         )
 
 
-def _validate_function_tools(tools: Any, source: Model, path: str) -> None:
+def _validate_function_tools(
+    tools: Any,
+    source: Model,
+    path: str,
+    allowed: frozenset[str] | set[str] = frozenset({"function"}),
+) -> None:
     if not isinstance(tools, list):
         return
     for index, tool in enumerate(tools):
-        if not isinstance(tool, dict) or tool.get("type") != "function":
+        if not isinstance(tool, dict) or tool.get("type") not in allowed:
             _source_unsupported(
                 "only client function tools are portable",
                 source,
@@ -490,6 +529,13 @@ def _validate_gemini_generation_config(value: Any, source: Model) -> None:
         "maxOutputTokens",
         "stopSequences",
         "candidateCount",
+        # Structured output, which output_config.format carries.
+        "responseMimeType",
+        "response_mime_type",
+        "responseSchema",
+        "response_schema",
+        "responseJsonSchema",
+        "response_json_schema",
     }
     unknown = set(value) - allowed
     if unknown:

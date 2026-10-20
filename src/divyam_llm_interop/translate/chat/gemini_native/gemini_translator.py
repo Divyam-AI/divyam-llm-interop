@@ -5,7 +5,7 @@ import base64
 import copy
 import json
 import time
-from typing import Any
+from typing import Any, cast
 
 from typing_extensions import override
 
@@ -18,7 +18,10 @@ from divyam_llm_interop.translate.chat.base.reasoning_state import (
     narrate_tool_call,
     narrate_tool_result,
 )
-from divyam_llm_interop.translate.chat.base.translation_utils import close_async_stream
+from divyam_llm_interop.translate.chat.base.translation_utils import (
+    JSON_ONLY_INSTRUCTION,
+    close_async_stream,
+)
 from divyam_llm_interop.translate.chat.base.translator import Translator
 from divyam_llm_interop.translate.chat.gemini_native.response_normalizer import (
     normalize_gemini_response_body,
@@ -27,6 +30,7 @@ from divyam_llm_interop.translate.chat.model_config.model_registry import (
     ModelRegistry,
 )
 from divyam_llm_interop.translate.chat.translation_errors import (
+    UnsupportedFeatureError,
     raise_for_internal_stream_error,
 )
 from divyam_llm_interop.translate.chat.types import (
@@ -117,12 +121,34 @@ class GeminiTranslator(Translator):
 
             message: dict[str, Any] = {"role": role}
             text_parts: list[str] = []
+            # Text and images in order, kept apart only once an image appears.
+            content_parts: list[dict[str, Any]] = []
+            # The model's earlier thinking, which is reasoning, not its answer.
+            thoughts: list[str] = []
             tool_calls: list[dict[str, Any]] = []
 
             for part_index, part in enumerate(content.get("parts", [])):
                 text = part.get("text")
+                if text is not None and part.get("thought") and role == "assistant":
+                    thoughts.append(str(text))
+                    continue
                 if text is not None:
                     text_parts.append(str(text))
+                    content_parts.append({"type": "text", "text": str(text)})
+                    continue
+
+                media = self._media_part(
+                    part, f"$.contents[{content_index}].parts[{part_index}]"
+                )
+                if media is not None:
+                    if role == "assistant":
+                        # An assistant turn carries no image in Chat Completions;
+                        # the conversation is told one was there.
+                        note = "[An image produced earlier is not shown here.]"
+                        text_parts.append(note)
+                        content_parts.append({"type": "text", "text": note})
+                    else:
+                        content_parts.append(media)
                     continue
 
                 function_call = part.get("functionCall")
@@ -173,7 +199,11 @@ class GeminiTranslator(Translator):
                         }
                     )
 
-            if text_parts:
+            if thoughts:
+                message["reasoning_content"] = "".join(thoughts)
+            if any(part["type"] == "image_url" for part in content_parts):
+                message["content"] = content_parts
+            elif text_parts:
                 message["content"] = "\n".join(text_parts)
 
             if tool_calls and role == "assistant":
@@ -207,6 +237,15 @@ class GeminiTranslator(Translator):
             unified_request_dict["top_k"] = generation_config["topK"]
         if generation_config.get("seed") is not None:
             unified_request_dict["seed"] = generation_config["seed"]
+        response_format = self._response_format(generation_config)
+        if response_format is not None:
+            unified_request_dict["response_format"] = response_format
+        if response_format == {"type": "json_object"}:
+            messages = unified_request_dict["messages"]
+            if messages and messages[0].get("role") == "system":
+                messages[0]["content"] += f"\n\n{JSON_ONLY_INSTRUCTION}"
+            else:
+                messages.insert(0, {"role": "system", "content": JSON_ONLY_INSTRUCTION})
 
         tool_declarations = self._extract_function_declarations(body.get("tools", []))
         if tool_declarations:
@@ -831,12 +870,45 @@ class GeminiTranslator(Translator):
         return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
     @staticmethod
+    def _media_part(part: dict[str, Any], path: str) -> dict[str, Any] | None:
+        """An image part as Chat Completions content, or None if not media.
+
+        Inline data becomes a base64 data URL and file data its URI. Media
+        other than an image has no Chat Completions form here, and is refused
+        rather than dropped, since the model would answer without it.
+        """
+        inline = part.get("inlineData") or part.get("inline_data")
+        file_data = part.get("fileData") or part.get("file_data")
+        media = inline if isinstance(inline, dict) else file_data
+        if not isinstance(media, dict):
+            return None
+        mime = str(media.get("mimeType") or media.get("mime_type") or "")
+        if not mime.lower().startswith("image/"):
+            raise UnsupportedFeatureError(
+                f"Gemini {mime or 'media'} parts cannot be translated for this "
+                "model; only images can",
+                source_api_type=ModelApiType.GEMINI,
+                path=path,
+            )
+        if media is inline:
+            # Gemini accepts URL-safe base64, which Google's SDK sends; a data
+            # URL takes the standard alphabet, padded.
+            data = str(media.get("data", "")).replace("-", "+").replace("_", "/")
+            url = f"data:{mime};base64,{data}{'=' * (-len(data) % 4)}"
+        else:
+            url = str(media.get("fileUri") or media.get("file_uri") or "")
+        return {"type": "image_url", "image_url": {"url": url}}
+
+    @staticmethod
     def _extract_function_declarations(
         tools: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         declarations: list[dict[str, Any]] = []
         for tool in tools:
-            for declaration in tool.get("functionDeclarations", []):
+            declared = tool.get(
+                "functionDeclarations", tool.get("function_declarations")
+            )
+            for declaration in declared or []:
                 declarations.append(
                     GeminiTranslator._normalize_function_declaration(declaration)
                 )
@@ -845,8 +917,13 @@ class GeminiTranslator(Translator):
     @staticmethod
     def _normalize_function_declaration(declaration: dict[str, Any]) -> dict[str, Any]:
         normalized = dict(declaration)
-        # Gemini SDK request payloads often use `parameters_json_schema`; unified
-        # tools expect `parameters`. Keep both for round-trip fidelity.
+        # The JSON Schema form of a declaration's parameters, which REST
+        # clients spell `parametersJsonSchema` and Gemini SDK payloads
+        # `parameters_json_schema`. Unified tools expect `parameters`; the
+        # snake_case copy is kept for the round trip back to Gemini.
+        camel_schema = normalized.pop("parametersJsonSchema", None)
+        if isinstance(camel_schema, dict):
+            normalized.setdefault("parameters_json_schema", camel_schema)
         params_json_schema = normalized.get("parameters_json_schema")
         if normalized.get("parameters") is None and isinstance(
             params_json_schema, dict
@@ -1095,6 +1172,46 @@ class GeminiTranslator(Translator):
         if mime_type is not None:
             file_data["mimeType"] = mime_type
         return {"fileData": file_data}
+
+    @staticmethod
+    def _response_format(generation_config: dict[str, Any]) -> dict[str, Any] | None:
+        """A Chat Completions response_format for Gemini's structured-output controls.
+
+        responseJsonSchema is JSON Schema already; responseSchema, Gemini's
+        OpenAPI subset, is converted to it. The JSON MIME type without a schema
+        is JSON mode. Gemini's enum MIME type answers with a bare value, which no
+        response_format can ask for, so it is refused naming the field.
+        """
+        mime_type = _first_present(
+            generation_config, "responseMimeType", "response_mime_type"
+        )
+        if mime_type == "text/x.enum":
+            raise UnsupportedFeatureError(
+                "responseMimeType text/x.enum answers with a bare enum value, "
+                "which this route's model cannot be asked for; use "
+                "application/json with a string enum schema instead",
+                source_api_type=ModelApiType.GEMINI,
+                path="$.generationConfig.responseMimeType",
+            )
+        schema = _first_present(
+            generation_config, "responseJsonSchema", "response_json_schema"
+        )
+        if not isinstance(schema, dict):
+            openapi_schema = _first_present(
+                generation_config, "responseSchema", "response_schema"
+            )
+            if isinstance(openapi_schema, dict):
+                schema = _json_schema_from_openapi(openapi_schema)
+        if isinstance(schema, dict):
+            # Gemini's schemas leave properties optional and objects open,
+            # which strict mode forbids.
+            return {
+                "type": "json_schema",
+                "json_schema": {"name": "response", "schema": schema, "strict": False},
+            }
+        if mime_type == "application/json":
+            return {"type": "json_object"}
+        return None
 
     @staticmethod
     def _structured_output(
@@ -1419,3 +1536,54 @@ class GeminiTranslator(Translator):
         if finish_reason == "content_filter":
             return "SAFETY"
         return "STOP"
+
+
+def _first_present(config: dict[str, Any], *names: str) -> Any:
+    """A generationConfig value under the first of its spellings present."""
+    for name in names:
+        if config.get(name) is not None:
+            return config[name]
+    return None
+
+
+# OpenAPI keys Gemini's responseSchema adds that JSON Schema has no use for.
+_OPENAPI_ONLY_KEYS = frozenset(
+    {"nullable", "propertyOrdering", "property_ordering", "example"}
+)
+
+
+def _json_schema_from_openapi(schema: dict[str, Any]) -> dict[str, Any]:
+    """Gemini's OpenAPI-subset responseSchema as JSON Schema.
+
+    Types are lower-cased (`OBJECT` becomes `object`), `nullable` becomes a
+    `null` type alongside, and nested schemas are converted the same way.
+    """
+    converted: dict[str, Any] = {}
+    for key, value in schema.items():
+        if key in _OPENAPI_ONLY_KEYS:
+            continue
+        if key == "type" and isinstance(value, str):
+            converted["type"] = value.lower()
+        elif key == "properties" and isinstance(value, dict):
+            converted["properties"] = {
+                name: _json_schema_from_openapi(cast(dict[str, Any], sub))
+                if isinstance(sub, dict)
+                else sub
+                for name, sub in cast(dict[str, Any], value).items()
+            }
+        elif key == "items" and isinstance(value, dict):
+            converted["items"] = _json_schema_from_openapi(cast(dict[str, Any], value))
+        elif key in ("anyOf", "any_of") and isinstance(value, list):
+            converted["anyOf"] = [
+                _json_schema_from_openapi(cast(dict[str, Any], sub))
+                if isinstance(sub, dict)
+                else sub
+                for sub in cast(list[Any], value)
+            ]
+        elif key in ("minItems", "min_items", "maxItems", "max_items"):
+            converted["minItems" if key.startswith("min") else "maxItems"] = value
+        else:
+            converted[key] = value
+    if schema.get("nullable") is True and isinstance(converted.get("type"), str):
+        converted["type"] = [converted["type"], "null"]
+    return converted

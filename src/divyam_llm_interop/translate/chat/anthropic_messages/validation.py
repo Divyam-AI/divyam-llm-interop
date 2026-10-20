@@ -79,15 +79,16 @@ _TOOL_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _IMAGE_MEDIA_TYPES = ("image/gif", "image/jpeg", "image/png", "image/webp")
 # Reasoning blocks are valid only as assistant history; see _validate_message_content.
 _REASONING_BLOCK_TYPES = {"thinking", "redacted_thinking"}
+#: Content a client attaches as reference material: read for its text by a
+#: target behind another API, and passed whole to an Anthropic one.
+DOCUMENT_BLOCK_TYPES = frozenset({"document", "search_result"})
 _UNSUPPORTED_BLOCK_TYPES = {
-    "document",
     "server_tool_use",
     "web_search_tool_result",
     "web_fetch_tool_result",
     "code_execution_tool_result",
     "bash_code_execution_tool_result",
     "text_editor_code_execution_tool_result",
-    "search_result",
 }
 
 
@@ -418,6 +419,10 @@ def _validate_message_content(
             _validate_image_block(block, path)
             saw_user_content = True
             continue
+        if block_type in DOCUMENT_BLOCK_TYPES and role == "user":
+            _validate_document_block(block, path)
+            saw_user_content = True
+            continue
         if block_type == "tool_use" and role == "assistant":
             _validate_tool_use(block, path, known_tool_uses, seen_tool_use_ids)
             saw_assistant_tool = True
@@ -510,11 +515,26 @@ def _validate_tool_result_content(value: Any, path: str) -> None:
         if block_type == "image":
             _validate_image_block(block, block_path)
             continue
+        if block_type in DOCUMENT_BLOCK_TYPES:
+            _validate_document_block(block, block_path)
+            continue
         if block_type != "text":
             _unsupported_block(block_type, block_path)
         _validate_text_block_fields(block, block_path)
         if not isinstance(block.get("text"), str):
             _invalid("text block text must be a string", f"{block_path}.text")
+
+
+def _validate_document_block(block: dict[str, Any], path: str) -> None:
+    """A document or search result: only what reading it for its text needs."""
+    if block["type"] == "document":
+        _require_mapping(block.get("source"), f"{path}.source")
+        return
+    content = block.get("content")
+    if not isinstance(content, list):
+        _invalid(
+            "search_result content must be a list of text blocks", f"{path}.content"
+        )
 
 
 def _validate_image_block(block: dict[str, Any], path: str) -> None:

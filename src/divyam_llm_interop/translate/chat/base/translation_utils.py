@@ -313,3 +313,11 @@ def recursive_merge_list_append(
             result[key] = value
 
     return result
+
+
+#: The instruction that goes with JSON mode. OpenAI's JSON mode requires the
+#: word in the messages, and a target without JSON mode has only this to go on;
+#: a client of another API, such as Gemini's, need not have written it.
+JSON_ONLY_INSTRUCTION = (
+    "Respond with a single valid JSON value and nothing else: no prose, no code fences."
+)

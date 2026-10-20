@@ -43,6 +43,24 @@ that only take one. `none`, or no effort on a model that reasons by default,
 sends thinking disabled; a model that cannot stop reasoning never receives
 disabled and gets the lowest effort instead.
 
+### Structured output
+
+Each API's request for JSON reaches the target in the target's own form:
+
+- Gemini's `responseJsonSchema` is JSON Schema already; `responseSchema`, its
+  OpenAPI subset, is converted (`OBJECT` becomes `object`, `nullable` a `null`
+  type). Either becomes a non-strict `json_schema` response format, since
+  Gemini's schemas leave properties optional. The JSON MIME type without a
+  schema is JSON mode. Gemini's `text/x.enum` answers with a bare value no
+  other API can ask for, and is refused naming the field.
+- Claude takes the schema in `output_config.format`. As Anthropic's SDKs do,
+  every object gets `additionalProperties: false`, and constraints Claude
+  rejects (`minimum`, `maximum`, `multipleOf`, `minLength`, `maxLength`,
+  `maxItems`, `minItems` above 1) move into the field's description.
+- JSON mode carries an instruction to answer with JSON alone. Claude has no
+  JSON mode, and OpenAI's requires the word in the messages; on the Responses
+  API it must be in the input rather than the instructions.
+
 ### Reasoning across endpoints
 
 Each endpoint's reasoning state belongs to a signing domain: the declared
@@ -55,12 +73,14 @@ travels back in the content blocks the client returns on its next request:
   data, are wrapped in an envelope (`dvm1.` plus base64url JSON naming the
   domain) so they are replayed only to that domain.
 - Readable reasoning from another provider becomes a thinking block for
-  display. Opaque state another provider returns ends the answer in one
+  display. Opaque state another provider returns travels in a
   `redacted_thinking` envelope block: an OpenRouter-style gateway's
   `reasoning_details`, Gemini `thoughtSignature` values keyed to the function
   call (or text) they came on, or OpenAI Responses reasoning items with their
-  `encrypted_content`, in output order. An answer with no such state gets no
-  extra block.
+  `encrypted_content`, in output order. The block goes ahead of the text and
+  tool calls, where Claude puts its thinking, since clients read the answer
+  from the blocks after it; state reported only after the text has started
+  ends the answer. An answer with no such state gets no extra block.
 
 On the next request, each endpoint receives only its own state, and envelopes
 never reach a provider: Gemini gets each signature back beside its
@@ -69,6 +89,13 @@ back ahead of the call or message they led to. Requests from Anthropic-format
 clients to a reasoning Responses endpoint ask for
 `include: ["reasoning.encrypted_content"]`, unless it declares
 `supports_encrypted_reasoning: false` or the request uses server-side state.
+
+A Responses-format client (Codex) returns reasoning items itself: encrypted
+items go back unchanged on a native route (a shared `responses_wire_profile`)
+and are left out on any other, and readable items reach a Chat Completions
+endpoint as `reasoning_content`. No route is refused for the reasoning state a
+conversation carries; see
+[Reasoning across providers](docs/reasoning-across-providers.md).
 
 Tool calls a model cannot verify are rewritten as narration of past events, in
 the form `[Earlier, another assistant called the tool Read with input {...}.]`

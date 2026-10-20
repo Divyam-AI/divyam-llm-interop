@@ -5,6 +5,7 @@ import json
 from typing import Any
 
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
+from divyam_llm_interop.translate.chat.base.reasoning_state import tool_images_label
 from divyam_llm_interop.translate.chat.base.translation_utils import (
     drop_null_values_top_level,
 )
@@ -12,11 +13,7 @@ from divyam_llm_interop.translate.chat.translation_errors import UnsupportedFeat
 
 
 def readable_reasoning_text(item: dict[str, Any]) -> str:
-    """Read a reasoning item without converting opaque or unknown content."""
-    if item.get("encrypted_content"):
-        raise UnsupportedFeatureError(
-            "Opaque reasoning state requires a compatible Responses endpoint"
-        )
+    """Read a reasoning item's readable parts, refusing unknown content."""
     parts = (item.get("content") or []) + (item.get("summary") or [])
     if any(
         not isinstance(part, dict)
@@ -91,6 +88,17 @@ def convert_responses_to_completions_request(
         elif isinstance(input_data, list):
             pending_function_calls: list[dict[str, Any]] = []
             pending_reasoning: list[str] = []
+            # Chat Completions tool messages carry text only, and every tool
+            # message must directly follow its assistant turn. Images a tool
+            # returned therefore go in a user message after the turn's tool
+            # messages, each call's introduced by its label.
+            pending_tool_images: list[dict[str, Any]] = []
+
+            def flush_tool_images() -> None:
+                if not pending_tool_images:
+                    return
+                messages.append({"role": "user", "content": list(pending_tool_images)})
+                pending_tool_images.clear()
 
             def attach_reasoning(message: dict[str, Any]) -> None:
                 if not pending_reasoning:
@@ -121,8 +129,17 @@ def convert_responses_to_completions_request(
                 pending_function_calls.clear()
 
             for item_index, item in enumerate(input_data):
+                if item.get("type") != "function_call_output":
+                    flush_tool_images()
                 if item.get("type") == "reasoning":
                     flush_function_calls()
+                    if item.get("encrypted_content"):
+                        # Encrypted reasoning is readable only by the endpoint
+                        # that produced it, which a native route reaches with
+                        # the item unchanged. A translated route serves the
+                        # turn without it, summary included, as one model's
+                        # reasoning is never given to another.
+                        continue
                     text = readable_reasoning_text(item)
                     if text:
                         pending_reasoning.append(text)
@@ -167,10 +184,26 @@ def convert_responses_to_completions_request(
                         else:
                             content_parts.append(output)
                     elif isinstance(output, list):
+                        images = _content_parts(
+                            [
+                                part
+                                for part in output
+                                if isinstance(part, dict)
+                                and part.get("type") == "input_image"
+                            ],
+                            item_index,
+                        )
                         for part in output:
-                            if isinstance(part, dict):
-                                text = part.get("text", "")
-                                content_parts.append(text)
+                            if isinstance(part, dict) and "text" in part:
+                                content_parts.append(part.get("text", ""))
+                        if images:
+                            call_id = str(item.get("call_id") or "")
+                            pending_tool_images.append(
+                                {"type": "text", "text": tool_images_label(call_id)}
+                            )
+                            pending_tool_images.extend(images)
+                            if not any(content_parts):
+                                content_parts = ["[image result]"]
 
                     msg = {
                         "role": "tool",
@@ -236,6 +269,7 @@ def convert_responses_to_completions_request(
 
                 messages.append(msg)
             flush_function_calls()
+            flush_tool_images()
             if pending_reasoning:
                 attach_reasoning(messages[-1] if messages else {})
 
