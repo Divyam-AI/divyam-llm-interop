@@ -7,8 +7,9 @@ A translated route answers from an endpoint outside the client's signing
 domain. Genuine thinking it returns is kept as text, with its signature or
 redacted data wrapped in an envelope naming that endpoint's domain. Opaque
 state another provider returns (thought signatures, encrypted reasoning,
-reasoning_details) ends the answer in one redacted_thinking envelope block;
-an answer without such state gets no extra block. See reasoning_state for the
+reasoning_details) travels in a redacted_thinking envelope block ahead of the
+text and tool calls it led to, where Claude puts its own thinking; an answer
+without such state gets no extra block. See reasoning_state for the
 envelope format and how requests unwrap it.
 """
 

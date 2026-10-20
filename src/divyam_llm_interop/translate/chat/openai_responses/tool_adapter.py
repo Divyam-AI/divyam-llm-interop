@@ -295,8 +295,11 @@ class ResponsesToolAdapter:
                     raise UnsupportedFeatureError(
                         "Tool output must be text or text parts"
                     )
+                # Images follow the turn's tool messages; see
+                # convert_responses_to_completions_request.
                 if isinstance(output, list) and any(
-                    p.get("type") not in {"input_text", "output_text", "text"}
+                    p.get("type")
+                    not in {"input_text", "output_text", "text", "input_image"}
                     for p in output
                 ):
                     raise UnsupportedFeatureError(

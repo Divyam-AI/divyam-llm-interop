@@ -93,9 +93,9 @@ def unified_stream_to_anthropic(
             _stream_error("cannot translate an empty stream", "$")
         if not state.terminal_seen:
             _stream_error("stream ended without a terminal finish reason", "$")
-        for event in _close_open_blocks(state):
-            yield event
-        for event in _state_block(state):
+        for event in (
+            _close_answer_blocks(state) + _state_block(state) + _flush_tool_calls(state)
+        ):
             yield event
         yield _message_delta(state)
         yield {"type": "message_stop"}
@@ -163,6 +163,7 @@ def _consume_chunk(
         # role-only first chunk still leads the message.
         if choice.delta.content:
             if state.text_block_index is None:
+                events.extend(_state_block(state))
                 state.text_block_index = state.next_block_index
                 state.next_block_index += 1
                 events.append(
@@ -255,6 +256,7 @@ def _replay_citation(
     """
     events = _close_display_thinking(state)
     if state.text_block_index is None:
+        events.extend(_state_block(state))
         state.text_block_index = state.next_block_index
         state.next_block_index += 1
         events.append(
@@ -392,19 +394,33 @@ def _close_text_block(state: TargetStreamState) -> list[dict[str, Any]]:
 
 def _close_open_blocks(state: TargetStreamState) -> list[dict[str, Any]]:
     """Close the open text or reasoning block and emit buffered tool calls."""
+    return _close_answer_blocks(state) + _flush_tool_calls(state)
+
+
+def _close_answer_blocks(state: TargetStreamState) -> list[dict[str, Any]]:
+    """Close the open text or reasoning block; tool calls stay buffered."""
     events = _close_text_block(state) + _close_display_thinking(state)
     if state.thinking_block_index is not None:
         events.append(
             {"type": "content_block_stop", "index": state.thinking_block_index}
         )
         state.thinking_block_index = None
-    return events + _flush_tool_calls(state)
+    return events
 
 
 def _state_block(state: TargetStreamState) -> list[dict[str, Any]]:
+    """A block of the state reported so far, which is then spent.
+
+    State goes ahead of the text and tool calls that follow it, where Claude
+    puts its own thinking: clients read the answer from the blocks after the
+    reasoning, and an answer ending in a state block reads as empty. State a
+    provider reports only after the text has started still ends the answer.
+    """
     block = turn_block(
         state.reasoning_domain, state.reasoning_details, state.provider_state
     )
+    state.reasoning_details = []
+    state.provider_state = {}
     if block is None:
         return []
     index = state.next_block_index

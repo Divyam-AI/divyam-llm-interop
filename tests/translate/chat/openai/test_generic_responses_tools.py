@@ -216,13 +216,14 @@ def test_server_owned_state_cannot_be_silently_lost(field, value):
         translator().translate_request(req, SOURCE, TARGET)
 
 
-def test_opaque_reasoning_requires_declared_compatible_endpoint():
+def test_opaque_reasoning_reaches_only_a_declared_compatible_endpoint():
     req = request()
     req.body["input"].append(
         {"type": "reasoning", "encrypted_content": "opaque-state", "summary": []}
     )
-    with pytest.raises(UnsupportedFeatureError, match="Opaque reasoning"):
-        translator().translate_request(req, SOURCE, TARGET)
+    assert "opaque-state" not in json.dumps(
+        translator().translate_request(req, SOURCE, TARGET).body
+    )
     native = endpoint(
         "another-vendor-model",
         ModelApiType.RESPONSES,
@@ -233,9 +234,11 @@ def test_opaque_reasoning_requires_declared_compatible_endpoint():
         "another-vendor-model",
         ModelApiType.RESPONSES,
         responses_wire_profile="different-wire-profile",
+        supports_function_calling=True,
     )
-    with pytest.raises(UnsupportedFeatureError):
-        translator().translate_request(req, SOURCE, wrong)
+    assert "opaque-state" not in json.dumps(
+        translator().translate_request(req, SOURCE, wrong).body
+    )
 
 
 def test_undeclared_function_support_is_ineligible_even_when_names_match():
@@ -473,7 +476,7 @@ async def test_incomplete_stream_cannot_emit_an_executable_custom_tool(finish_re
     assert not any(e.get("item", {}).get("type") == "custom_tool_call" for e in emitted)
 
 
-def test_non_text_tool_result_is_rejected_instead_of_losing_content():
+def test_an_image_tool_result_is_carried_rather_than_lost():
     req = request()
     req.body["input"].append(
         {
@@ -482,6 +485,21 @@ def test_non_text_tool_result_is_rejected_instead_of_losing_content():
             "output": [
                 {"type": "input_image", "image_url": "https://example.invalid/a.png"}
             ],
+        }
+    )
+
+    messages = translator().translate_request(req, SOURCE, TARGET).body["messages"]
+
+    assert "https://example.invalid/a.png" in json.dumps(messages)
+
+
+def test_tool_output_that_cannot_be_carried_is_rejected_instead_of_lost():
+    req = request()
+    req.body["input"].append(
+        {
+            "type": "custom_tool_call_output",
+            "call_id": "call_audio",
+            "output": [{"type": "input_audio", "input_audio": {"data": "AAAA"}}],
         }
     )
     with pytest.raises(UnsupportedFeatureError, match="Non-text"):
@@ -590,11 +608,6 @@ async def test_streamed_reasoning_survives_conversion():
         {"input": "Continue", "conversation": "conv_old"},
         {"input": "Continue", "background": True},
         {"input": "Continue", "store": True},
-        {
-            "input": [
-                {"type": "reasoning", "summary": [], "encrypted_content": "opaque"}
-            ]
-        },
     ],
 )
 def test_default_responses_translation_rejects_content_it_cannot_preserve(body):

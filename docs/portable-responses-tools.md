@@ -51,14 +51,16 @@ profile permits native passthrough. Sharing a provider name, model prefix or API
 path is insufficient. Stored response IDs and encrypted state can also depend
 on account or deployment boundaries; profiles must reflect those boundaries.
 
-Without a matching native profile, the portable adapter rejects encrypted
-reasoning input, stored conversations, `previous_response_id`, background work,
-`store=True`, built-in tools (but see [Provider-hosted tools](#provider-hosted-tools))
-and non-text input/tool results. Readable reasoning
-is attached to its assistant message as `reasoning_content` on the Chat
-Completions path, never presented as a user-visible answer. Other target adapters
-that cannot retain that field reject the route. Endpoint conformance checks must
-verify acceptance of reasoning history as well as tool calls.
+Without a matching native profile, the portable adapter rejects stored
+conversations, `previous_response_id`, background work, `store=True`, built-in
+tools (but see [Provider-hosted tools](#provider-hosted-tools)) and non-text
+input/tool results. Encrypted reasoning items are left out, since only the
+endpoint that issued them can read them. Readable reasoning is attached to its
+assistant message as `reasoning_content` on the Chat Completions path, never
+presented as a user-visible answer; targets with no such field are served
+without it. See [Reasoning across providers](reasoning-across-providers.md).
+Endpoint conformance checks must verify acceptance of reasoning history as well
+as tool calls.
 
 If an endpoint returns opaque provider reasoning, declare
 `emits_opaque_reasoning=True`; it is excluded from this Responses bridge before
@@ -71,12 +73,12 @@ native passthrough. Old unmarked items cannot be reliably attributed to the
 adapter and are left unchanged; start a fresh conversation when upgrading an old
 mixed-provider transcript.
 
-This preservation policy applies to every Responses caller, including callers
-without custom tools. Encrypted state in a conversation restricts subsequent
-requests to compatible native routes. The router must filter incompatible
-candidates before selection; an otherwise cheaper model does not justify
-discarding state. Unexpected opaque output fails even after a paid provider call,
-so accurate endpoint capability registration is required to avoid that failure.
+This policy applies to every Responses caller, including callers without
+custom tools. Encrypted state in a conversation does not restrict later
+requests: a native route returns it, and any other route serves the
+conversation without it. Unexpected opaque output fails even after a paid
+provider call, so accurate endpoint capability registration is required to
+avoid that failure.
 
 ## Provider-hosted tools
 

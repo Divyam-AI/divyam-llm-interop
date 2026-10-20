@@ -1,3 +1,6 @@
+# Copyright 2025 Divyam.ai
+# SPDX-License-Identifier: Apache-2.0
+
 from copy import deepcopy
 
 import pytest
@@ -7,7 +10,6 @@ from divyam_llm_interop.translate.chat.translate import (
     ChatTranslateConfig,
     ChatTranslator,
 )
-from divyam_llm_interop.translate.chat.translation_errors import UnsupportedFeatureError
 from divyam_llm_interop.translate.chat.types import ChatRequest, ChatResponse, Model
 
 
@@ -49,7 +51,7 @@ def test_native_readable_reasoning_is_returned_to_its_endpoint_unchanged(encrypt
     assert body == original
 
 
-def test_adapter_reasoning_cannot_be_disguised_as_native_assistant_text():
+def test_another_models_reasoning_is_left_out_of_a_native_route():
     tr = ChatTranslator(ChatTranslateConfig(allow_generic_translate=True))
     response = tr.translate_response(
         ChatResponse(
@@ -76,9 +78,11 @@ def test_adapter_reasoning_cannot_be_disguised_as_native_assistant_text():
     )
     body = {"model": "baseline", "input": response.body["output"], "store": False}
     original = deepcopy(body)
-    with pytest.raises(UnsupportedFeatureError, match="Adapter-created reasoning"):
-        translate(body)
+    native = translate(body)
     assert body == original
+    # The answer stays; the reasoning, another model's, is not sent.
+    assert [item.get("type") for item in native["input"]] == ["message"]
+    assert "Six times seven." not in str(native)
     portable = tr.translate_request(
         ChatRequest(body),
         model("baseline"),

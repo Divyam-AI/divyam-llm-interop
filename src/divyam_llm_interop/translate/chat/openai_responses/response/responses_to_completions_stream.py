@@ -38,6 +38,10 @@ class ResponsesToCompletionsStreamConverter:
         self.item_call_ids: dict[str, str] = {}
         self.tool_call_index_counter = 0
         self.is_first_chunk = True
+        # Output items finished so far, and whether their reasoning state has
+        # been reported ahead of the message.
+        self.done_items: list[dict[str, Any]] = []
+        self.state_reported = False
 
     def _create_base_chunk(self) -> dict[str, Any]:
         """Creates the boilerplate for a ChatCompletionChunk."""
@@ -72,6 +76,19 @@ class ResponsesToCompletionsStreamConverter:
                         chunk["choices"][0]["delta"] = {"role": role}
                         yield chunk
                         self.is_first_chunk = False
+                    # The reasoning that led to the message is final before
+                    # its text starts, so it is reported ahead of the text.
+                    # Anything output after the message is placed by replay.
+                    reasoning_state = reasoning_output_state(
+                        [*self.done_items, {"type": "message"}]
+                    )
+                    if reasoning_state is not None and not self.state_reported:
+                        chunk = self._create_base_chunk()
+                        chunk[RESPONSE_STATE_KEY] = {
+                            STATE_RESPONSES_OUTPUT: reasoning_state
+                        }
+                        yield chunk
+                        self.state_reported = True
 
                 elif item_type == "function_call":
                     item_id = item.get("id")
@@ -145,9 +162,14 @@ class ResponsesToCompletionsStreamConverter:
                 "response.content_part.done",
                 "response.output_text.done",
                 "response.function_call_arguments.done",
-                "response.output_item.done",
                 "response.in_progress",
             ):
+                continue
+
+            elif event_type == "response.output_item.done":
+                item = event.get("item")
+                if isinstance(item, dict):
+                    self.done_items.append(item)
                 continue
 
             # Terminal events — emit final chunk and stop
@@ -205,7 +227,7 @@ class ResponsesToCompletionsStreamConverter:
         chunk["choices"][0]["finish_reason"] = finish_reason
         # The completed response lists every output item, reasoning included.
         reasoning_state = reasoning_output_state(response.get("output"))
-        if reasoning_state is not None:
+        if reasoning_state is not None and not self.state_reported:
             chunk[RESPONSE_STATE_KEY] = {STATE_RESPONSES_OUTPUT: reasoning_state}
 
         if usage:

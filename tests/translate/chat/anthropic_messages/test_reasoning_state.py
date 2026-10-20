@@ -325,7 +325,7 @@ def test_completions_gateway_reasoning_round_trips(translator):
         _GATEWAY,
         _CLIENT,
     )
-    thinking, text, tool_use, marker = answer.body["content"]
+    thinking, marker, text, tool_use = answer.body["content"]
     assert (thinking["type"], thinking["thinking"]) == ("thinking", "Start with a.py.")
     assert (text["type"], tool_use["type"]) == ("text", "tool_use")
     turn = unwrap_envelope(marker["data"])

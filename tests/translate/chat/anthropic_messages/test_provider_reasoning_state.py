@@ -84,7 +84,11 @@ def _tool_use_id(response: ChatResponse) -> str:
 
 
 def _turn_payload(response: ChatResponse) -> Any:
-    marker = response.body["content"][-1]
+    marker = next(
+        block
+        for block in response.body["content"]
+        if block["type"] == "redacted_thinking"
+    )
     envelope = _envelope(marker["data"])
     assert envelope.kind == KIND_TURN
     return envelope.payload
@@ -153,7 +157,7 @@ def test_claude_gemini_claude_gemini_loop_returns_gemini_its_signatures(translat
     gemini_answer = translator.translate_response(
         ChatResponse(body=_gemini_tool_response("a.py")), _GEMINI, _CLIENT
     )
-    thinking, tool_use, _marker = gemini_answer.body["content"]
+    thinking, _marker, tool_use = gemini_answer.body["content"]
     assert (thinking["type"], thinking["thinking"]) == (
         "thinking",
         "Reading the file first.",
@@ -406,12 +410,13 @@ async def test_gemini_stream_signature_reaches_the_turn_marker(translator):
     events = [event async for event in translated.stream]
 
     starts = [e["content_block"] for e in events if e["type"] == "content_block_start"]
+    # The turn's state goes ahead of the answer, after the thinking.
     assert [block["type"] for block in starts] == [
         "thinking",
-        "tool_use",
         "redacted_thinking",
+        "tool_use",
     ]
-    payload = _envelope(starts[-1]["data"]).payload
+    payload = _envelope(starts[1]["data"]).payload
     assert payload == {
         "gemini_thought_signatures": [
             {"tool_call_id": "call_0_Read", "signature": "gem-sig-1"}
@@ -456,7 +461,7 @@ def test_gpt_claude_gpt_loop_returns_gpt_its_encrypted_reasoning(translator):
     gpt_answer = translator.translate_response(
         ChatResponse(body=_responses_tool_response("call_1")), _GPT, _CLIENT
     )
-    thinking, tool_use, _marker = gpt_answer.body["content"]
+    thinking, _marker, tool_use = gpt_answer.body["content"]
     assert thinking["thinking"] == "Need a.py first."
     assert tool_use["id"] == "call_1"
     reasoning_item = {
@@ -583,14 +588,68 @@ async def test_responses_stream_reasoning_reaches_the_turn_marker(translator):
     out = [event async for event in translated.stream]
 
     starts = [e["content_block"] for e in out if e["type"] == "content_block_start"]
+    # The turn's state goes ahead of the answer, after the thinking.
     assert [block["type"] for block in starts] == [
         "thinking",
-        "tool_use",
         "redacted_thinking",
+        "tool_use",
     ]
-    turn = _envelope(starts[-1]["data"])
+    turn = _envelope(starts[1]["data"])
     assert turn.domain == _GPT_DOMAIN
     assert turn.payload["responses_output"][0]["encrypted_content"] == "enc-1"
+
+
+@pytest.mark.asyncio
+async def test_a_streamed_answer_ends_in_its_text_not_its_state(translator):
+    """Clients read the answer from the last block, as Claude orders them."""
+    reasoning = {
+        "type": "reasoning",
+        "id": "rs_1",
+        "summary": [{"type": "summary_text", "text": "Simple."}],
+        "encrypted_content": "enc-1",
+    }
+    message = {
+        "type": "message",
+        "id": "msg_1",
+        "role": "assistant",
+        "content": [{"type": "output_text", "text": "pong"}],
+    }
+    events = [
+        {"type": "response.created", "response": {"model": "gpt-5.1"}},
+        {"type": "response.output_item.added", "item": {"type": "reasoning"}},
+        {"type": "response.output_item.done", "item": reasoning},
+        {"type": "response.output_item.added", "item": {**message, "content": []}},
+        {"type": "response.output_text.delta", "item_id": "msg_1", "delta": "pong"},
+        {"type": "response.output_item.done", "item": message},
+        {
+            "type": "response.completed",
+            "response": {
+                "id": "resp_1",
+                "model": "gpt-5.1",
+                "status": "completed",
+                "output": [reasoning, message],
+                "usage": {"input_tokens": 5, "output_tokens": 2, "total_tokens": 7},
+            },
+        },
+    ]
+
+    translated = translator.translate_response_streaming(
+        ChatResponseStreaming(_stream(events)), _GPT, _CLIENT
+    )
+    out = [event async for event in translated.stream]
+
+    starts = [e["content_block"] for e in out if e["type"] == "content_block_start"]
+    assert [block["type"] for block in starts] == ["redacted_thinking", "text"]
+    turn = _envelope(starts[0]["data"])
+    assert turn.payload["responses_output"] == [
+        {
+            "type": "reasoning",
+            "id": "rs_1",
+            "encrypted_content": "enc-1",
+            "summary": [{"type": "summary_text", "text": "Simple."}],
+        },
+        {"type": "message"},
+    ]
 
 
 _GPT_COMPLETIONS = Model(
