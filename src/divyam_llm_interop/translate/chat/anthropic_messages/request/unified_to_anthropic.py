@@ -7,6 +7,9 @@ import json
 import re
 from typing import Any, NoReturn
 
+from divyam_llm_interop.translate.chat.anthropic_messages.request import (
+    structured_output,
+)
 from divyam_llm_interop.translate.chat.anthropic_messages.request.reasoning_history import (
     reconcile_anthropic_history,
 )
@@ -84,7 +87,22 @@ def _build_request_body(
         body["system"] = system
     _add_optional_fields(unified, body)
     _add_tools(unified, body)
+    _add_response_format(unified, body)
     return body
+
+
+def _add_response_format(
+    unified: UnifiedChatCompletionsRequestBody, body: dict[str, Any]
+) -> None:
+    """A JSON Schema as output_config.format; JSON mode as an instruction."""
+    response_format = unified.response_format
+    if response_format is None or response_format.type == "text":
+        return
+    output_format = structured_output.output_format(response_format)
+    if output_format is not None:
+        body.setdefault("output_config", {})["format"] = output_format
+    else:
+        body["system"] = structured_output.with_json_instruction(body.get("system"))
 
 
 #: Roles whose messages are instructions, which Claude takes as its system
@@ -471,10 +489,10 @@ def _add_thinking(
         else:
             body["thinking"] = {"type": "adaptive"}
             if plan.effort is not None:
-                body["output_config"] = {"effort": plan.effort}
+                body.setdefault("output_config", {})["effort"] = plan.effort
     elif plan.on:
         if plan.effort is not None:
-            body["output_config"] = {"effort": plan.effort}
+            body.setdefault("output_config", {})["effort"] = plan.effort
     elif capabilities.supports_reasoning is not False and (
         capabilities.reasoning_enabled_by_default
     ):
@@ -542,7 +560,6 @@ def _validate_unified_request(unified: UnifiedChatCompletionsRequestBody) -> Non
         "user",
         "logprobs",
         "top_logprobs",
-        "response_format",
         "seed",
         "service_tier",
         "modalities",

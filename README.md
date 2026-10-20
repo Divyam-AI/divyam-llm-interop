@@ -43,6 +43,24 @@ that only take one. `none`, or no effort on a model that reasons by default,
 sends thinking disabled; a model that cannot stop reasoning never receives
 disabled and gets the lowest effort instead.
 
+### Structured output
+
+Each API's request for JSON reaches the target in the target's own form:
+
+- Gemini's `responseJsonSchema` is JSON Schema already; `responseSchema`, its
+  OpenAPI subset, is converted (`OBJECT` becomes `object`, `nullable` a `null`
+  type). Either becomes a non-strict `json_schema` response format, since
+  Gemini's schemas leave properties optional. The JSON MIME type without a
+  schema is JSON mode. Gemini's `text/x.enum` answers with a bare value no
+  other API can ask for, and is refused naming the field.
+- Claude takes the schema in `output_config.format`. As Anthropic's SDKs do,
+  every object gets `additionalProperties: false`, and constraints Claude
+  rejects (`minimum`, `maximum`, `multipleOf`, `minLength`, `maxLength`,
+  `maxItems`, `minItems` above 1) move into the field's description.
+- JSON mode carries an instruction to answer with JSON alone. Claude has no
+  JSON mode, and OpenAI's requires the word in the messages; on the Responses
+  API it must be in the input rather than the instructions.
+
 ### Reasoning across endpoints
 
 Each endpoint's reasoning state belongs to a signing domain: the declared

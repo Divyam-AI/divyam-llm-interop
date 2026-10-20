@@ -10,6 +10,7 @@ from divyam_llm_interop.translate.chat.base.reasoning_state import (
     RESPONSES_OUTPUT_TYPE,
 )
 from divyam_llm_interop.translate.chat.base.translation_utils import (
+    JSON_ONLY_INSTRUCTION,
     drop_null_values_top_level,
 )
 from divyam_llm_interop.translate.chat.translation_errors import (
@@ -315,6 +316,16 @@ def convert_completion_request_to_responses_request(
                 )
             output_format.update(schema)
         responses_request["text"] = {"format": output_format}
+        if output_format.get("type") == "json_object" and (
+            "json" not in json.dumps(responses_request.get("input")).lower()
+        ):
+            # JSON mode requires the word in the input messages, where
+            # instructions do not count; the client may have written it in its
+            # system prompt, or, from another API, nowhere.
+            responses_request["input"] = [
+                {"role": "developer", "content": JSON_ONLY_INSTRUCTION},
+                *(responses_request.get("input") or []),
+            ]
     if user is not None:
         responses_request["user"] = user
     if reasoning:

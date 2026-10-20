@@ -529,6 +529,13 @@ def _validate_gemini_generation_config(value: Any, source: Model) -> None:
         "maxOutputTokens",
         "stopSequences",
         "candidateCount",
+        # Structured output, which output_config.format carries.
+        "responseMimeType",
+        "response_mime_type",
+        "responseSchema",
+        "response_schema",
+        "responseJsonSchema",
+        "response_json_schema",
     }
     unknown = set(value) - allowed
     if unknown:
