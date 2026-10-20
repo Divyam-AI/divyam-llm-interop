@@ -555,13 +555,11 @@ def test_malformed_thinking_controls_fail_closed(
     [
         "audio",
         "video",
-        "document",
         "file",
         "thinking",
         "redacted_thinking",
         "server_tool_use",
         "web_search_tool_result",
-        "search_result",
     ],
 )
 def test_unsupported_content_blocks_fail_closed(
