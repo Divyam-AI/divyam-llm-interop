@@ -63,7 +63,12 @@ def _gemini_mode(body: dict[str, Any]) -> Optional[str]:
     )
     if not isinstance(calling, dict):
         return None
-    mode = _GEMINI_MODES.get(str(calling.get("mode")).upper())
+    # Gemini's default mode is AUTO; a config without one only narrows the
+    # functions the model may call.
+    named_mode = calling.get("mode")
+    mode = _GEMINI_MODES.get(
+        named_mode.upper() if isinstance(named_mode, str) else "AUTO"
+    )
     allowed = calling.get("allowedFunctionNames") or calling.get(
         "allowed_function_names"
     )

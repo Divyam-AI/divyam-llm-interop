@@ -5,6 +5,9 @@ import pytest
 
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
 from divyam_llm_interop.translate.chat.base.reasoning_state import fit_effort
+from divyam_llm_interop.translate.chat.base.tool_choice import (
+    requested_tool_choice_mode,
+)
 from divyam_llm_interop.translate.chat.model_config.model_capabilities import (
     ModelCapabilities,
     ReasoningEffortConfig,
@@ -217,6 +220,23 @@ def test_a_forced_tool_is_refused_on_a_model_that_cannot_be_forced(
         "$.tool_choice",
         "$.toolConfig.functionCallingConfig.mode",
     )
+
+
+@pytest.mark.parametrize(
+    "calling, mode",
+    [
+        ({"mode": "ANY"}, "required"),
+        ({"mode": "ANY", "allowedFunctionNames": ["Read"]}, "named"),
+        ({"mode": "none"}, "none"),
+        ({"mode": "VALIDATED"}, "auto"),
+        # No mode is Gemini's default, AUTO, whatever functions it allows.
+        ({"allowedFunctionNames": ["Read"]}, "auto"),
+        ({}, None),
+    ],
+)
+def test_a_gemini_tool_choice_is_read_in_its_own_form(calling, mode):
+    body = {"toolConfig": {"functionCallingConfig": calling}}
+    assert requested_tool_choice_mode(body, ModelApiType.GEMINI) == mode
 
 
 def test_a_forced_tool_is_refused_on_a_native_route_too(translator):
