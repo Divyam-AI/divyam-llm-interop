@@ -5,10 +5,10 @@ import json
 from typing import Any
 
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
-from divyam_llm_interop.translate.chat.base.reasoning_state import tool_images_label
 from divyam_llm_interop.translate.chat.base.translation_utils import (
     drop_null_values_top_level,
 )
+from divyam_llm_interop.translate.chat.reasoning_state import tool_images_label
 from divyam_llm_interop.translate.chat.translation_errors import UnsupportedFeatureError
 
 

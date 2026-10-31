@@ -6,12 +6,12 @@ import os
 import uuid
 from typing import Any
 
-from divyam_llm_interop.translate.chat.base.reasoning_state import (
-    RESPONSES_OUTPUT_TYPE,
-)
 from divyam_llm_interop.translate.chat.base.translation_utils import (
     JSON_ONLY_INSTRUCTION,
     drop_null_values_top_level,
+)
+from divyam_llm_interop.translate.chat.reasoning_state import (
+    RESPONSES_OUTPUT_TYPE,
 )
 from divyam_llm_interop.translate.chat.translation_errors import (
     InvalidProtocolRequestError,

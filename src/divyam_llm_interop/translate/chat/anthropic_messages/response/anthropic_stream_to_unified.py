@@ -18,18 +18,18 @@ from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
     is_portable_tool_name,
 )
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
-from divyam_llm_interop.translate.chat.base.hosted_web_search import (
+from divyam_llm_interop.translate.chat.base.translation_utils import (
+    close_async_stream,
+)
+from divyam_llm_interop.translate.chat.hosted_tools.split import (
+    is_anthropic_server_block,
+)
+from divyam_llm_interop.translate.chat.hosted_tools.web_search import (
     anthropic_citation,
     anthropic_reported_requests,
     anthropic_search_call,
     is_web_search_citation,
     is_web_search_server_block,
-)
-from divyam_llm_interop.translate.chat.base.provider_hosted_tools import (
-    is_anthropic_server_block,
-)
-from divyam_llm_interop.translate.chat.base.translation_utils import (
-    close_async_stream,
 )
 from divyam_llm_interop.translate.chat.translation_errors import (
     INTERNAL_ANTHROPIC_EVENT_KEY,

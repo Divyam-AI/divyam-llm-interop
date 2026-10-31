@@ -17,15 +17,15 @@ from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
     is_portable_tool_name,
 )
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
-from divyam_llm_interop.translate.chat.base.hosted_web_search import (
+from divyam_llm_interop.translate.chat.hosted_tools.split import (
+    is_anthropic_server_block,
+)
+from divyam_llm_interop.translate.chat.hosted_tools.web_search import (
     anthropic_citation,
     anthropic_reported_requests,
     anthropic_search_call,
     is_web_search_citation,
     is_web_search_server_block,
-)
-from divyam_llm_interop.translate.chat.base.provider_hosted_tools import (
-    is_anthropic_server_block,
 )
 from divyam_llm_interop.translate.chat.translation_errors import (
     ResponseTranslationError,
@@ -101,7 +101,7 @@ def _anthropic_only_content(
     """What in the response only an Anthropic client has a form for.
 
     Web search and its citations have a form in every API with hosted tools
-    (see hosted_web_search), so they are named apart: with web_search, only
+    (see hosted_tools.web_search), so they are named apart: with web_search, only
     they are; without, all else is.
     """
     content = [block for block in body["content"] if isinstance(block, dict)]

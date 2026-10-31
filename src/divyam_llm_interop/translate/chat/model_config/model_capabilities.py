@@ -24,7 +24,7 @@ TOOL_CHOICE_MODES = frozenset({"auto", "none", "required", "named"})
 
 #: Provider-independent names for tools a provider runs on its own servers,
 #: as an endpoint declares them in `hosted_tools`. Each provider's own tool
-#: types map onto these; see provider_hosted_tools.
+#: types map onto these; see hosted_tools.split.
 HOSTED_TOOL_KINDS = frozenset(
     {
         "web_search",
@@ -302,7 +302,7 @@ class ModelCapabilities:
     def _validate_hosted_spellings(declared: dict[str, Any]) -> None:
         # Imported here: the hosted tool tables import the reasoning helpers,
         # which import this module.
-        from divyam_llm_interop.translate.chat.base.provider_hosted_tools import (
+        from divyam_llm_interop.translate.chat.hosted_tools.split import (
             spelling_kind,
         )
 

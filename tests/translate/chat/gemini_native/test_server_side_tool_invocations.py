@@ -19,13 +19,13 @@ from typing import Any
 import pytest
 
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
-from divyam_llm_interop.translate.chat.base.reasoning_state import (
-    unwrap_envelope,
-    wrap_envelope,
-)
 from divyam_llm_interop.translate.chat.hosted_tools import (
     HostedToolCounter,
     hosted_tool_counts,
+)
+from divyam_llm_interop.translate.chat.reasoning_state import (
+    unwrap_envelope,
+    wrap_envelope,
 )
 from divyam_llm_interop.translate.chat.translate import (
     ChatTranslateConfig,

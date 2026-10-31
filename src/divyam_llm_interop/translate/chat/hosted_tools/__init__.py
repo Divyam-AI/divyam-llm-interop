@@ -17,7 +17,15 @@ from collections.abc import Iterable
 from typing import Any, Optional
 
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
-from divyam_llm_interop.translate.chat.base.hosted_web_search import (
+from divyam_llm_interop.translate.chat.hosted_tools.split import (
+    anthropic_kind,
+    declared_hosted_kinds,
+    responses_call_kind,
+)
+from divyam_llm_interop.translate.chat.hosted_tools.split import (
+    dropped_tools_note as _dropped_tools_note,
+)
+from divyam_llm_interop.translate.chat.hosted_tools.web_search import (
     CROSS_API_KINDS,
     WEB_SEARCH_APIS,
     anthropic_block_counts,
@@ -28,14 +36,6 @@ from divyam_llm_interop.translate.chat.base.hosted_web_search import (
     hosted_usage,
     responses_item_counts,
     responses_reported_requests,
-)
-from divyam_llm_interop.translate.chat.base.provider_hosted_tools import (
-    anthropic_kind,
-    declared_hosted_kinds,
-    responses_call_kind,
-)
-from divyam_llm_interop.translate.chat.base.provider_hosted_tools import (
-    dropped_tools_note as _dropped_tools_note,
 )
 from divyam_llm_interop.translate.chat.model_config.model_capabilities import (
     HOSTED_TOOL_KINDS,

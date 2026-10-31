@@ -14,7 +14,7 @@ from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
     validate_anthropic_request,
     without_null_fields,
 )
-from divyam_llm_interop.translate.chat.base.reasoning_state import (
+from divyam_llm_interop.translate.chat.reasoning_state import (
     DEFAULT_EFFORT_KEY,
     DISPLAY_TEXT_KEY,
     KIND_ANTHROPIC_GENUINE,

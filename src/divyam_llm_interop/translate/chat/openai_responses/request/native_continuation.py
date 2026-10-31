@@ -9,7 +9,7 @@ narrated, since its record carries an ID this endpoint never issued.
 
 from typing import Any
 
-from divyam_llm_interop.translate.chat.base.provider_hosted_tools import (
+from divyam_llm_interop.translate.chat.hosted_tools.split import (
     without_adapter_search_items,
 )
 from divyam_llm_interop.translate.chat.openai_responses.item_ids import (

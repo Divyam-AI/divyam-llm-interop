@@ -4,13 +4,13 @@
 import pytest
 
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
-from divyam_llm_interop.translate.chat.base.reasoning_state import fit_effort
-from divyam_llm_interop.translate.chat.base.tool_choice import (
-    requested_tool_choice_mode,
-)
 from divyam_llm_interop.translate.chat.model_config.model_capabilities import (
     ModelCapabilities,
     ReasoningEffortConfig,
+)
+from divyam_llm_interop.translate.chat.reasoning_state import fit_effort
+from divyam_llm_interop.translate.chat.tool_choice import (
+    requested_tool_choice_mode,
 )
 from divyam_llm_interop.translate.chat.translation_errors import (
     InvalidProtocolRequestError,

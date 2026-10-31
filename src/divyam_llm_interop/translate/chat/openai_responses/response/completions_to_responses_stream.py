@@ -8,12 +8,12 @@ from copy import deepcopy
 from typing import Any, Optional
 
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
-from divyam_llm_interop.translate.chat.base.hosted_web_search import (
+from divyam_llm_interop.translate.chat.base.translation_utils import client_call_id
+from divyam_llm_interop.translate.chat.hosted_tools.web_search import (
     hosted_usage,
     responses_annotation,
     responses_search_item,
 )
-from divyam_llm_interop.translate.chat.base.translation_utils import client_call_id
 from divyam_llm_interop.translate.chat.unified.unified_hosted_tools import (
     HOSTED_TOOL_EVENTS_FIELD,
     UnifiedHostedToolEvent,

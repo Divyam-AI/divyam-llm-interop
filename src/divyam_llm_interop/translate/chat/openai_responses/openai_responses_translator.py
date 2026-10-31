@@ -8,7 +8,6 @@ from typing_extensions import override
 
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
 from divyam_llm_interop.translate.chat.base import translation_utils
-from divyam_llm_interop.translate.chat.base.reasoning_state import RETURNS_STATE_KEY
 from divyam_llm_interop.translate.chat.base.translation_utils import close_async_stream
 from divyam_llm_interop.translate.chat.base.translator import Translator
 from divyam_llm_interop.translate.chat.model_config.model_capabilities import (
@@ -50,6 +49,7 @@ from divyam_llm_interop.translate.chat.openai_responses.response.responses_to_co
 from divyam_llm_interop.translate.chat.openai_responses.tool_adapter import (
     ResponsesToolAdapter,
 )
+from divyam_llm_interop.translate.chat.reasoning_state import RETURNS_STATE_KEY
 from divyam_llm_interop.translate.chat.translation_errors import (
     InteropTranslationError,
     TargetCapabilityError,

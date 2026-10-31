@@ -5,17 +5,17 @@ import time
 import uuid
 from typing import Any
 
-from divyam_llm_interop.translate.chat.base.hosted_web_search import (
+from divyam_llm_interop.translate.chat.base.translation_utils import (
+    drop_null_values_top_level,
+)
+from divyam_llm_interop.translate.chat.hosted_tools.web_search import (
     responses_citation,
     responses_reported_requests,
     responses_search_call,
 )
-from divyam_llm_interop.translate.chat.base.reasoning_state import (
+from divyam_llm_interop.translate.chat.reasoning_state import (
     RESPONSE_STATE_KEY,
     STATE_RESPONSES_OUTPUT,
-)
-from divyam_llm_interop.translate.chat.base.translation_utils import (
-    drop_null_values_top_level,
 )
 from divyam_llm_interop.translate.chat.unified.unified_hosted_tools import (
     HOSTED_TOOLS_FIELD,

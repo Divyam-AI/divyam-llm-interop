@@ -20,7 +20,19 @@ from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
 )
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
 from divyam_llm_interop.translate.chat.base import translation_utils
-from divyam_llm_interop.translate.chat.base.hosted_web_search import (
+from divyam_llm_interop.translate.chat.base.translation_utils import (
+    normalize_model_name,
+)
+from divyam_llm_interop.translate.chat.base.translator import Translator
+from divyam_llm_interop.translate.chat.gemini_native.gemini_translator import (
+    GeminiTranslator,
+)
+from divyam_llm_interop.translate.chat.hosted_tools.split import (
+    declared_hosted_kinds,
+    responses_call_kind,
+    split_provider_hosted_tools,
+)
+from divyam_llm_interop.translate.chat.hosted_tools.web_search import (
     CROSS_API_KINDS,
     WEB_SEARCH_APIS,
     attach_hosted_tools,
@@ -28,31 +40,6 @@ from divyam_llm_interop.translate.chat.base.hosted_web_search import (
     responses_item_counts,
     tools_for_target,
     without_replayed_gemini_searches,
-)
-from divyam_llm_interop.translate.chat.base.provider_hosted_tools import (
-    declared_hosted_kinds,
-    responses_call_kind,
-    split_provider_hosted_tools,
-)
-from divyam_llm_interop.translate.chat.base.reasoning_state import (
-    RESPONSE_DOMAIN_KEY,
-    RETURNS_STATE_KEY,
-    apply_default_effort,
-    fit_requested_effort,
-    plan_thinking,
-    reasoning_domain,
-    resolve_unified_reasoning_state,
-)
-from divyam_llm_interop.translate.chat.base.tool_choice import (
-    requested_tool_choice_mode,
-    tool_choice_path,
-)
-from divyam_llm_interop.translate.chat.base.translation_utils import (
-    normalize_model_name,
-)
-from divyam_llm_interop.translate.chat.base.translator import Translator
-from divyam_llm_interop.translate.chat.gemini_native.gemini_translator import (
-    GeminiTranslator,
 )
 from divyam_llm_interop.translate.chat.model_config.model_registry import (
     ModelRegistry,
@@ -62,6 +49,19 @@ from divyam_llm_interop.translate.chat.openai_completions.completions_translator
 )
 from divyam_llm_interop.translate.chat.openai_responses.openai_responses_translator import (
     OpenAiResponsesTranslator,
+)
+from divyam_llm_interop.translate.chat.reasoning_state import (
+    RESPONSE_DOMAIN_KEY,
+    RETURNS_STATE_KEY,
+    apply_default_effort,
+    fit_requested_effort,
+    plan_thinking,
+    reasoning_domain,
+    resolve_unified_reasoning_state,
+)
+from divyam_llm_interop.translate.chat.tool_choice import (
+    requested_tool_choice_mode,
+    tool_choice_path,
 )
 from divyam_llm_interop.translate.chat.translation_errors import (
     InteropTranslationError,
@@ -84,8 +84,8 @@ def _refuse_anthropic_only(unknowns: dict[str, Any], client: Model) -> None:
     """Refuse what the client has no form for, rather than lose it.
 
     Server tool blocks, citations and a paused turn arrive only from a server
-    tool; see provider_hosted_tools. A web search and its citations reach a
-    Responses or Gemini client in its own form (see hosted_web_search); the
+    tool; see hosted_tools.split. A web search and its citations reach a
+    Responses or Gemini client in its own form (see hosted_tools.web_search); the
     rest, and anything for a Chat Completions client, would be dropped.
     """
     found = anthropic_only_content(
@@ -177,7 +177,7 @@ class ChatTranslateConfig:
     # target declares in hosted_tools, where the route can carry them. The
     # rest are refused; with this set, they are removed instead, the model is
     # told they are unavailable this turn, and ChatRequest.dropped_hosted_tools
-    # names them, unless tool_choice forces one. See provider_hosted_tools.
+    # names them, unless tool_choice forces one. See hosted_tools.split.
     # Requests served natively forward them as sent whatever the setting.
     drop_provider_hosted_tools: bool = False
 
@@ -504,7 +504,7 @@ class ChatTranslator:
         response passed through (Responses) or rebuilt with those blocks
         intact (Anthropic). A Gemini route of that kind is always native.
         Between Responses, Anthropic and Gemini a route carries web search,
-        whose output each of them has a form for; see hosted_web_search. Chat
+        whose output each of them has a form for; see hosted_tools.web_search. Chat
         Completions has no hosted tools, so a route to or from it keeps none.
         """
         declared = declared_hosted_kinds(

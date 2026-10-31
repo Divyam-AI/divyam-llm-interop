@@ -3,7 +3,7 @@
 
 """Hosted tools in each API's own form, read and written through the hub.
 
-A hosted tool is named by its portable kind (see provider_hosted_tools); two
+A hosted tool is named by its portable kind (see hosted_tools.split); two
 tools are equivalent when their kinds match. This module holds each API's
 wire form of the tools a route carries between APIs, which is web search,
 the kind OpenAI Responses, Anthropic Messages and Gemini all run:
@@ -41,7 +41,7 @@ from itertools import pairwise
 from typing import Any, Optional
 
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
-from divyam_llm_interop.translate.chat.base.provider_hosted_tools import (
+from divyam_llm_interop.translate.chat.hosted_tools.split import (
     _ANTHROPIC_RECORD_PREFIX,
     _RESPONSES_RECORD_PREFIX,
     DEFAULT_HOSTED_SPELLINGS,
@@ -56,7 +56,7 @@ from divyam_llm_interop.translate.chat.base.provider_hosted_tools import (
     responses_call_kind,
     responses_tool_kind,
 )
-from divyam_llm_interop.translate.chat.base.reasoning_state import (
+from divyam_llm_interop.translate.chat.reasoning_state import (
     KIND_TURN,
     gemini_replay_parts,
     unwrap_envelope,

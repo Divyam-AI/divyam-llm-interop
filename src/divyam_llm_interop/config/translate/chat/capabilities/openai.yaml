@@ -1,6 +1,6 @@
 # hosted_tools lists the provider-hosted tools a model's Responses API runs,
 # as OpenAI's model pages state them. A kind the docs do not confirm is left
-# out, so it is dropped or refused rather than sent; see provider_hosted_tools.
+# out, so it is dropped or refused rather than sent; see hosted_tools.split.
 - selector:
     name:
       regex:

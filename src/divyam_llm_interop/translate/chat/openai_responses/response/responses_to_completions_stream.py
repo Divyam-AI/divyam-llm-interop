@@ -7,12 +7,12 @@ from collections.abc import AsyncGenerator
 from typing import Any
 
 from divyam_llm_interop.interop_logging import logger
-from divyam_llm_interop.translate.chat.base.hosted_web_search import (
+from divyam_llm_interop.translate.chat.hosted_tools.web_search import (
     responses_citation,
     responses_reported_requests,
     responses_search_call,
 )
-from divyam_llm_interop.translate.chat.base.reasoning_state import (
+from divyam_llm_interop.translate.chat.reasoning_state import (
     RESPONSE_STATE_KEY,
     STATE_RESPONSES_OUTPUT,
 )

@@ -22,12 +22,12 @@ from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
     is_portable_tool_name,
 )
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
-from divyam_llm_interop.translate.chat.base.hosted_web_search import (
+from divyam_llm_interop.translate.chat.hosted_tools.web_search import (
     anthropic_cited_text_blocks,
     anthropic_search_blocks,
     hosted_usage,
 )
-from divyam_llm_interop.translate.chat.base.reasoning_state import (
+from divyam_llm_interop.translate.chat.reasoning_state import (
     RESPONSE_DOMAIN_KEY,
     RESPONSE_STATE_KEY,
 )

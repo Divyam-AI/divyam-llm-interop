@@ -18,16 +18,16 @@ from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
     validate_portable_schema,
 )
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
-from divyam_llm_interop.translate.chat.base.reasoning_state import (
-    ThinkingPlan,
-    plan_thinking,
-    reasoning_domain,
-)
 from divyam_llm_interop.translate.chat.model_config.model_capabilities import (
     ModelCapabilities,
 )
 from divyam_llm_interop.translate.chat.model_config.model_registry import (
     ModelRegistry,
+)
+from divyam_llm_interop.translate.chat.reasoning_state import (
+    ThinkingPlan,
+    plan_thinking,
+    reasoning_domain,
 )
 from divyam_llm_interop.translate.chat.translation_errors import (
     TargetCapabilityError,

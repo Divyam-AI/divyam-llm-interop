@@ -1,7 +1,7 @@
 # hosted_tools lists the built-in tools a model runs on Google's servers, as
 # its model page states them: Google Search grounding as web_search, URL
 # context as web_fetch. A kind the docs do not confirm is left out; see
-# provider_hosted_tools.
+# hosted_tools.split.
 - selector:
     name:
       regex: gemini.*

@@ -118,7 +118,7 @@
 # Server tools these families run, per Anthropic's web search, web fetch, code
 # execution and tool search pages. claude-4 is left out: it spans retired
 # versions, 4.5, which runs only code execution and tool search, and 4.6 on,
-# which runs all four. See provider_hosted_tools.
+# which runs all four. See hosted_tools.split.
 - selector:
     name:
       regex:

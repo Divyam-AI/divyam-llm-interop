@@ -7,7 +7,7 @@ import json
 import pytest
 
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
-from divyam_llm_interop.translate.chat.base.reasoning_state import wrap_envelope
+from divyam_llm_interop.translate.chat.reasoning_state import wrap_envelope
 from divyam_llm_interop.translate.chat.translate import (
     ChatTranslateConfig,
     ChatTranslator,

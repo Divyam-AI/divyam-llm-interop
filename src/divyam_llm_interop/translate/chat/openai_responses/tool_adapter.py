@@ -18,7 +18,7 @@ from typing import Any
 
 from lark import Lark, LarkError
 
-from divyam_llm_interop.translate.chat.base.provider_hosted_tools import (
+from divyam_llm_interop.translate.chat.hosted_tools.split import (
     responses_tool_kind,
 )
 from divyam_llm_interop.translate.chat.openai_responses.item_ids import (

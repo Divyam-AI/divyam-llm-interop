@@ -30,7 +30,7 @@ def anthropic_only_content(
     """What in a unified response or chunk the client cannot receive.
 
     hosted_tools says the client's API has a form for web search and its
-    citations; see hosted_web_search. Nothing else here has one outside
+    citations; see hosted_tools.web_search. Nothing else here has one outside
     Anthropic.
     """
     named = unknowns.get(ANTHROPIC_ONLY_CONTENT_KEY)

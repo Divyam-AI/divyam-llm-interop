@@ -6,9 +6,11 @@ import sys
 from dataclasses import dataclass
 from typing import Any, Optional, Union
 
-from divyam_llm_interop.translate.chat.base.regex_specificity import specificity_score
 from divyam_llm_interop.translate.chat.model_config.model_catalog import (
     ModelCatalogEntry,
+)
+from divyam_llm_interop.translate.chat.model_config.regex_specificity import (
+    specificity_score,
 )
 from divyam_llm_interop.translate.chat.types import Model
 

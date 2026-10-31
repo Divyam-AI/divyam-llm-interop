@@ -7,14 +7,14 @@ from typing import Any
 
 from divyam_llm_interop.interop_logging import logger
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
-from divyam_llm_interop.translate.chat.base.hosted_web_search import (
-    hosted_usage,
-    responses_annotation,
-    responses_search_item,
-)
 from divyam_llm_interop.translate.chat.base.translation_utils import (
     client_call_id,
     drop_null_values_top_level,
+)
+from divyam_llm_interop.translate.chat.hosted_tools.web_search import (
+    hosted_usage,
+    responses_annotation,
+    responses_search_item,
 )
 from divyam_llm_interop.translate.chat.unified.unified_hosted_tools import (
     UnifiedHostedToolOutput,

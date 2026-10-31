@@ -30,16 +30,16 @@ from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
     is_portable_tool_name,
 )
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
-from divyam_llm_interop.translate.chat.base.hosted_web_search import (
+from divyam_llm_interop.translate.chat.base.translation_utils import (
+    close_async_stream,
+)
+from divyam_llm_interop.translate.chat.hosted_tools.web_search import (
     anthropic_citation_entry,
     anthropic_search_blocks,
     hosted_usage,
 )
-from divyam_llm_interop.translate.chat.base.reasoning_state import (
+from divyam_llm_interop.translate.chat.reasoning_state import (
     RESPONSE_STATE_KEY,
-)
-from divyam_llm_interop.translate.chat.base.translation_utils import (
-    close_async_stream,
 )
 from divyam_llm_interop.translate.chat.translation_errors import (
     INTERNAL_ANTHROPIC_EVENT_KEY,

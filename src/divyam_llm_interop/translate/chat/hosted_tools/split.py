@@ -13,7 +13,7 @@ A hosted tool on a translated request is handled in one of three ways:
 
 * kept, when the target runs its kind and the route can carry it. The
   declaration bypasses translation and is restored onto the target's request,
-  in the target's spelling; see hosted_web_search.
+  in the target's spelling; see hosted_tools.web_search.
 * dropped, when ``ChatTranslateConfig.drop_provider_hosted_tools`` is set. The
   model is told in a short instruction that the tool is unavailable this turn.
 * otherwise left in place, for translation to refuse.
@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
-from divyam_llm_interop.translate.chat.base.reasoning_state import (
+from divyam_llm_interop.translate.chat.reasoning_state import (
     narrate_tool_call,
     narrate_tool_loaded,
     narrate_tool_result,
@@ -121,7 +121,7 @@ _GEMINI_TOOL_TYPE_KINDS = {
     "FILE_SEARCH": "file_search",
 }
 # Prefixes of the IDs given to search records this library writes for another
-# API's search; see hosted_web_search.
+# API's search; see hosted_tools.web_search.
 _ANTHROPIC_RECORD_PREFIX = "srvtoolu_dvy_"
 _RESPONSES_RECORD_PREFIX = "ws_dvy_"
 # Anthropic types defined by the client side despite their provider names.

@@ -8,16 +8,16 @@ from typing import Any
 from divyam_llm_interop.translate.chat.anthropic_messages.request.anthropic_to_unified import (
     tool_reference_text,
 )
-from divyam_llm_interop.translate.chat.base.reasoning_state import (
+from divyam_llm_interop.translate.chat.model_config.model_capabilities import (
+    ModelCapabilities,
+)
+from divyam_llm_interop.translate.chat.reasoning_state import (
     KIND_ANTHROPIC_REDACTED,
     KIND_ANTHROPIC_SIGNATURE,
     is_envelope,
     narrate_tool_call,
     narrate_tool_result,
     unwrap_envelope,
-)
-from divyam_llm_interop.translate.chat.model_config.model_capabilities import (
-    ModelCapabilities,
 )
 
 _REASONING_BLOCK_TYPES = {"thinking", "redacted_thinking"}
