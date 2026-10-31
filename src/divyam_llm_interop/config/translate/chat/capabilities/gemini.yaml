@@ -588,6 +588,10 @@
 
 # Gemini 4 and 3 return a 400 when a function call in the current turn comes
 # back without its thought signature. Gemini 3 Pro Image does not enforce it.
+# Calls arriving unsigned keep Google's skip value rather than being narrated:
+# clients in OpenAI formats return no signatures, so every call of their tool
+# loop arrives unsigned and narration would recast the model's own loop as
+# another assistant's past calls.
 - selector:
     name:
       regex:
@@ -595,6 +599,7 @@
         - gemini-4.*
   capabilities:
     tool_loop_requires_reasoning_replay: true
+    gemini_foreign_call_policy: skip_signature
 
 - selector:
     name: gemini-3-pro-image-preview

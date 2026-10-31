@@ -6,6 +6,7 @@ from typing import Any, NoReturn
 
 from divyam_llm_interop.translate.chat.anthropic_messages.response.stream_state import (
     ANTHROPIC_CITATION_KEY,
+    ANTHROPIC_PORTABLE_KEY,
     ANTHROPIC_SERVER_EVENT_KEY,
     ANTHROPIC_THINKING_EVENT_KEY,
     SourceStreamState,
@@ -17,6 +18,13 @@ from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
     is_portable_tool_name,
 )
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
+from divyam_llm_interop.translate.chat.base.hosted_web_search import (
+    anthropic_citation,
+    anthropic_reported_requests,
+    anthropic_search_call,
+    is_web_search_citation,
+    is_web_search_server_block,
+)
 from divyam_llm_interop.translate.chat.base.provider_hosted_tools import (
     is_anthropic_server_block,
 )
@@ -30,6 +38,10 @@ from divyam_llm_interop.translate.chat.translation_errors import (
     UnsupportedFeatureError,
 )
 from divyam_llm_interop.translate.chat.types import ChatResponseStreaming, Model
+from divyam_llm_interop.translate.chat.unified.unified_hosted_tools import (
+    HOSTED_TOOL_EVENTS_FIELD,
+    UnifiedHostedToolEvent,
+)
 from divyam_llm_interop.translate.chat.unified.unified_response import (
     UnifiedChatCompletionsStreamChunk,
     UnifiedChatResponseStreaming,
@@ -133,8 +145,23 @@ def _content_block_start(
         _stream_error("content_block must be an object", "$.content_block")
     block_type = block.get("type")
     if is_anthropic_server_block(block):
-        state.blocks[index] = {"type": "server", "open": True}
-        return [_server_chunk(state, event)]
+        web_search = is_web_search_server_block(block)
+        state.blocks[index] = {
+            "type": "server",
+            "open": True,
+            "web_search": web_search,
+            "id": str(block.get("id") or ""),
+            "input": "",
+        }
+        chunk = _server_chunk(state, event, portable=web_search)
+        if block_type == "web_search_tool_result":
+            call = anthropic_search_call(
+                block, state.search_queries.get(str(block.get("tool_use_id")))
+            )
+            chunk[HOSTED_TOOL_EVENTS_FIELD] = [
+                UnifiedHostedToolEvent(call=call).to_dict()
+            ]
+        return [chunk]
     if block_type in {"thinking", "redacted_thinking"}:
         _validate_reasoning_block_start(block)
         state.blocks[index] = {"type": block_type, "open": True}
@@ -148,7 +175,13 @@ def _content_block_start(
         text = block.get("text", "")
         if not isinstance(text, str):
             _stream_error("text must be a string", "$.content_block.text")
-        state.blocks[index] = {"type": "text", "open": True}
+        state.blocks[index] = {
+            "type": "text",
+            "open": True,
+            "start": state.text_length,
+            "citations": [],
+        }
+        state.text_length += len(text)
         return [_chunk(state, delta={"content": text})] if text else []
     if block_type == "tool_use":
         _validate_direct_tool_caller(
@@ -206,13 +239,24 @@ def _content_block_delta(
     if not isinstance(delta, dict):
         _stream_error("delta must be an object", "$.delta")
     if block["type"] == "server":
-        return _server_chunk(state, event)
+        if delta.get("type") == "input_json_delta" and isinstance(
+            delta.get("partial_json"), str
+        ):
+            block["input"] += delta["partial_json"]
+        return _server_chunk(state, event, portable=block["web_search"])
     if block["type"] == "text" and delta.get("type") == "citations_delta":
-        return _chunk(state, delta={}, chunk_unknowns={ANTHROPIC_CITATION_KEY: delta})
+        citation = delta.get("citation")
+        unknowns: dict[str, Any] = {ANTHROPIC_CITATION_KEY: delta}
+        if is_web_search_citation(citation):
+            # Reported to other clients once the block's text is complete.
+            block["citations"].append(citation)
+            unknowns[ANTHROPIC_PORTABLE_KEY] = True
+        return _chunk(state, delta={}, chunk_unknowns=unknowns)
     if block["type"] == "text" and delta.get("type") == "text_delta":
         text = delta.get("text")
         if not isinstance(text, str):
             _stream_error("text delta must contain a string", "$.delta.text")
+        state.text_length += len(text)
         return _chunk(state, delta={"content": text})
     if block["type"] == "thinking" and delta.get("type") == "thinking_delta":
         thinking = delta.get("thinking")
@@ -264,8 +308,29 @@ def _content_block_stop(
     if block["type"] in {"thinking", "redacted_thinking"}:
         return [_thinking_chunk(state, event, {})]
     if block["type"] == "server":
-        return [_server_chunk(state, event)]
+        if block["web_search"] and block["id"]:
+            state.search_queries[block["id"]] = _search_query(block["input"])
+        return [_server_chunk(state, event, portable=block["web_search"])]
+    if block["type"] == "text" and block["citations"]:
+        events = [
+            UnifiedHostedToolEvent(
+                citation=anthropic_citation(citation, block["start"], state.text_length)
+            ).to_dict()
+            for citation in block["citations"]
+        ]
+        chunk = _chunk(state, delta={})
+        chunk[HOSTED_TOOL_EVENTS_FIELD] = events
+        return [chunk]
     return []
+
+
+def _search_query(arguments: str) -> str:
+    try:
+        decoded = json.loads(arguments or "{}")
+    except json.JSONDecodeError:
+        return ""
+    query = decoded.get("query") if isinstance(decoded, dict) else None
+    return str(query) if query else ""
 
 
 def _validate_reasoning_block_start(block: dict[str, Any]) -> None:
@@ -285,11 +350,20 @@ def _validate_reasoning_block_start(block: dict[str, Any]) -> None:
         _stream_error("signature must be a string", "$.content_block.signature")
 
 
-def _server_chunk(state: SourceStreamState, event: dict[str, Any]) -> dict[str, Any]:
-    """A server tool block event, for an Anthropic client to replay."""
+def _server_chunk(
+    state: SourceStreamState, event: dict[str, Any], *, portable: bool = False
+) -> dict[str, Any]:
+    """A server tool block event, for an Anthropic client to replay.
+
+    A web search's events are portable: other clients read the search from
+    hosted_tool_events instead.
+    """
     # The block index is renumbered by whoever re-emits the event.
     native = {key: value for key, value in event.items() if key != "index"}
-    return _chunk(state, delta={}, chunk_unknowns={ANTHROPIC_SERVER_EVENT_KEY: native})
+    unknowns: dict[str, Any] = {ANTHROPIC_SERVER_EVENT_KEY: native}
+    if portable:
+        unknowns[ANTHROPIC_PORTABLE_KEY] = True
+    return _chunk(state, delta={}, chunk_unknowns=unknowns)
 
 
 def _thinking_chunk(
@@ -342,7 +416,7 @@ def _message_delta(event: dict[str, Any], state: SourceStreamState) -> dict[str,
         _read_input_usage(usage, state, "$.usage")
     state.output_tokens = _token_count(usage, "output_tokens", "$.usage")
     state.terminal_delta = True
-    return _chunk(
+    chunk = _chunk(
         state,
         delta={},
         finish_reason=finish_reason,
@@ -353,6 +427,12 @@ def _message_delta(event: dict[str, Any], state: SourceStreamState) -> dict[str,
         },
         include_usage=True,
     )
+    requests = anthropic_reported_requests(usage)
+    if requests:
+        chunk[HOSTED_TOOL_EVENTS_FIELD] = [
+            UnifiedHostedToolEvent(requests=requests).to_dict()
+        ]
+    return chunk
 
 
 def _message_stop(state: SourceStreamState) -> None:

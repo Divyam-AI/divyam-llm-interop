@@ -6,9 +6,18 @@ import uuid
 from typing import Any
 
 from divyam_llm_interop.interop_logging import logger
+from divyam_llm_interop.translate.chat.api_types import ModelApiType
+from divyam_llm_interop.translate.chat.base.hosted_web_search import (
+    hosted_usage,
+    responses_annotation,
+    responses_search_item,
+)
 from divyam_llm_interop.translate.chat.base.translation_utils import (
     client_call_id,
     drop_null_values_top_level,
+)
+from divyam_llm_interop.translate.chat.unified.unified_hosted_tools import (
+    UnifiedHostedToolOutput,
 )
 
 from .reasoning import readable_reasoning
@@ -16,6 +25,7 @@ from .reasoning import readable_reasoning
 
 def convert_completions_to_responses_response(
     completion_dict: dict[str, Any],
+    hosted: UnifiedHostedToolOutput | None = None,
 ) -> dict[str, Any]:
     """
     Convert a non-streaming Chat Completions API response (dict)
@@ -25,6 +35,9 @@ def convert_completions_to_responses_response(
 
     Args:
         completion_dict: Chat Completions API JSON/dict response.
+        hosted: What hosted tools did for the response: web_search_call
+            items ahead of the message, url_citation annotations on its
+            text, and their count in usage.
 
     Returns:
         Dict formatted as a Responses API response.
@@ -104,6 +117,10 @@ def convert_completions_to_responses_response(
                 }
             )
 
+        # Searches run before the answer that rests on them.
+        for call in hosted.calls if hosted else []:
+            responses_response["output"].append(responses_search_item(call))
+
         # Add text output
         if content is not None:
             msg_id = message.get("id", f"msg_{uuid.uuid4().hex}")
@@ -117,7 +134,14 @@ def convert_completions_to_responses_response(
 
             if isinstance(content, str):
                 message_item["content"].append(
-                    {"type": "output_text", "text": content, "annotations": []}
+                    {
+                        "type": "output_text",
+                        "text": content,
+                        "annotations": [
+                            responses_annotation(citation)
+                            for citation in (hosted.citations if hosted else [])
+                        ],
+                    }
                 )
             elif isinstance(content, list):
                 for piece in content:
@@ -262,6 +286,9 @@ def convert_completions_to_responses_response(
             if output_tokens_details:
                 # noinspection PyTypeChecker
                 usage_out["output_tokens_details"] = output_tokens_details
+
+        if hosted:
+            usage_out.update(hosted_usage(hosted.counts(), ModelApiType.RESPONSES))
 
         # noinspection PyTypeChecker
         responses_response["usage"] = usage_out

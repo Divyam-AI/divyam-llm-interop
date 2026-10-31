@@ -7,6 +7,23 @@
       - COMPLETIONS
     supports_reasoning: false
 
+# DeepSeek V3.1 and V3.2 think only when asked (reasoning_effort). Reasoning
+# comes back as reasoning_content, or as reasoning from some hosts.
+- selector:
+    name:
+      regex:
+        - deepseek-v3\.[12]
+  capabilities:
+    supported_api_types:
+      - COMPLETIONS
+    supports_json_mode: true
+    supports_function_calling: true
+    supports_vision: false
+    supports_reasoning: true
+    reasoning_enabled_by_default: false
+    reasoning_can_be_disabled: true
+    reasoning_dialect: openai
+
 # DeepSeek V4 thinks by default; thinking {"type": "disabled"} turns it off.
 # Reasoning comes back as reasoning_content. Once tools are in play every
 # earlier reasoning_content must be sent back, or the API answers 400;

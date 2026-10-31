@@ -1,0 +1,189 @@
+[
+  {
+    "candidates": [
+      {
+        "content": {
+          "parts": [
+            {
+              "thoughtSignature": "EpQECpEECAISjAQBaRR9E/y9nRvSCvaneHeKqGftBXSLWiNg",
+              "toolCall": {
+                "toolType": "GOOGLE_SEARCH_WEB",
+                "args": {
+                  "queries": [
+                    "current weather in Pune India"
+                  ]
+                },
+                "id": "call_248866"
+              }
+            }
+          ],
+          "role": "model"
+        },
+        "index": 0
+      }
+    ],
+    "usageMetadata": {
+      "promptTokenCount": 66,
+      "candidatesTokenCount": 16,
+      "totalTokenCount": 144,
+      "promptTokensDetails": [
+        {
+          "modality": "TEXT",
+          "tokenCount": 66
+        }
+      ],
+      "thoughtsTokenCount": 62,
+      "serviceTier": "standard"
+    },
+    "modelVersion": "gemini-3.8-flash",
+    "responseId": "EKblapPHCoKE694P-Y_fmQ0"
+  },
+  {
+    "candidates": [
+      {
+        "content": {
+          "parts": [
+            {
+              "thoughtSignature": "EoRECoFECAIS/EMBaRR9E3IxRylCH76hp4D4vyj84Z1l2kUp",
+              "toolResponse": {
+                "toolType": "GOOGLE_SEARCH_WEB",
+                "response": {
+                  "search_suggestions": "<style>\n.container {\n  align-items: center;\n  border-radius: 8px;\n  display: fle"
+                },
+                "id": "call_248866"
+              }
+            }
+          ],
+          "role": "model"
+        }
+      }
+    ],
+    "usageMetadata": {
+      "promptTokenCount": 66,
+      "totalTokenCount": 66,
+      "promptTokensDetails": [
+        {
+          "modality": "TEXT",
+          "tokenCount": 66
+        }
+      ],
+      "serviceTier": "standard"
+    },
+    "modelVersion": "gemini-3.8-flash",
+    "responseId": "EKblapPHCoKE694P-Y_fmQ0"
+  },
+  {
+    "candidates": [
+      {
+        "content": {
+          "parts": [
+            {
+              "thoughtSignature": "EtQCCtECCAISzAIBaRR9E3HOnWjyfeqPzWIFbOJSyAikHLOi",
+              "toolCall": {
+                "toolType": "GOOGLE_SEARCH_WEB",
+                "args": {
+                  "queries": [
+                    "\"Pune\" weather timeanddate"
+                  ]
+                },
+                "id": "call_248902"
+              }
+            }
+          ],
+          "role": "model"
+        },
+        "index": 0
+      }
+    ],
+    "usageMetadata": {
+      "promptTokenCount": 66,
+      "totalTokenCount": 148,
+      "promptTokensDetails": [
+        {
+          "modality": "TEXT",
+          "tokenCount": 66
+        }
+      ],
+      "thoughtsTokenCount": 82,
+      "serviceTier": "standard"
+    },
+    "modelVersion": "gemini-3.8-flash",
+    "responseId": "EKblapPHCoKE694P-Y_fmQ0"
+  },
+  {
+    "candidates": [
+      {
+        "content": {
+          "parts": [
+            {
+              "thoughtSignature": "EtZdCtNdCAISzl0BaRR9E91uCLQNiXzMNYKXQ1EoZYdh+nhF",
+              "toolResponse": {
+                "toolType": "GOOGLE_SEARCH_WEB",
+                "response": {
+                  "search_suggestions": "<style>\n.container {\n  align-items: center;\n  border-radius: 8px;\n  display: fle"
+                },
+                "id": "call_248902"
+              }
+            }
+          ],
+          "role": "model"
+        }
+      }
+    ],
+    "usageMetadata": {
+      "promptTokenCount": 66,
+      "totalTokenCount": 148,
+      "promptTokensDetails": [
+        {
+          "modality": "TEXT",
+          "tokenCount": 66
+        }
+      ],
+      "thoughtsTokenCount": 82,
+      "serviceTier": "standard"
+    },
+    "modelVersion": "gemini-3.8-flash",
+    "responseId": "EKblapPHCoKE694P-Y_fmQ0"
+  },
+  {
+    "candidates": [
+      {
+        "content": {
+          "parts": [
+            {
+              "functionCall": {
+                "name": "exec_command",
+                "args": {
+                  "cmd": "curl -s \"wttr.in/Pune?format=j1\""
+                },
+                "id": "call_248934"
+              },
+              "thoughtSignature": "EqMCCqACAWkUfRMyBvT81mV8Q0SXveTZ0nscy+0L7BPJD2kJ"
+            },
+            {
+              "text": ""
+            }
+          ],
+          "role": "model"
+        },
+        "finishReason": "STOP",
+        "index": 0
+      }
+    ],
+    "usageMetadata": {
+      "promptTokenCount": 148,
+      "candidatesTokenCount": 31,
+      "totalTokenCount": 306,
+      "promptTokensDetails": [
+        {
+          "modality": "TEXT",
+          "tokenCount": 148
+        }
+      ],
+      "thoughtsTokenCount": 127,
+      "serviceTier": "standard"
+    },
+    "modelVersion": "gemini-3.8-flash",
+    "responseId": "EKblapPHCoKE694P-Y_fmQ0"
+  }
+]

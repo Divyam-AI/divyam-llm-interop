@@ -23,6 +23,27 @@ from divyam_llm_interop.translate.chat.model_config.model_config_loader import (
 from divyam_llm_interop.translate.chat.model_config.model_selector import SelectorRegex
 from divyam_llm_interop.translate.chat.types import Model
 
+#: A Bedrock model ID's qualifiers, before the model's own name: an inference
+#: profile's geography, then the vendor. global.anthropic.claude-opus-5-5
+#: and anthropic.claude-opus-5-5 are both claude-opus-5-5. Some IDs keep the
+#: vendor in the model's name, deepseek.v3.2 for deepseek-v3.2.
+_BEDROCK_QUALIFIERS = re.compile(
+    r"^(?:(?:global|us|us-gov|eu|apac|au|jp|ca)\.)?"
+    r"(?P<vendor>anthropic|meta|mistral|amazon|cohere|ai21|deepseek|openai|qwen"
+    r"|google|writer|moonshotai|zai|minimax|nvidia|xai)\."
+)
+
+
+def _bedrock_names(name: str) -> list[str]:
+    """The names a Bedrock model ID may be catalogued under, most likely
+    first: without its qualifiers, then with its vendor joined on. None for
+    a name that is not a Bedrock ID."""
+    qualified = _BEDROCK_QUALIFIERS.match(name)
+    if qualified is None:
+        return []
+    rest = name[qualified.end() :]
+    return [rest, f"{qualified['vendor']}-{rest}"]
+
 
 @dataclasses.dataclass
 class ModelRegistry:
@@ -69,6 +90,14 @@ class ModelRegistry:
         return self._normalized_name_to_model_map.get(normalized_name, [])
 
     def find_matching_model(self, model: Model) -> Model:
+        for name in _bedrock_names(normalize_model_name(model.name)):
+            try:
+                return self._find_matching_model(dataclasses.replace(model, name=name))
+            except ValueError:
+                pass
+        return self._find_matching_model(model)
+
+    def _find_matching_model(self, model: Model) -> Model:
         potential_matches = self.find_models_by_name(model.name)
         if not potential_matches:
             potential_matches = self._find_models_by_name_pattern(model)

@@ -31,6 +31,9 @@ from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
     validate_no_assistant_prefill,
 )
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
+from divyam_llm_interop.translate.chat.base.provider_hosted_tools import (
+    without_adapter_search_blocks,
+)
 from divyam_llm_interop.translate.chat.base.reasoning_state import (
     DEFAULT_EFFORT_KEY,
     STATE_ENTRY_TYPE,
@@ -66,7 +69,9 @@ class AnthropicMessagesTranslator(Translator):
     def prepare_translation(
         self, request: ChatRequest, source: Model, target: Model, *, native: bool
     ) -> ChatRequest:
-        body = normalize_system_messages(request.body)
+        # Search records written for another API's search reach no route as
+        # Anthropic's own; see without_adapter_search_blocks.
+        body = without_adapter_search_blocks(normalize_system_messages(request.body))
         if native:
             # The client's own Anthropic state verifies here. Envelopes the
             # router returned on earlier turns are restored or removed, so

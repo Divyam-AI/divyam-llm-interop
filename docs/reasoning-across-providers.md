@@ -66,10 +66,11 @@ text; other state is wrapped in an envelope naming its signing domain:
 - Readable reasoning from another model, as a thinking block for display.
 - Opaque state from another model, in a `redacted_thinking` block ahead of the
   text and tool calls, where Claude puts its own thinking:
-  OpenRouter-style `reasoning_details`, Gemini thought signatures, or OpenAI
-  reasoning items with their `encrypted_content`. Clients such as Claude Code
-  read the answer from the blocks after it, so it never follows the text
-  unless a provider reports it only once the text has started.
+  OpenRouter-style `reasoning_details`, Gemini thought signatures and the
+  parts of a built-in tool's run, or OpenAI reasoning items with their
+  `encrypted_content`. Clients such as Claude Code read the answer from the
+  blocks after it, so it never follows the text unless a provider reports it
+  only once the text has started.
 
 On the next request each endpoint receives only the state of its own domain,
 and no envelope ever reaches a provider. Claude, with thinking on, requires its
@@ -102,6 +103,14 @@ The API has no field for opaque state; readable reasoning travels as
 
 Thought signatures go back on a native Gemini route. Thought parts in the
 history are read as reasoning, not as the answer.
+
+A request translated to native Gemini carries no thinking control, whatever
+its source: an OpenAI `reasoning_effort` or `reasoning.effort` and an
+Anthropic `thinking` or `output_config.effort` alike leave the model reasoning
+at its default. Gemini models take different controls (`thinkingLevel` on
+Gemini 3, `thinkingBudget` before it) and no capability yet declares which an
+endpoint takes, so none is sent rather than one it may reject. An
+OpenAI-format endpoint serving a Gemini model takes `reasoning_effort`.
 
 ## What moving between models costs
 

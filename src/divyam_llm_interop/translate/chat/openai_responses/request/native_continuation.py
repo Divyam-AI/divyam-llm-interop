@@ -1,16 +1,24 @@
 # Copyright 2026 Divyam.ai
 # SPDX-License-Identifier: Apache-2.0
 
-"""Keep native reasoning intact and leave out reasoning another model produced."""
+"""Keep native state intact and leave out what another model produced.
+
+Reasoning another model produced is left out; a search another API ran is
+narrated, since its record carries an ID this endpoint never issued.
+"""
 
 from typing import Any
 
+from divyam_llm_interop.translate.chat.base.provider_hosted_tools import (
+    without_adapter_search_items,
+)
 from divyam_llm_interop.translate.chat.openai_responses.item_ids import (
     normalize_custom_tool_item_id,
 )
 
 
 def normalize_native_continuation(body: dict[str, Any]) -> dict[str, Any]:
+    body = without_adapter_search_items(body)
     items = body.get("input")
     if not isinstance(items, list):
         return body

@@ -739,3 +739,112 @@ def test_endpoint_declaring_opaque_output_is_excluded_before_provider_call():
     )
     with pytest.raises(TargetCapabilityError, match="emits opaque reasoning"):
         translator().translate_request(request(), SOURCE, target)
+
+
+def _undeclared_call_response(name: str, finish: str = "tool_calls") -> ChatResponse:
+    return ChatResponse(
+        body={
+            "id": "r",
+            "object": "chat.completion",
+            "model": TARGET.name,
+            "created": 1,
+            "choices": [
+                {
+                    "index": 0,
+                    "finish_reason": finish,
+                    "message": {
+                        "role": "assistant",
+                        "tool_calls": [
+                            {
+                                "id": "call_9",
+                                "type": "function",
+                                "function": {"name": name, "arguments": "{}"},
+                            }
+                        ],
+                    },
+                }
+            ],
+        }
+    )
+
+
+@pytest.mark.parametrize("name", ["__cite__", "spawn_agent"])
+def test_a_call_to_an_undeclared_tool_reaches_the_client_as_named(name):
+    """A model may misremember or invent a tool's name. The client answers
+    the call as an unknown tool and the model can correct itself; the
+    response is not lost over it."""
+    tr = translator()
+    translated = tr.translate_request(request(), SOURCE, TARGET)
+
+    result = tr.translate_response(
+        _undeclared_call_response(name), TARGET, SOURCE, request=translated
+    )
+
+    (item,) = result.body["output"]
+    assert {k: item[k] for k in ["type", "name", "call_id", "arguments"]} == {
+        "type": "function_call",
+        "name": name,
+        "call_id": "call_9",
+        "arguments": "{}",
+    }
+
+
+def test_an_incomplete_undeclared_call_is_still_not_executable():
+    tr = translator()
+    translated = tr.translate_request(request(), SOURCE, TARGET)
+    with pytest.raises(ResponseTranslationError, match="Incomplete tool call"):
+        tr.translate_response(
+            _undeclared_call_response("__cite__", finish="length"),
+            TARGET,
+            SOURCE,
+            request=translated,
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_streamed_call_to_an_undeclared_tool_reaches_the_client():
+    tr = translator()
+    translated = tr.translate_request(request(), SOURCE, TARGET)
+
+    async def chunks():
+        base = {"id": "c", "object": "chat.completion.chunk", "created": 1}
+        yield {
+            **base,
+            "model": TARGET.name,
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {
+                        "role": "assistant",
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "call_9",
+                                "type": "function",
+                                "function": {"name": "__cite__", "arguments": "{}"},
+                            }
+                        ],
+                    },
+                    "finish_reason": None,
+                }
+            ],
+        }
+        yield {
+            **base,
+            "model": TARGET.name,
+            "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}],
+        }
+
+    streamed = tr.translate_response_streaming(
+        ChatResponseStreaming(stream=chunks()), TARGET, SOURCE, request=translated
+    )
+    events = [event async for event in streamed.stream]
+
+    done = [
+        e["item"]
+        for e in events
+        if e["type"] == "response.output_item.done"
+        and e["item"]["type"] == "function_call"
+    ]
+    assert [(item["name"], item["arguments"]) for item in done] == [("__cite__", "{}")]
+    assert events[-1]["type"] == "response.completed"

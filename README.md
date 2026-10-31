@@ -25,6 +25,10 @@ can express and drop what is only a hint:
   operational fields `context_management`, `safeguards`, `service_tier`,
   `inference_geo`, `speed`, `fallbacks`, `container` and `diagnostics` are
   dropped. Explicit nulls on optional fields count as absent.
+- Deferred tools are sent with every other tool, so a `tool_reference` that a
+  client-side tool search returns in a `tool_result` becomes a line telling the
+  model the named tool is available. A reference to a tool the request does
+  not declare is invalid, as Anthropic treats it.
 - `output_config.effort` maps to the target's reasoning effort, with `xhigh` and
   `max` lowered to `high`. Without an explicit effort, an enabled thinking budget
   maps to `low` up to 4096 tokens, `medium` up to 16384 and `high` above that,
@@ -107,11 +111,13 @@ and `[The tool Read returned: ...]`, without call IDs:
   on.
 - Gemini 3: every step of the current turn (since the latest user message other
   than function responses) whose first function call has no signature from this
-  endpoint, with the function responses answering it. An endpoint can declare
-  `gemini_foreign_call_policy: "skip_signature"` to keep such calls with
-  Google's `skip_thought_signature_validator` value instead, at some cost to
-  reasoning quality. Base64 images, including those a tool returned, reach
-  native Gemini as `inlineData`.
+  endpoint, with the function responses answering it, when the endpoint
+  declares `gemini_foreign_call_policy: "flatten"`. The catalog declares
+  `"skip_signature"` for Gemini 3 and 4, which keeps such calls with Google's
+  `skip_thought_signature_validator` value instead, at some cost to reasoning
+  quality: clients in OpenAI formats return no signatures, so every call of
+  their tool loop arrives unsigned. Base64 images, including those a tool
+  returned, reach native Gemini as `inlineData`.
 
 ### Endpoint reasoning overrides
 
@@ -127,6 +133,17 @@ a client asks for adaptive thinking without a level; the Claude catalogue
 declares `high`, and `medium` for Claude Opus 5.5 and Claude Haiku 5.5.
 `anthropic_wire_profile`, `reasoning_dialect`, `supports_encrypted_reasoning`
 and `gemini_foreign_call_policy` are set the same way.
+
+`supported_tool_choices` lists the tool choices a target accepts: `auto` (the
+model decides), `none`, `required` (some tool must be called) and `named` (a
+given tool must be called), read from each API's own form -- Anthropic's
+`any` is `required`, Gemini's `ANY` with one allowed function is `named`.
+Unset, all four are accepted. A request choosing another is refused with
+`TargetCapabilityError` on every route, native ones included, rather than sent
+to be refused by the provider or answered without the tool it demanded. The
+catalogue declares `["auto", "none"]` for Claude Opus 5.5, Sonnet 5.5, Fable
+5.1 and Mythos 5.1, which Anthropic documents as refusing a forced tool on
+every platform. An endpoint's declaration replaces the model's.
 
 ## Installation
 
@@ -246,7 +263,11 @@ translated = translator.translate_response(chat_response, source, target)
 ## Model Name Resolution and Fallback
 
 When a request model name is resolved against the catalog, matching happens in
-this order:
+this order, first for the name without a Bedrock model ID's qualifiers -- an
+inference profile's geography and the vendor, so
+`global.anthropic.claude-opus-5-5` resolves as `claude-opus-5-5` -- then with
+the vendor joined on, as `deepseek.v4-pro` is `deepseek-v4-pro`, then, when
+neither finds anything, for the name as given:
 
 1. Exact normalized name match (`provider/model-name` and case differences are
    normalized).

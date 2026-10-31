@@ -5,6 +5,12 @@ from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field, fields
 from typing import Any, Optional
 
+from divyam_llm_interop.translate.chat.unified.unified_hosted_tools import (
+    HOSTED_TOOL_EVENTS_FIELD,
+    HOSTED_TOOLS_FIELD,
+    UnifiedHostedToolEvent,
+    UnifiedHostedToolOutput,
+)
 from divyam_llm_interop.translate.chat.unified.unified_request import (
     UnifiedMessage,
     UnifiedToolCall,
@@ -312,6 +318,10 @@ class UnifiedChatCompletionsResponseBody:
     # Service tier used for the request
     service_tier: Optional[str] = None
 
+    # What provider-hosted tools did for the response; see
+    # unified_hosted_tools. Internal, like unknowns.
+    hosted_tools: Optional[UnifiedHostedToolOutput] = None
+
     # Unknown fields
     unknowns: dict[str, Any] = field(default_factory=dict)
 
@@ -327,6 +337,7 @@ class UnifiedChatCompletionsResponseBody:
         if data.get("usage"):
             usage = UnifiedUsage.from_dict(data["usage"])
 
+        hosted = data.get(HOSTED_TOOLS_FIELD)
         return cls(
             id=data["id"],
             object=data["object"],
@@ -336,6 +347,9 @@ class UnifiedChatCompletionsResponseBody:
             usage=usage,
             system_fingerprint=data.get("system_fingerprint"),
             service_tier=data.get("service_tier"),
+            hosted_tools=UnifiedHostedToolOutput.from_dict(hosted)
+            if isinstance(hosted, dict)
+            else None,
             unknowns=unknowns,
         )
 
@@ -357,6 +371,8 @@ class UnifiedChatCompletionsResponseBody:
             result["service_tier"] = self.service_tier
 
         if keep_unknowns:
+            if self.hosted_tools:
+                result[HOSTED_TOOLS_FIELD] = self.hosted_tools.to_dict()
             result.update(self.unknowns)
 
         return result
@@ -509,6 +525,10 @@ class UnifiedChatCompletionsStreamChunk:
     system_fingerprint: Optional[str] = None
     service_tier: Optional[str] = None
 
+    # Hosted tool output known by this chunk; see unified_hosted_tools.
+    # Internal, like unknowns.
+    hosted_tool_events: list[UnifiedHostedToolEvent] = field(default_factory=list)
+
     # Unknown fields
     unknowns: dict[str, Any] = field(default_factory=dict)
 
@@ -537,6 +557,11 @@ class UnifiedChatCompletionsStreamChunk:
             usage=usage,
             system_fingerprint=data.get("system_fingerprint"),
             service_tier=data.get("service_tier"),
+            hosted_tool_events=[
+                UnifiedHostedToolEvent.from_dict(event)
+                for event in data.get(HOSTED_TOOL_EVENTS_FIELD) or []
+                if isinstance(event, dict)
+            ],
             unknowns=unknowns,
         )
 
@@ -560,6 +585,10 @@ class UnifiedChatCompletionsStreamChunk:
             result["service_tier"] = self.service_tier
 
         if keep_unknowns:
+            if self.hosted_tool_events:
+                result[HOSTED_TOOL_EVENTS_FIELD] = [
+                    event.to_dict() for event in self.hosted_tool_events
+                ]
             result.update(self.unknowns)
 
         return result

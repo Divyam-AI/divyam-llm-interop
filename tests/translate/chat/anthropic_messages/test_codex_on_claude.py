@@ -121,7 +121,9 @@ def test_a_codex_request_reaches_claude(translator: ChatTranslator) -> None:
     assert body["system"] == "You are Codex."
     assert {"include", "prompt_cache_key", "client_metadata", "store"}.isdisjoint(body)
     names = [tool["name"] for tool in body["tools"]]
-    assert names[0] == "exec_command" and len(names) == 2
+    assert names[0] == "exec_command" and len(names) == 3
+    # Claude declares web search, so Codex's is carried, as Claude's own.
+    assert body["tools"][-1] == {"type": "web_search_20250305", "name": "web_search"}
     assert "strict" not in body["tools"][0]
     assert body["tools"][0]["input_schema"]["additionalProperties"] is False
 

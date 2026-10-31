@@ -14,6 +14,9 @@ from divyam_llm_interop.translate.chat.model_config.model_capabilities import (
 from divyam_llm_interop.translate.chat.model_config.model_registry import (
     ModelRegistry,
 )
+from divyam_llm_interop.translate.chat.openai_responses.tool_adapter import (
+    agent_message_as_user_message,
+)
 from divyam_llm_interop.translate.chat.translation_errors import (
     TargetCapabilityError,
     UnsupportedFeatureError,
@@ -95,13 +98,17 @@ def validate_portable_target_capabilities(
         )
     if target.api_type == ModelApiType.GEMINI:
         # The end-user ID is attribution only, and the Gemini encoder omits it.
-        if _has_explicit_effort(unified):
-            _target_error("native Gemini cannot preserve effort", target, "$")
+        # So is effort: native Gemini is sent no thinking control from any
+        # source, and the model reasons at its default; see
+        # docs/reasoning-across-providers.md. Tool schemas reach Gemini as
+        # JSON Schema (parameters_json_schema), checked as structured output
+        # schemas are.
         for index, tool in enumerate(unified.tools or []):
             validate_portable_schema(
                 tool.function.parameters.to_dict(),
                 f"$.tools[{index}].input_schema",
                 require_object_root=True,
+                allow_constraints=True,
             )
 
 
@@ -130,15 +137,6 @@ def validate_source_profile_for_anthropic_target(
         _validate_gemini_tools(body.get("tools"), source)
         _validate_gemini_tool_config(body.get("toolConfig"), source)
         _validate_gemini_generation_config(body.get("generationConfig"), source)
-
-
-def _has_explicit_effort(unified: UnifiedChatCompletionsRequestBody) -> bool:
-    # Effort derived from Anthropic thinking is omitted where it has no
-    # control; only an effort the caller set explicitly is refused.
-    raw = unified.unknowns.get("anthropic_request_raw")
-    if isinstance(raw, dict):
-        return (raw.get("output_config") or {}).get("effort") is not None
-    return unified.reasoning_effort is not None
 
 
 def _validate_numeric_ranges(
@@ -292,6 +290,9 @@ def _validate_responses_input(input_value: Any, source: Model) -> None:
         path = f"$.input[{item_index}]"
         if not isinstance(item, dict):
             continue
+        if item.get("type") == "agent_message":
+            # Carried as the user message the tool adapter makes of it.
+            item = agent_message_as_user_message(item)
         if item.get("type") not in allowed_items:
             _source_unsupported(
                 "provider-native Responses input items are outside the supported text/tool profile",

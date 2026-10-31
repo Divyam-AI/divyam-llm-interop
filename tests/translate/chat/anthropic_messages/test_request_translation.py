@@ -948,16 +948,18 @@ def test_anthropic_server_tool_declaration_fails_closed(
     "constraint, value",
     [("additionalProperties", False), ("propertyNames", {"type": "string"})],
 )
-def test_schema_constraints_are_not_silently_dropped_for_native_gemini(
+def test_schema_constraints_reach_native_gemini_as_json_schema(
     translator, anthropic_model, gemini_model, constraint, value
 ):
     body = _anthropic_tool_request()
     body["tools"][0]["input_schema"][constraint] = value
 
-    with pytest.raises(UnsupportedFeatureError, match="unsupported field"):
-        translator.translate_request(
-            ChatRequest(body=body), anthropic_model, gemini_model
-        )
+    result = translator.translate_request(
+        ChatRequest(body=body), anthropic_model, gemini_model
+    )
+
+    declaration = result.body["tools"][0]["functionDeclarations"][0]
+    assert declaration["parameters_json_schema"][constraint] == value
 
 
 @pytest.mark.parametrize("api_type", [ModelApiType.COMPLETIONS, ModelApiType.RESPONSES])
@@ -1605,7 +1607,7 @@ def test_nested_object_array_schema_is_portable(
     )
 
     assert (
-        result.body["tools"][0]["functionDeclarations"][0]["parameters"]
+        result.body["tools"][0]["functionDeclarations"][0]["parameters_json_schema"]
         == (body["tools"][0]["input_schema"])
     )
 

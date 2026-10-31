@@ -30,6 +30,11 @@ from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
     is_portable_tool_name,
 )
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
+from divyam_llm_interop.translate.chat.base.hosted_web_search import (
+    anthropic_citation_entry,
+    anthropic_search_blocks,
+    hosted_usage,
+)
 from divyam_llm_interop.translate.chat.base.reasoning_state import (
     RESPONSE_STATE_KEY,
 )
@@ -116,7 +121,7 @@ def unified_stream_to_anthropic(
 def _consume_chunk(
     chunk: UnifiedChatCompletionsStreamChunk, state: TargetStreamState
 ) -> list[dict[str, Any]]:
-    events: list[dict[str, Any]] = []
+    events: list[dict[str, Any]] = _hosted_tool_events(chunk, state)
     if len(chunk.choices) > 1:
         _target_error("Anthropic Messages supports one response choice", "$.choices")
     if state.terminal_seen and chunk.choices:
@@ -139,13 +144,13 @@ def _consume_chunk(
     native_thinking = chunk.unknowns.get(ANTHROPIC_THINKING_EVENT_KEY)
     if isinstance(native_thinking, dict):
         # The same chunk's reasoning_content is the text for other clients.
-        return _replay_thinking_event(native_thinking, state)
+        return events + _replay_thinking_event(native_thinking, state)
     native_server = chunk.unknowns.get(ANTHROPIC_SERVER_EVENT_KEY)
     if isinstance(native_server, dict):
-        return _replay_server_event(native_server, state)
+        return events + _replay_server_event(native_server, state)
     citation = chunk.unknowns.get(ANTHROPIC_CITATION_KEY)
     if isinstance(citation, dict):
-        return _replay_citation(citation, state)
+        return events + _replay_citation(citation, state)
     for choice in chunk.choices:
         if choice.index != 0:
             _target_error(
@@ -200,6 +205,72 @@ def _consume_chunk(
             state.anthropic_stop_reason = chunk.unknowns.get("anthropic_stop_reason")
             state.stop_sequence = chunk.unknowns.get("anthropic_stop_sequence")
             state.stop_details = chunk.unknowns.get("anthropic_stop_details")
+    return events
+
+
+def _hosted_tool_events(
+    chunk: UnifiedChatCompletionsStreamChunk, state: TargetStreamState
+) -> list[dict[str, Any]]:
+    """Blocks and citations for another API's hosted tool output.
+
+    An Anthropic source's own blocks and citations are replayed as sent, so
+    only its count of runs is taken from here. A search becomes a call block
+    and its result block, written once the search has finished. A citation
+    arrives once its text has streamed, and so cites the text block then
+    open: the whole streamed answer, where a complete response would cite
+    the span alone.
+    """
+    events: list[dict[str, Any]] = []
+    foreign = _anthropic_input_split(chunk) is None
+    for hosted in chunk.hosted_tool_events:
+        if hosted.requests:
+            state.hosted_requests.update(hosted.requests)
+        if hosted.call is not None and foreign:
+            events.extend(_close_open_blocks(state))
+            kind = hosted.call.kind
+            state.hosted_calls[kind] = state.hosted_calls.get(kind, 0) + 1
+            for block in anthropic_search_blocks(hosted.call):
+                index = state.next_block_index
+                state.next_block_index += 1
+                if block["type"] == "server_tool_use":
+                    events.append(
+                        {
+                            "type": "content_block_start",
+                            "index": index,
+                            "content_block": {**block, "input": {}},
+                        }
+                    )
+                    events.append(
+                        {
+                            "type": "content_block_delta",
+                            "index": index,
+                            "delta": {
+                                "type": "input_json_delta",
+                                "partial_json": json.dumps(
+                                    block["input"], ensure_ascii=False
+                                ),
+                            },
+                        }
+                    )
+                else:
+                    events.append(
+                        {
+                            "type": "content_block_start",
+                            "index": index,
+                            "content_block": block,
+                        }
+                    )
+                events.append({"type": "content_block_stop", "index": index})
+        if hosted.citation is not None and foreign:
+            events.extend(
+                _replay_citation(
+                    {
+                        "type": "citations_delta",
+                        "citation": anthropic_citation_entry(hosted.citation),
+                    },
+                    state,
+                )
+            )
     return events
 
 
@@ -529,6 +600,20 @@ def _message_delta(state: TargetStreamState) -> dict[str, Any]:
             "$.stop_sequence",
         )
     stop_details = _target_stop_details(state.stop_details, stop_reason)
+    usage: dict[str, Any] = dict(
+        anthropic_usage(
+            state.input_tokens,
+            state.cache_read_tokens,
+            state.cache_write_tokens,
+            state.output_tokens,
+        )
+    )
+    usage.update(
+        hosted_usage(
+            {**state.hosted_calls, **state.hosted_requests},
+            ModelApiType.ANTHROPIC_MESSAGES,
+        )
+    )
     return {
         "type": "message_delta",
         "delta": {
@@ -536,12 +621,7 @@ def _message_delta(state: TargetStreamState) -> dict[str, Any]:
             "stop_sequence": state.stop_sequence,
             "stop_details": stop_details,
         },
-        "usage": anthropic_usage(
-            state.input_tokens,
-            state.cache_read_tokens,
-            state.cache_write_tokens,
-            state.output_tokens,
-        ),
+        "usage": usage,
     }
 
 

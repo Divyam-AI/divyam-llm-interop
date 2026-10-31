@@ -82,6 +82,10 @@ _REASONING_BLOCK_TYPES = {"thinking", "redacted_thinking"}
 #: Content a client attaches as reference material: read for its text by a
 #: target behind another API, and passed whole to an Anthropic one.
 DOCUMENT_BLOCK_TYPES = frozenset({"document", "search_result"})
+#: A tool result's pointer to a deferred tool it loads (client-side tool
+#: search). Anthropic expands it into the tool's definition; a target behind
+#: another API already has every definition and reads it as text.
+TOOL_REFERENCE_BLOCK_TYPE = "tool_reference"
 _UNSUPPORTED_BLOCK_TYPES = {
     "server_tool_use",
     "web_search_tool_result",
@@ -136,7 +140,7 @@ def validate_anthropic_request(body: dict[str, Any]) -> None:
     _validate_tool_choice(body.get("tool_choice"), tool_names)
     _validate_thinking(body.get("thinking"))
     _validate_metadata_and_output_config(body)
-    _validate_messages(body.get("messages"))
+    _validate_messages(body.get("messages"), tool_names)
     if "stream" in body and not isinstance(body["stream"], bool):
         _invalid("stream must be a boolean", "$.stream")
     if "cache_control" in body:
@@ -329,7 +333,7 @@ def text_from_blocks(value: Any, path: str) -> str:
     return "".join(text)
 
 
-def _validate_messages(messages: Any) -> None:
+def _validate_messages(messages: Any, tool_names: set[str]) -> None:
     if not isinstance(messages, list) or not messages:
         _invalid("messages must be a non-empty list", "$.messages")
 
@@ -360,6 +364,7 @@ def _validate_messages(messages: Any) -> None:
                 path,
                 outstanding_tool_uses,
                 seen_tool_use_ids,
+                tool_names,
             )
             continue
 
@@ -369,6 +374,7 @@ def _validate_messages(messages: Any) -> None:
             path,
             outstanding_tool_uses,
             seen_tool_use_ids,
+            tool_names,
         )
         if outstanding_tool_uses and result_ids != set(outstanding_tool_uses):
             _invalid(
@@ -385,6 +391,7 @@ def _validate_message_content(
     message_path: str,
     known_tool_uses: dict[str, str],
     seen_tool_use_ids: set[str],
+    tool_names: set[str],
 ) -> set[str]:
     if isinstance(content, str):
         return set()
@@ -433,7 +440,7 @@ def _validate_message_content(
                 _invalid(
                     "user tool_result blocks must precede text and image blocks", path
                 )
-            _validate_tool_result(block, path, known_tool_uses, result_ids)
+            _validate_tool_result(block, path, known_tool_uses, result_ids, tool_names)
             continue
         if block_type in {"tool_use", "tool_result"}:
             _invalid(f"{block_type} is not valid for role {role}", path)
@@ -489,6 +496,7 @@ def _validate_tool_result(
     path: str,
     known_tool_uses: dict[str, str],
     result_ids: set[str],
+    tool_names: set[str],
 ) -> None:
     _reject_block_extras(block, {"type", "tool_use_id", "content", "is_error"}, path)
     tool_use_id = block.get("tool_use_id")
@@ -500,10 +508,10 @@ def _validate_tool_result(
     result_ids.add(str(tool_use_id))
     if "is_error" in block and not isinstance(block["is_error"], bool):
         _invalid("is_error must be a boolean", f"{path}.is_error")
-    _validate_tool_result_content(block.get("content"), f"{path}.content")
+    _validate_tool_result_content(block.get("content"), f"{path}.content", tool_names)
 
 
-def _validate_tool_result_content(value: Any, path: str) -> None:
+def _validate_tool_result_content(value: Any, path: str, tool_names: set[str]) -> None:
     if value is None or isinstance(value, str):
         return
     if not isinstance(value, list):
@@ -518,11 +526,29 @@ def _validate_tool_result_content(value: Any, path: str) -> None:
         if block_type in DOCUMENT_BLOCK_TYPES:
             _validate_document_block(block, block_path)
             continue
+        if block_type == TOOL_REFERENCE_BLOCK_TYPE:
+            _validate_tool_reference(block, block_path, tool_names)
+            continue
         if block_type != "text":
             _unsupported_block(block_type, block_path)
         _validate_text_block_fields(block, block_path)
         if not isinstance(block.get("text"), str):
             _invalid("text block text must be a string", f"{block_path}.text")
+
+
+def _validate_tool_reference(
+    block: dict[str, Any], path: str, tool_names: set[str]
+) -> None:
+    # Anthropic expands a reference only to a tool the request declares, and
+    # rejects one naming any other.
+    _reject_block_extras(block, {"type", "tool_name"}, path)
+    name = block.get("tool_name")
+    _require_tool_name(name, f"{path}.tool_name")
+    if name not in tool_names:
+        _invalid(
+            f"tool_reference {name!r} does not name a declared tool",
+            f"{path}.tool_name",
+        )
 
 
 def _validate_document_block(block: dict[str, Any], path: str) -> None:

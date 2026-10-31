@@ -65,3 +65,111 @@ def test_snake_case_declarations_are_read() -> None:
     )
 
     assert tool["function"]["parameters"] == _SCHEMA
+
+
+# --- to a Gemini target ----------------------------------------------------
+
+# A strict schema as coding agents send it: JSON Schema keywords outside
+# Gemini's OpenAPI subset, which `parameters` refuses.
+_STRICT_SCHEMA = {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {"command": {"type": "string", "minLength": 1}},
+    "required": ["command"],
+    "additionalProperties": False,
+}
+_RESPONSES = Model("gpt-4.1-mini", ModelApiType.RESPONSES)
+_ANTHROPIC = Model("claude-sonnet-test", ModelApiType.ANTHROPIC_MESSAGES)
+
+
+def _to_gemini(body: dict[str, Any], source: Model) -> dict[str, Any]:
+    translated = ChatTranslator(
+        ChatTranslateConfig(allow_generic_translate=True)
+    ).translate_request(ChatRequest(body), source, GEMINI)
+    (tool,) = translated.body["tools"]
+    (declaration,) = tool["functionDeclarations"]
+    return declaration
+
+
+@pytest.mark.parametrize(
+    "body, source",
+    [
+        (
+            {
+                "model": "gpt-4.1-mini",
+                "messages": [{"role": "user", "content": "List files."}],
+                "tools": [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "bash",
+                            "description": "Run a command.",
+                            "parameters": _STRICT_SCHEMA,
+                            "strict": True,
+                        },
+                    }
+                ],
+            },
+            COMPLETIONS,
+        ),
+        (
+            {
+                "model": "gpt-4.1-mini",
+                "input": "List files.",
+                "tools": [
+                    {
+                        "type": "function",
+                        "name": "bash",
+                        "description": "Run a command.",
+                        "parameters": _STRICT_SCHEMA,
+                        "strict": True,
+                    }
+                ],
+            },
+            _RESPONSES,
+        ),
+        (
+            {
+                "model": "claude-sonnet-test",
+                "max_tokens": 64,
+                "messages": [{"role": "user", "content": "List files."}],
+                "tools": [
+                    {
+                        "name": "bash",
+                        "description": "Run a command.",
+                        "input_schema": _STRICT_SCHEMA,
+                    }
+                ],
+            },
+            _ANTHROPIC,
+        ),
+    ],
+    ids=["completions", "responses", "anthropic"],
+)
+def test_a_translated_schema_reaches_gemini_as_json_schema(
+    body: dict[str, Any], source: Model
+) -> None:
+    declaration = _to_gemini(body, source)
+
+    assert declaration["name"] == "bash"
+    assert declaration["parameters_json_schema"] == _STRICT_SCHEMA
+    assert "parameters" not in declaration
+
+
+def test_a_gemini_request_reaches_gemini_as_sent() -> None:
+    body = {
+        "contents": [{"role": "user", "parts": [{"text": "List files."}]}],
+        "tools": [
+            {
+                "functionDeclarations": [
+                    {"name": "bash", "parameters": {"type": "OBJECT"}}
+                ]
+            }
+        ],
+    }
+
+    translated = ChatTranslator(
+        ChatTranslateConfig(allow_generic_translate=True)
+    ).translate_request(ChatRequest(body), GEMINI, GEMINI)
+
+    assert translated.body["tools"] == body["tools"]

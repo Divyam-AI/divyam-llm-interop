@@ -8,6 +8,7 @@ from typing import Any, NoReturn
 
 from divyam_llm_interop.translate.chat.anthropic_messages.response.stream_state import (
     ANTHROPIC_ONLY_CONTENT_KEY,
+    ANTHROPIC_PORTABLE_CONTENT_KEY,
 )
 from divyam_llm_interop.translate.chat.anthropic_messages.response.usage import (
     unified_usage,
@@ -16,6 +17,13 @@ from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
     is_portable_tool_name,
 )
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
+from divyam_llm_interop.translate.chat.base.hosted_web_search import (
+    anthropic_citation,
+    anthropic_reported_requests,
+    anthropic_search_call,
+    is_web_search_citation,
+    is_web_search_server_block,
+)
 from divyam_llm_interop.translate.chat.base.provider_hosted_tools import (
     is_anthropic_server_block,
 )
@@ -24,6 +32,10 @@ from divyam_llm_interop.translate.chat.translation_errors import (
     UnsupportedFeatureError,
 )
 from divyam_llm_interop.translate.chat.types import ChatResponse, Model
+from divyam_llm_interop.translate.chat.unified.unified_hosted_tools import (
+    HOSTED_TOOLS_FIELD,
+    UnifiedHostedToolOutput,
+)
 from divyam_llm_interop.translate.chat.unified.unified_response import (
     UnifiedChatCompletionsResponse,
 )
@@ -71,23 +83,74 @@ def anthropic_response_to_unified(
     anthropic_only = _anthropic_only_content(body)
     if anthropic_only:
         unified_body[ANTHROPIC_ONLY_CONTENT_KEY] = anthropic_only
+    portable = _anthropic_only_content(body, web_search=True)
+    if portable:
+        unified_body[ANTHROPIC_PORTABLE_CONTENT_KEY] = portable
+    hosted = _hosted_output(body)
+    if hosted:
+        unified_body[HOSTED_TOOLS_FIELD] = hosted.to_dict()
     return UnifiedChatCompletionsResponse.from_dict(
         {"body": unified_body, "headers": copy.deepcopy(chat_response.headers)},
         headers=copy.deepcopy(chat_response.headers),
     )
 
 
-def _anthropic_only_content(body: dict[str, Any]) -> list[str]:
-    """What in the response only an Anthropic client has a form for."""
+def _anthropic_only_content(
+    body: dict[str, Any], *, web_search: bool = False
+) -> list[str]:
+    """What in the response only an Anthropic client has a form for.
+
+    Web search and its citations have a form in every API with hosted tools
+    (see hosted_web_search), so they are named apart: with web_search, only
+    they are; without, all else is.
+    """
     content = [block for block in body["content"] if isinstance(block, dict)]
     found: list[str] = []
-    if any(is_anthropic_server_block(block) for block in content):
+    if any(
+        is_anthropic_server_block(block)
+        and is_web_search_server_block(block) == web_search
+        for block in content
+    ):
         found.append("server tool blocks")
-    if any(block.get("type") == "text" and block.get("citations") for block in content):
+    if any(
+        block.get("type") == "text"
+        and any(
+            is_web_search_citation(citation) == web_search
+            for citation in block.get("citations") or []
+        )
+        for block in content
+    ):
         found.append("citations")
-    if body.get("stop_reason") == "pause_turn":
+    if not web_search and body.get("stop_reason") == "pause_turn":
         found.append("pause_turn")
     return found
+
+
+def _hosted_output(body: dict[str, Any]) -> UnifiedHostedToolOutput:
+    """The response's web searches and citations, located in its joined text."""
+    output = UnifiedHostedToolOutput()
+    queries: dict[str, str] = {}
+    offset = 0
+    for block in body["content"]:
+        if not isinstance(block, dict):
+            continue
+        if block.get("type") == "server_tool_use" and is_web_search_server_block(block):
+            query = (block.get("input") or {}).get("query")
+            queries[str(block.get("id"))] = str(query) if query else ""
+        elif block.get("type") == "web_search_tool_result":
+            output.calls.append(
+                anthropic_search_call(block, queries.get(str(block.get("tool_use_id"))))
+            )
+        elif block.get("type") == "text" and isinstance(block.get("text"), str):
+            end = offset + len(block["text"])
+            output.citations.extend(
+                anthropic_citation(citation, offset, end)
+                for citation in block.get("citations") or []
+                if is_web_search_citation(citation)
+            )
+            offset = end
+    output.requests = anthropic_reported_requests(body.get("usage"))
+    return output
 
 
 def _validate_response(body: Any) -> None:

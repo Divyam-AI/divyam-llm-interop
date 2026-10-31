@@ -7,7 +7,17 @@ from collections.abc import AsyncGenerator
 from copy import deepcopy
 from typing import Any, Optional
 
+from divyam_llm_interop.translate.chat.api_types import ModelApiType
+from divyam_llm_interop.translate.chat.base.hosted_web_search import (
+    hosted_usage,
+    responses_annotation,
+    responses_search_item,
+)
 from divyam_llm_interop.translate.chat.base.translation_utils import client_call_id
+from divyam_llm_interop.translate.chat.unified.unified_hosted_tools import (
+    HOSTED_TOOL_EVENTS_FIELD,
+    UnifiedHostedToolEvent,
+)
 
 from .reasoning import readable_reasoning
 
@@ -76,6 +86,11 @@ class CompletionsToResponsesStreamConverter:
 
         usage_data: dict[str, Any] | None = None
         response_finished = False
+        # Hosted tool runs written into the stream, and those the provider
+        # counted itself, by kind; and the open text part's citations.
+        hosted_calls: dict[str, int] = {}
+        hosted_requests: dict[str, int] = {}
+        annotations: list[dict[str, Any]] = []
         reasoning_item: dict[str, Any] | None = None
         reasoning_index = -1
         reasoning_text = ""
@@ -86,6 +101,14 @@ class CompletionsToResponsesStreamConverter:
             return seq
 
         async for chunk in completion_stream:
+            hosted_events = [
+                UnifiedHostedToolEvent.from_dict(event)
+                for event in chunk.get(HOSTED_TOOL_EVENTS_FIELD) or []
+            ]
+            for hosted in hosted_events:
+                if hosted.requests:
+                    hosted_requests.update(hosted.requests)
+
             if response_finished:
                 if chunk.get("usage"):
                     usage_data = self._map_usage(chunk["usage"])
@@ -110,6 +133,52 @@ class CompletionsToResponsesStreamConverter:
                 }
 
                 is_first_chunk = False
+
+            # --- Hosted tools: searches as items, citations as annotations ---
+            for hosted in hosted_events:
+                if hosted.call is not None:
+                    kind = hosted.call.kind
+                    hosted_calls[kind] = hosted_calls.get(kind, 0) + 1
+                    item = responses_search_item(hosted.call)
+                    item_index = next_output_index
+                    next_output_index += 1
+                    response_obj["output"].append(item)
+                    yield {
+                        "type": "response.output_item.added",
+                        "sequence_number": next_seq(),
+                        "output_index": item_index,
+                        "item": {
+                            "id": item["id"],
+                            "type": item["type"],
+                            "status": "in_progress",
+                        },
+                    }
+                    for phase in ("in_progress", "searching", "completed"):
+                        yield {
+                            "type": f"response.web_search_call.{phase}",
+                            "sequence_number": next_seq(),
+                            "output_index": item_index,
+                            "item_id": item["id"],
+                        }
+                    yield {
+                        "type": "response.output_item.done",
+                        "sequence_number": next_seq(),
+                        "output_index": item_index,
+                        "item": deepcopy(item),
+                    }
+                if hosted.citation is not None:
+                    annotation = responses_annotation(hosted.citation)
+                    annotations.append(annotation)
+                    if content_part_open:
+                        yield {
+                            "type": "response.output_text.annotation.added",
+                            "sequence_number": next_seq(),
+                            "item_id": message_id,
+                            "output_index": message_output_index,
+                            "content_index": content_index,
+                            "annotation_index": len(annotations) - 1,
+                            "annotation": annotation,
+                        }
 
             reasoning_delta = readable_reasoning(delta)
             if reasoning_delta:
@@ -208,13 +277,14 @@ class CompletionsToResponsesStreamConverter:
                         content_index,
                         accumulated_text,
                         next_seq,
+                        annotations,
                     ):
                         yield evt
                     accumulated_content.append(
                         {
                             "type": "output_text",
                             "text": accumulated_text,
-                            "annotations": [],
+                            "annotations": list(annotations),
                         }
                     )
                     content_part_open = False
@@ -284,13 +354,14 @@ class CompletionsToResponsesStreamConverter:
                         content_index,
                         accumulated_text,
                         next_seq,
+                        annotations,
                     ):
                         yield evt
                     accumulated_content.append(
                         {
                             "type": "output_text",
                             "text": accumulated_text,
-                            "annotations": [],
+                            "annotations": list(annotations),
                         }
                     )
                     content_part_open = False
@@ -369,6 +440,11 @@ class CompletionsToResponsesStreamConverter:
 
         if response_finished:
             if usage_data:
+                usage_data.update(
+                    hosted_usage(
+                        {**hosted_calls, **hosted_requests}, ModelApiType.RESPONSES
+                    )
+                )
                 response_obj["usage"] = usage_data
             yield {
                 "type": "response.completed",
@@ -383,8 +459,12 @@ class CompletionsToResponsesStreamConverter:
         content_index: int,
         accumulated_text: str,
         next_seq,
+        annotations: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
         """Return output_text.done + content_part.done events."""
+        part: dict[str, Any] = {"type": "output_text", "text": accumulated_text}
+        if annotations:
+            part["annotations"] = list(annotations)
         return [
             {
                 "type": "response.output_text.done",
@@ -400,7 +480,7 @@ class CompletionsToResponsesStreamConverter:
                 "item_id": message_id,
                 "output_index": output_index,
                 "content_index": content_index,
-                "part": {"type": "output_text", "text": accumulated_text},
+                "part": part,
             },
         ]
 

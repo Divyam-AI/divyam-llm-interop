@@ -71,10 +71,24 @@ STATE_GEMINI_SIGNATURES = "gemini_thought_signatures"
 # OpenAI Responses output order: reasoning items in full, and placeholders
 # {"type": "function_call", "call_id"} and {"type": "message"} for the rest.
 STATE_RESPONSES_OUTPUT = "responses_output"
+# Gemini model-turn part order, kept for a turn that ran a built-in tool: its
+# toolCall and toolResponse parts in full, every field and signature as Gemini
+# returned them, and placeholders {"placeholder": "function_call",
+# "tool_call_id"} and {"placeholder": "text"} for the parts the unified
+# message carries. Gemini expects every part of such a turn back, in order.
+STATE_GEMINI_PARTS = "gemini_parts"
+GEMINI_PLACEHOLDER_KEY = "placeholder"
+GEMINI_TEXT_PLACEHOLDER = "text"
+GEMINI_CALL_PLACEHOLDER = "function_call"
 
 # Replayable state on a unified assistant message, for one target encoder.
 GEMINI_SIGNATURE_TYPE = "gemini.thought_signature"
+GEMINI_PARTS_TYPE = "gemini.parts"
 RESPONSES_OUTPUT_TYPE = "openai.responses.output"
+
+# The keys a recorded Gemini built-in tool part may hold, in either case.
+_GEMINI_INVOCATION_KEYS = {"toolCall", "tool_call", "toolResponse", "tool_response"}
+_GEMINI_SIGNATURE_KEYS = {"thoughtSignature", "thought_signature"}
 
 # Marks a decoded envelope, or a genuine Anthropic block, on a unified message.
 STATE_ENTRY_TYPE = "interop.reasoning_state"
@@ -325,6 +339,16 @@ def narrate_tool_result(name: str, result: str, *, is_error: bool = False) -> st
     return f"[The tool {name} {outcome}: {result}]"
 
 
+def narrate_tool_loaded(name: str) -> str:
+    """A tool a tool search loaded, as text for a model that reads it as such.
+
+    Anthropic loads a deferred tool's definition when a search names it.
+    Every declared tool, deferred or not, already reaches a model behind
+    another API, so naming it only tells the model the tool is now in play.
+    """
+    return f"[The tool {name} is now available to call.]\n"
+
+
 def state_entries(message: Any) -> list[dict[str, Any]]:
     """The reasoning-state entries recorded on one unified message."""
     details = getattr(message, "reasoning_details", None) or []
@@ -459,7 +483,7 @@ def _replay_items(
         return details if replays_details and details else []
     if target.api_type == ModelApiType.GEMINI:
         signatures = _dict_list(payload.get(STATE_GEMINI_SIGNATURES)) or []
-        return [
+        items = [
             {"type": GEMINI_SIGNATURE_TYPE, **item}
             for item in signatures
             if _non_empty_string(item.get("signature"))
@@ -468,6 +492,10 @@ def _replay_items(
                 or item.get("part") == "text"
             )
         ]
+        parts = gemini_replay_parts(payload)
+        if parts is not None:
+            items.append({"type": GEMINI_PARTS_TYPE, "parts": parts})
+        return items
     if target.api_type == ModelApiType.RESPONSES:
         if capabilities.supports_encrypted_reasoning is False:
             return []
@@ -477,6 +505,47 @@ def _replay_items(
             return []
         return [{"type": RESPONSES_OUTPUT_TYPE, "items": items}]
     return []
+
+
+def gemini_replay_parts(payload: Any) -> list[dict[str, Any]] | None:
+    """A turn payload's Gemini part order (STATE_GEMINI_PARTS), if well formed.
+
+    The client supplied it, so it is taken only whole: every entry a
+    placeholder or a built-in tool part holding one toolCall or toolResponse
+    and at most a signature beside it, and at least one such part. Anything
+    else leaves the turn to be served as if it had no part order.
+    """
+    if not isinstance(payload, dict):
+        return None
+    entries = _dict_list(payload.get(STATE_GEMINI_PARTS))
+    if entries is None:
+        return None
+    invoked = False
+    for entry in entries:
+        placeholder = entry.get(GEMINI_PLACEHOLDER_KEY)
+        if placeholder == GEMINI_TEXT_PLACEHOLDER and len(entry) == 1:
+            continue
+        if (
+            placeholder == GEMINI_CALL_PLACEHOLDER
+            and set(entry) == {GEMINI_PLACEHOLDER_KEY, "tool_call_id"}
+            and _non_empty_string(entry["tool_call_id"])
+        ):
+            continue
+        if not _gemini_invocation_entry(entry):
+            return None
+        invoked = True
+    return entries if invoked else None
+
+
+def _gemini_invocation_entry(entry: dict[str, Any]) -> bool:
+    invocations = set(entry) & _GEMINI_INVOCATION_KEYS
+    signatures = set(entry) & _GEMINI_SIGNATURE_KEYS
+    return (
+        len(invocations) == 1
+        and isinstance(entry[next(iter(invocations))], dict)
+        and set(entry) == invocations | signatures
+        and all(_non_empty_string(entry[key]) for key in signatures)
+    )
 
 
 def _replayable_output_item(item: dict[str, Any]) -> bool:
