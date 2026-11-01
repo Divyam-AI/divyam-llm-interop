@@ -129,7 +129,9 @@
     reasoning_content_replay: all
 
 - selector:
-    name: kimi-k2.6
+    name:
+      regex:
+        - kimi-k2\.[56]
   capabilities:
     reasoning_can_be_disabled: true
 
@@ -219,6 +221,18 @@
     reasoning_enabled_by_default: true
     reasoning_can_be_disabled: true
     reasoning_dialect: openai
+
+# Qwen3 Coder does not reason; it reads text and calls tools, and writes up to
+# 65536 tokens.
+- selector:
+    name: qwen3-coder
+  capabilities:
+    supported_api_types:
+      - COMPLETIONS
+    max_tokens: { min: 1, max: 65536 }
+    supports_function_calling: true
+    supports_vision: false
+    supports_reasoning: false
 
 # Qwen 3.8 reads back the reasoning_content of every earlier assistant turn
 # by default (preserve_thinking).

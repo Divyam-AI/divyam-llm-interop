@@ -43,13 +43,26 @@
 - selector:
     name:
       regex:
-        - claude-fable-5
+        - claude-fable-5(?:-1)?
         - claude-opus-5-5
         - claude-sonnet-5-5
-        - claude-mythos
+        - claude-mythos(?:-5-1)?
   capabilities:
     reasoning_enabled_by_default: true
     reasoning_can_be_disabled: false
+
+# These refuse a forced tool_choice ("any" or a named tool) with a 400,
+# whatever the thinking settings; per Anthropic's tool use documentation,
+# on every platform.
+- selector:
+    name:
+      regex:
+        - claude-opus-5-5
+        - claude-sonnet-5-5
+        - claude-fable-5-1
+        - claude-mythos-5-1
+  capabilities:
+    supported_tool_choices: [ "auto", "none" ]
 
 - selector:
     name: claude-3
@@ -82,13 +95,13 @@
     name:
       regex:
         - claude-4-7
-        - claude-fable-5
+        - claude-fable-5(?:-1)?
         - claude-opus-5
         - claude-opus-5-5
         - claude-haiku-5-5
         - claude-sonnet-5
         - claude-sonnet-5-5
-        - claude-mythos
+        - claude-mythos(?:-5-1)?
   capabilities:
     api_capabilities:
       anthropic_messages:
@@ -105,14 +118,14 @@
 # Server tools these families run, per Anthropic's web search, web fetch, code
 # execution and tool search pages. claude-4 is left out: it spans retired
 # versions, 4.5, which runs only code execution and tool search, and 4.6 on,
-# which runs all four. See provider_hosted_tools.
+# which runs all four. See hosted_tools.split.
 - selector:
     name:
       regex:
         - claude-4-7
-        - claude-fable-5
+        - claude-fable-5(?:-1)?
         - claude-haiku-5-5
-        - claude-mythos
+        - claude-mythos(?:-5-1)?
         - claude-opus-5
         - claude-opus-5-5
         - claude-sonnet-5

@@ -1,5 +1,9 @@
 - name: deepseek-llm-7b
 - name: deepseek-coder-6.7b
+# DeepSeek V3.1 and V3.2: open weights, served by other hosts, such as Amazon
+# Bedrock (deepseek.v3.2).
+- name: deepseek-v3.1
+- name: deepseek-v3.2
 # DeepSeek V4. deepseek-v4-flash is a legacy name served by deepseek-flash.
 - name: deepseek-flash
 - name: deepseek-v4-flash

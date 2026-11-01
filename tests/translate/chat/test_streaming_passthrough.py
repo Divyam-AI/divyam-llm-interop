@@ -489,12 +489,14 @@ class TestCompletionsStreamingPassthrough:
 
 
 # ===================================================================
-# Responses passthrough (short-circuit — same object returned)
+# Responses passthrough (short-circuit — the same events)
 # ===================================================================
 
 
 class TestResponsesStreamingPassthrough:
-    """Responses API same-type streaming short-circuits identically."""
+    """Responses API same-type streaming passes each event through as it
+    came; only a closing event's usage gains the hosted runs it streamed
+    (test_hosted_web_search)."""
 
     @pytest.mark.asyncio
     async def test_text_chunks_identity(self, translator):
@@ -504,7 +506,7 @@ class TestResponsesStreamingPassthrough:
 
         result = translator.translate_response_streaming(original, source, target)
 
-        assert result is original
+        assert result.headers is original.headers
         chunks = await _collect(result)
         assert len(chunks) == len(RESPONSES_CHUNKS)
         for got, expected in zip(chunks, RESPONSES_CHUNKS):
@@ -518,9 +520,11 @@ class TestResponsesStreamingPassthrough:
 
         result = translator.translate_response_streaming(original, source, target)
 
-        assert result is original
+        assert result.headers is original.headers
         chunks = await _collect(result)
         assert len(chunks) == len(RESPONSES_TOOL_CALL_CHUNKS)
+        for got, expected in zip(chunks, RESPONSES_TOOL_CALL_CHUNKS):
+            assert got is expected
 
         # Function call item
         assert chunks[1]["item"]["name"] == "get_weather"

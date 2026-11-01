@@ -13,6 +13,7 @@
 - name: dolphin-2.6-mixtral-8x7b
 - name: dolphin-2.6-llama-3-8b
 # Moonshot Kimi
+- name: kimi-k2.5
 - name: kimi-k2.6
 - name: kimi-k2.7-code
 - name: kimi-k3

@@ -5,12 +5,22 @@ import time
 import uuid
 from typing import Any
 
-from divyam_llm_interop.translate.chat.base.reasoning_state import (
+from divyam_llm_interop.translate.chat.base.translation_utils import (
+    drop_null_values_top_level,
+)
+from divyam_llm_interop.translate.chat.hosted_tools.web_search import (
+    responses_citation,
+    responses_reported_requests,
+    responses_search_call,
+)
+from divyam_llm_interop.translate.chat.reasoning_state import (
     RESPONSE_STATE_KEY,
     STATE_RESPONSES_OUTPUT,
 )
-from divyam_llm_interop.translate.chat.base.translation_utils import (
-    drop_null_values_top_level,
+from divyam_llm_interop.translate.chat.unified.unified_hosted_tools import (
+    HOSTED_TOOLS_FIELD,
+    UnifiedHostedCitation,
+    UnifiedHostedToolOutput,
 )
 
 from .reasoning import reasoning_output_state, reasoning_summary_text
@@ -48,6 +58,7 @@ def convert_responses_to_completions_response(
     message_content = None
     tool_calls_dict = {}  # call_id -> tool call
     function_outputs = {}  # call_id -> output
+    hosted = UnifiedHostedToolOutput()
 
     # First pass: separate messages, reasoning, and tool calls
     for item in output:
@@ -55,11 +66,24 @@ def convert_responses_to_completions_response(
         if item_type == "message":
             content_parts = item.get("content", [])
             text_parts = []
+            # Citations of the text kept, located in it as joined below.
+            citations: list[UnifiedHostedCitation] = []
+            offset = 0
             for part in content_parts:
                 if part.get("type") == "output_text":
-                    text_parts.append(part.get("text", ""))
+                    text = part.get("text", "")
+                    for annotation in part.get("annotations") or []:
+                        citation = responses_citation(annotation, offset)
+                        if citation is not None:
+                            citations.append(citation)
+                    text_parts.append(text)
+                    offset += len(text) + 1
             if text_parts:
                 message_content = "\n".join(text_parts)
+                hosted.citations = citations
+
+        elif item_type == "web_search_call":
+            hosted.calls.append(responses_search_call(item))
 
         elif item_type == "reasoning":
             reasoning_text = " ".join(
@@ -168,6 +192,10 @@ def convert_responses_to_completions_response(
     # Optional system fingerprint passthrough
     if response_dict.get("system_fingerprint"):
         completion_response["system_fingerprint"] = response_dict["system_fingerprint"]
+
+    hosted.requests = responses_reported_requests(usage)
+    if hosted:
+        completion_response[HOSTED_TOOLS_FIELD] = hosted.to_dict()
 
     # Reasoning a client can return on its next turn; never serialized for
     # Chat Completions clients.

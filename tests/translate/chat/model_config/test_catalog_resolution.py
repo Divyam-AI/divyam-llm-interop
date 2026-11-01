@@ -64,9 +64,31 @@ def registry() -> ModelRegistry:
         # Anthropic
         ("claude-opus-5-5", _ANTHROPIC, "claude-opus-5-5", _ALWAYS_REASONS),
         ("claude-sonnet-5-5", _ANTHROPIC, "claude-sonnet-5-5", _ALWAYS_REASONS),
-        ("claude-fable-5-1", _ANTHROPIC, "claude-fable-5", _ALWAYS_REASONS),
-        ("anthropic.claude-fable-5-1", _ANTHROPIC, "claude-fable-5", _ALWAYS_REASONS),
-        ("claude-mythos-5-1", _ANTHROPIC, "claude-mythos", _ALWAYS_REASONS),
+        (
+            "claude-fable-5-1",
+            _ANTHROPIC,
+            "claude-fable-5-1",
+            {**_ALWAYS_REASONS, "supported_tool_choices": ["auto", "none"]},
+        ),
+        (
+            "anthropic.claude-fable-5-1",
+            _ANTHROPIC,
+            "claude-fable-5-1",
+            _ALWAYS_REASONS,
+        ),
+        ("claude-fable-5", _ANTHROPIC, "claude-fable-5", _ALWAYS_REASONS),
+        (
+            "claude-mythos-5-1",
+            _ANTHROPIC,
+            "claude-mythos-5-1",
+            {**_ALWAYS_REASONS, "supported_tool_choices": ["auto", "none"]},
+        ),
+        (
+            "claude-mythos-5",
+            _ANTHROPIC,
+            "claude-mythos",
+            {**_ALWAYS_REASONS, "supported_tool_choices": None},
+        ),
         ("claude-mythos-preview", _ANTHROPIC, "claude-mythos", _ALWAYS_REASONS),
         (
             "claude-haiku-5-5",
@@ -76,6 +98,25 @@ def registry() -> ModelRegistry:
         ),
         ("claude-opus-5", _ANTHROPIC, "claude-opus-5", _REASONS_BY_DEFAULT),
         ("anthropic.claude-opus-5", _ANTHROPIC, "claude-opus-5", _REASONS_BY_DEFAULT),
+        # Bedrock inference profiles: a geography before the vendor.
+        (
+            "global.anthropic.claude-opus-5-5",
+            _ANTHROPIC,
+            "claude-opus-5-5",
+            _ALWAYS_REASONS,
+        ),
+        (
+            "us.anthropic.claude-opus-5-5",
+            _ANTHROPIC,
+            "claude-opus-5-5",
+            _ALWAYS_REASONS,
+        ),
+        (
+            "eu.anthropic.claude-haiku-5-5",
+            _ANTHROPIC,
+            "claude-haiku-5-5",
+            {**_REASONS_BY_DEFAULT, "default_reasoning_effort": "medium"},
+        ),
         ("claude-sonnet-5", _ANTHROPIC, "claude-sonnet-5", _REASONS_BY_DEFAULT),
         # A later Opus 5.x is not assumed to reason like Opus 5.
         ("claude-opus-5-6", _ANTHROPIC, "claude", _REASONS_ON_REQUEST),
@@ -119,7 +160,65 @@ def registry() -> ModelRegistry:
             "deepseek-v4-pro",
             {**_SWITCHABLE, "supports_vision": False},
         ),
+        # Bedrock spells DeepSeek's IDs with the vendor in the name.
+        (
+            "deepseek.v4-pro",
+            _COMPLETIONS,
+            "deepseek-v4-pro",
+            {**_SWITCHABLE, "supports_vision": False},
+        ),
+        ("global.openai.gpt-6-sol", _RESPONSES, "gpt-6-sol", _OPENAI_REASONING),
+        ("moonshotai.kimi-k2.6", _COMPLETIONS, "kimi-k2.6", _SWITCHABLE),
+        ("zai.glm-5.3", _COMPLETIONS, "glm-5.3", _ALWAYS_REASONS),
+        ("xai.grok-4.3", _COMPLETIONS, "grok-4.3", _SWITCHABLE),
         ("moonshotai/kimi-k3", _COMPLETIONS, "kimi-k3", _ALWAYS_REASONS),
+        (
+            "moonshotai.kimi-k2.5",
+            _COMPLETIONS,
+            "kimi-k2.5",
+            {**_SWITCHABLE, "supports_vision": True},
+        ),
+        # Open weights served by other hosts: reasoning only when asked.
+        (
+            "deepseek.v3.2",
+            _COMPLETIONS,
+            "deepseek-v3.2",
+            {
+                "supports_reasoning": True,
+                "reasoning_enabled_by_default": False,
+                "reasoning_can_be_disabled": True,
+                "supports_vision": False,
+            },
+        ),
+        (
+            "deepseek-ai/DeepSeek-V3.1",
+            _COMPLETIONS,
+            "deepseek-v3.1",
+            {
+                "supports_reasoning": True,
+                "reasoning_enabled_by_default": False,
+                "reasoning_can_be_disabled": True,
+                "supports_vision": False,
+            },
+        ),
+        # Qwen3 Coder: every size, no reasoning, text only.
+        *(
+            (
+                name,
+                _COMPLETIONS,
+                "qwen3-coder",
+                {
+                    "supports_reasoning": False,
+                    "supports_vision": False,
+                    "supports_function_calling": True,
+                },
+            )
+            for name in (
+                "qwen.qwen3-coder-480b-a35b-instruct",
+                "Qwen/Qwen3-Coder-30B-A3B-Instruct",
+                "qwen.qwen3-coder-next",
+            )
+        ),
         (
             "kimi-k2.7-code-highspeed",
             _COMPLETIONS,

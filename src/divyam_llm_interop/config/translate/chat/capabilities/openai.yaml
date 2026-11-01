@@ -1,6 +1,6 @@
 # hosted_tools lists the provider-hosted tools a model's Responses API runs,
 # as OpenAI's model pages state them. A kind the docs do not confirm is left
-# out, so it is dropped or refused rather than sent; see provider_hosted_tools.
+# out, so it is dropped or refused rather than sent; see hosted_tools.split.
 - selector:
     name:
       regex:
@@ -252,7 +252,7 @@
 - selector:
     name: gpt-5
   capabilities:
-    hosted_tools: [ "web_search", "image_generation" ]
+    hosted_tools: [ "web_search", "file_search", "code_execution", "image_generation", "mcp" ]
     strict_completions_compatibility: false
     max_tokens:
       min: 1
@@ -281,7 +281,7 @@
 - selector:
     name: gpt-5-nano
   capabilities:
-    hosted_tools: [ "image_generation" ]
+    hosted_tools: [ "web_search", "file_search", "code_execution", "mcp" ]
     strict_completions_compatibility: false
     max_tokens:
       min: 1
@@ -377,7 +377,7 @@
 - selector:
     name: gpt-4.1
   capabilities:
-    hosted_tools: [ "web_search", "image_generation" ]
+    hosted_tools: [ "web_search", "file_search", "code_execution", "image_generation", "mcp" ]
     strict_completions_compatibility: false
     max_tokens:
       min: 1
@@ -434,7 +434,7 @@
 - selector:
     name: gpt-4.1-mini
   capabilities:
-    hosted_tools: [ "web_search", "image_generation" ]
+    hosted_tools: [ "web_search", "file_search", "code_execution", "image_generation", "mcp" ]
     strict_completions_compatibility: false
     max_tokens:
       min: 1
@@ -463,7 +463,7 @@
 - selector:
     name: gpt-4.1-nano
   capabilities:
-    hosted_tools: [ "image_generation" ]
+    hosted_tools: [ "file_search", "code_execution", "image_generation", "mcp" ]
     strict_completions_compatibility: false
     max_tokens:
       min: 1
@@ -668,7 +668,7 @@
 - selector:
     name: gpt-4o
   capabilities:
-    hosted_tools: [ "image_generation" ]
+    hosted_tools: [ "web_search", "file_search", "code_execution", "image_generation", "mcp" ]
     strict_completions_compatibility: false
     max_tokens:
       min: 1
@@ -697,7 +697,7 @@
 - selector:
     name: gpt-4o-mini
   capabilities:
-    hosted_tools: [ "image_generation" ]
+    hosted_tools: [ "web_search", "file_search", "code_execution", "image_generation", "mcp" ]
     strict_completions_compatibility: false
     max_tokens:
       min: 1
@@ -761,6 +761,7 @@
 - selector:
     name: gpt-5.1
   capabilities:
+    hosted_tools: [ "web_search", "file_search", "code_execution", "image_generation", "mcp" ]
     strict_completions_compatibility: false
     max_tokens:
       min: 1
@@ -824,6 +825,7 @@
 - selector:
     name: gpt-5.1-codex-max
   capabilities:
+    hosted_tools: [ "web_search" ]
     strict_completions_compatibility: false
     max_tokens:
       min: 1
@@ -846,6 +848,7 @@
 - selector:
     name: gpt-5.2-pro
   capabilities:
+    hosted_tools: [ "web_search", "file_search", "image_generation", "mcp" ]
     strict_completions_compatibility: false
     max_completion_tokens: { min: 1, max: 131072 } # 128k output cap
     top_p: { min: 1, max: 1 }
@@ -862,7 +865,7 @@
 - selector:
     name: gpt-5.2
   capabilities:
-    hosted_tools: [ "image_generation", "mcp" ]
+    hosted_tools: [ "web_search", "file_search", "code_execution", "image_generation", "mcp" ]
     max_completion_tokens: { min: 1, max: 131072 }
     top_p: { min: 1, max: 1 }
     input_token_limit: 272000
@@ -951,6 +954,7 @@
 - selector:
     name: gpt-5.3-codex
   capabilities:
+    hosted_tools: [ "web_search" ]
     description: OpenAI's flagship agentic coding model; merges reasoning with software lifecycle management.
     strict_completions_compatibility: false
     max_completion_tokens:
@@ -998,6 +1002,7 @@
 - selector:
     name: gpt-5.2-codex
   capabilities:
+    hosted_tools: [ "web_search" ]
     description: Legacy agentic coding model with native context compaction.
     strict_completions_compatibility: false
     max_completion_tokens:
@@ -1020,6 +1025,7 @@
 - selector:
     name: gpt-5.1-codex
   capabilities:
+    hosted_tools: [ "web_search" ]
     description: Initial GPT-5 generation coding specialist.
     strict_completions_compatibility: false
     max_tokens:

@@ -7,7 +7,7 @@ import re
 
 import pytest
 
-from divyam_llm_interop.translate.chat.base.reasoning_state import (
+from divyam_llm_interop.translate.chat.reasoning_state import (
     KIND_ANTHROPIC_REDACTED,
     KIND_ANTHROPIC_SIGNATURE,
     unwrap_envelope,

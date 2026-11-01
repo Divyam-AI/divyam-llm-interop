@@ -10,7 +10,7 @@ from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
     is_openai_strict_schema,
 )
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
-from divyam_llm_interop.translate.chat.base.reasoning_state import (
+from divyam_llm_interop.translate.chat.reasoning_state import (
     ENVELOPE_PREFIX,
     KIND_ANTHROPIC_SIGNATURE,
     KIND_TURN,

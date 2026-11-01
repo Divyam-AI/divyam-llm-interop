@@ -22,7 +22,12 @@ from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
     is_portable_tool_name,
 )
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
-from divyam_llm_interop.translate.chat.base.reasoning_state import (
+from divyam_llm_interop.translate.chat.hosted_tools.web_search import (
+    anthropic_cited_text_blocks,
+    anthropic_search_blocks,
+    hosted_usage,
+)
+from divyam_llm_interop.translate.chat.reasoning_state import (
     RESPONSE_DOMAIN_KEY,
     RESPONSE_STATE_KEY,
 )
@@ -30,6 +35,9 @@ from divyam_llm_interop.translate.chat.translation_errors import (
     TargetCapabilityError,
 )
 from divyam_llm_interop.translate.chat.types import ChatResponse, Model
+from divyam_llm_interop.translate.chat.unified.unified_hosted_tools import (
+    UnifiedHostedToolOutput,
+)
 from divyam_llm_interop.translate.chat.unified.unified_response import (
     UnifiedChatCompletionsResponse,
     UnifiedChoice,
@@ -64,7 +72,10 @@ def unified_response_to_anthropic(
         "type": "message",
         "role": "assistant",
         "content": _content_blocks(
-            choice, domain, from_response.body.unknowns.get(RESPONSE_STATE_KEY)
+            choice,
+            domain,
+            from_response.body.unknowns.get(RESPONSE_STATE_KEY),
+            from_response.body.hosted_tools,
         ),
         "model": target.name,
         "stop_reason": stop_reason,
@@ -80,7 +91,10 @@ def unified_response_to_anthropic(
 
 
 def _content_blocks(
-    choice: UnifiedChoice, domain: str | None, provider_state: Any
+    choice: UnifiedChoice,
+    domain: str | None,
+    provider_state: Any,
+    hosted: UnifiedHostedToolOutput | None = None,
 ) -> list[dict[str, Any]]:
     message = choice.message
     if message.role != "assistant":
@@ -104,13 +118,22 @@ def _content_blocks(
                 "signature": display_signature(domain),
             }
         )
+    if hosted:
+        # Searches run before the answer that rests on them.
+        for call in hosted.calls:
+            content.extend(anthropic_search_blocks(call))
     if message.content is not None:
         if not isinstance(message.content, str):
             _target_error(
                 "only text response content is supported",
                 "$.choices[0].message.content",
             )
-        content.append({"type": "text", "text": message.content})
+        if hosted and hosted.citations and message.content:
+            content.extend(
+                anthropic_cited_text_blocks(message.content, hosted.citations)
+            )
+        else:
+            content.append({"type": "text", "text": message.content})
     for index, tool_call in enumerate(message.tool_calls or []):
         if tool_call.type != "function":
             _target_error(
@@ -212,11 +235,17 @@ def _validate_stop_sequence_pair(reason: str, sequence: Any) -> None:
         )
 
 
-def _usage(from_response: UnifiedChatCompletionsResponse) -> dict[str, int]:
+def _usage(from_response: UnifiedChatCompletionsResponse) -> dict[str, Any]:
     usage = from_response.body.usage
-    if usage is None:
-        return {"input_tokens": 0, "output_tokens": 0}
-    return anthropic_usage(*input_split(usage), usage.completion_tokens)
+    result: dict[str, Any] = (
+        {"input_tokens": 0, "output_tokens": 0}
+        if usage is None
+        else dict(anthropic_usage(*input_split(usage), usage.completion_tokens))
+    )
+    hosted = from_response.body.hosted_tools
+    if hosted:
+        result.update(hosted_usage(hosted.counts(), ModelApiType.ANTHROPIC_MESSAGES))
+    return result
 
 
 def _message_id(value: str) -> str:

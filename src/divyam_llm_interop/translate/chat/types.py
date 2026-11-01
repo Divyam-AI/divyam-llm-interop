@@ -86,6 +86,12 @@ class ChatRequest:
     )
     # Explicit at HTTP ingress; older library callers may still use detection.
     api_type: ModelApiType | None = None
+    # Hosted tool kinds translation removed from the request, by
+    # ChatTranslateConfig.drop_provider_hosted_tools; never part of the
+    # provider payload.
+    dropped_hosted_tools: frozenset[str] = field(
+        default_factory=frozenset, compare=False
+    )
 
 
 @dataclass

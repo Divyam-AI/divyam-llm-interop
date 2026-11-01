@@ -11,13 +11,6 @@ from typing_extensions import override
 
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
 from divyam_llm_interop.translate.chat.base import translation_utils
-from divyam_llm_interop.translate.chat.base.reasoning_state import (
-    GEMINI_SIGNATURE_TYPE,
-    RESPONSE_STATE_KEY,
-    STATE_GEMINI_SIGNATURES,
-    narrate_tool_call,
-    narrate_tool_result,
-)
 from divyam_llm_interop.translate.chat.base.translation_utils import (
     JSON_ONLY_INSTRUCTION,
     close_async_stream,
@@ -26,8 +19,31 @@ from divyam_llm_interop.translate.chat.base.translator import Translator
 from divyam_llm_interop.translate.chat.gemini_native.response_normalizer import (
     normalize_gemini_response_body,
 )
+from divyam_llm_interop.translate.chat.hosted_tools.split import (
+    gemini_invocation,
+    is_gemini_invocation_part,
+)
+from divyam_llm_interop.translate.chat.hosted_tools.web_search import (
+    WEB_SEARCH,
+    gemini_grounding,
+    gemini_grounding_metadata,
+    gemini_invoked_searches,
+    gemini_search_output,
+)
 from divyam_llm_interop.translate.chat.model_config.model_registry import (
     ModelRegistry,
+)
+from divyam_llm_interop.translate.chat.reasoning_state import (
+    GEMINI_CALL_PLACEHOLDER,
+    GEMINI_PARTS_TYPE,
+    GEMINI_PLACEHOLDER_KEY,
+    GEMINI_SIGNATURE_TYPE,
+    GEMINI_TEXT_PLACEHOLDER,
+    RESPONSE_STATE_KEY,
+    STATE_GEMINI_PARTS,
+    STATE_GEMINI_SIGNATURES,
+    narrate_tool_call,
+    narrate_tool_result,
 )
 from divyam_llm_interop.translate.chat.translation_errors import (
     UnsupportedFeatureError,
@@ -38,6 +54,13 @@ from divyam_llm_interop.translate.chat.types import (
     ChatResponse,
     ChatResponseStreaming,
     Model,
+)
+from divyam_llm_interop.translate.chat.unified.unified_hosted_tools import (
+    HOSTED_TOOL_EVENTS_FIELD,
+    HOSTED_TOOLS_FIELD,
+    UnifiedHostedCitation,
+    UnifiedHostedToolCall,
+    UnifiedHostedToolEvent,
 )
 from divyam_llm_interop.translate.chat.unified.unified_request import (
     UnifiedChatCompletionsRequest,
@@ -53,10 +76,21 @@ from divyam_llm_interop.translate.chat.unified.unified_response import (
 
 # Google's documented thought signature for function calls a Gemini model did
 # not produce, such as history from another model. It costs reasoning quality,
-# so it is used only for endpoints that opt in with gemini_foreign_call_policy
-# "skip_signature"; by default such calls are flattened instead.
+# so it is used only for endpoints declaring gemini_foreign_call_policy
+# "skip_signature", as the catalog does for Gemini 3 and 4; otherwise such
+# calls are flattened instead.
 _SKIP_SIGNATURE_VALIDATOR = "skip_thought_signature_validator"
 
+# The most JSON a turn's built-in tool parts are kept to, in characters. The
+# state travels in one envelope with the turn's signatures, and an envelope
+# past its own limit is ignored whole; a turn past this is narrated instead.
+_MAX_PART_ORDER_LENGTH = 1_000_000
+# Ends a streamed part order that outgrew it; no replay accepts it.
+_OMITTED_PLACEHOLDER = "omitted"
+
+
+# Content part types holding text, as Chat Completions and Responses name them.
+_TEXT_PART_TYPES = ("text", "input_text", "output_text")
 
 # Image MIME types by file extension, for fileData parts named by URL.
 _IMAGE_MIME_TYPES = {
@@ -278,9 +312,11 @@ class GeminiTranslator(Translator):
         request_body: dict[str, Any] = {"model": target.name}
 
         system_messages = [
-            message.content
-            for message in unified.messages
-            if message.role == "system" and message.content
+            text
+            for index, message in enumerate(unified.messages)
+            if message.role == "system"
+            for text in [self._system_text(message.content, index)]
+            if text
         ]
         if system_messages:
             request_body["systemInstruction"] = {
@@ -338,6 +374,8 @@ class GeminiTranslator(Translator):
                         part["thoughtSignature"] = call_signatures[tool_call.id]
                     parts.append(part)
 
+            if message.role == "assistant":
+                parts = self._ordered_parts(parts, message)
             if parts:
                 contents.append({"role": role, "parts": parts})
 
@@ -425,6 +463,8 @@ class GeminiTranslator(Translator):
         candidates = body.get("candidates", [])
 
         signatures: list[dict[str, Any]] = []
+        part_order: list[dict[str, Any]] = []
+        hosted: dict[str, Any] | None = None
         choices = []
         for index, candidate in enumerate(candidates):
             content = candidate.get("content") or {}
@@ -440,6 +480,14 @@ class GeminiTranslator(Translator):
                 message["tool_calls"] = [tc.to_dict() for tc in tool_calls]
             if index == 0:
                 signatures = self._thought_signatures(parts)
+                part_order = _kept_part_order(self._part_order(parts))
+                metadata = gemini_grounding_metadata(candidate)
+                searches = gemini_invoked_searches(parts)
+                if metadata is not None or searches:
+                    output = gemini_search_output(
+                        metadata or {}, self._answer_texts(parts), searches or None
+                    )
+                    hosted = output.to_dict() if output else None
 
             finish = GeminiTranslator._candidate_field(
                 candidate, "finishReason", "finish_reason"
@@ -475,8 +523,15 @@ class GeminiTranslator(Translator):
             completion_body["usage"] = usage
 
         completion_body["gemini_response_raw"] = copy.deepcopy(body)
-        if candidates and signatures:
-            completion_body[RESPONSE_STATE_KEY] = {STATE_GEMINI_SIGNATURES: signatures}
+        state: dict[str, Any] = {}
+        if signatures:
+            state[STATE_GEMINI_SIGNATURES] = signatures
+        if part_order:
+            state[STATE_GEMINI_PARTS] = part_order
+        if candidates and state:
+            completion_body[RESPONSE_STATE_KEY] = state
+        if hosted is not None:
+            completion_body[HOSTED_TOOLS_FIELD] = hosted
 
         return translation_utils.as_is_response_to_unified(
             ChatResponse(body=completion_body, headers=chat_response.headers)
@@ -527,6 +582,15 @@ class GeminiTranslator(Translator):
                 candidate["finishMessage"] = finish_message
             if parts:
                 candidate["content"] = {"role": "model", "parts": parts}
+            hosted = from_response.body.hosted_tools
+            if hosted and choice.index == 0:
+                candidate["groundingMetadata"] = gemini_grounding(
+                    hosted.calls,
+                    hosted.citations,
+                    choice.message.content
+                    if isinstance(choice.message.content, str)
+                    else "",
+                )
 
             candidates.append(candidate)
 
@@ -546,14 +610,17 @@ class GeminiTranslator(Translator):
         self, chat_response: ChatResponseStreaming, source: Model
     ) -> UnifiedChatResponseStreaming:
         async def unified_stream():
-            # Candidates that called a tool earlier in the stream: Gemini sends
-            # the call and the finish reason in different chunks.
-            called: set[int] = set()
+            calls = _StreamCalls()
+            grounding = _StreamGrounding()
             try:
                 async for chunk in chat_response.stream:
-                    yield UnifiedChatCompletionsStreamChunk.from_dict(
-                        self._gemini_stream_chunk_to_unified_dict(chunk, source, called)
+                    unified = self._gemini_stream_chunk_to_unified_dict(
+                        chunk, source, calls
                     )
+                    events = grounding.events(chunk)
+                    if events:
+                        unified[HOSTED_TOOL_EVENTS_FIELD] = events
+                    yield UnifiedChatCompletionsStreamChunk.from_dict(unified)
             finally:
                 await close_async_stream(chat_response.stream)
 
@@ -569,9 +636,19 @@ class GeminiTranslator(Translator):
             # Buffer for incremental tool call deltas.
             # key = (choice_index, tool_call_index), value = {name, arguments}
             tc_buffer: dict[tuple[int, int], dict[str, str]] = {}
+            # Hosted tool output so far, written as groundingMetadata on the
+            # chunk that finishes the first candidate.
+            searches: list[UnifiedHostedToolCall] = []
+            citations: list[UnifiedHostedCitation] = []
+            answer = ""
 
             async for unified_chunk in from_response.stream:
                 raise_for_internal_stream_error(unified_chunk)
+                for hosted in unified_chunk.hosted_tool_events:
+                    if hosted.call is not None:
+                        searches.append(hosted.call)
+                    if hosted.citation is not None:
+                        citations.append(hosted.citation)
                 # If there's a gemini_response_raw passthrough, emit as-is.
                 raw = unified_chunk.unknowns.get("gemini_response_raw")
                 if isinstance(raw, dict):
@@ -589,6 +666,8 @@ class GeminiTranslator(Translator):
                     # Text passes through immediately.
                     if choice.delta.content:
                         parts.append({"text": choice.delta.content})
+                        if choice.index == 0:
+                            answer += str(choice.delta.content)
 
                     # Buffer incremental tool call deltas.
                     if choice.delta.tool_calls:
@@ -639,6 +718,10 @@ class GeminiTranslator(Translator):
                         candidate["finishMessage"] = finish_message
                     if parts:
                         candidate["content"] = {"role": "model", "parts": parts}
+                    if finish_reason and choice.index == 0 and (searches or citations):
+                        candidate["groundingMetadata"] = gemini_grounding(
+                            searches, citations, answer
+                        )
                     candidates.append(candidate)
 
                 body: dict[str, Any] = {
@@ -676,24 +759,35 @@ class GeminiTranslator(Translator):
 
     @staticmethod
     def _gemini_stream_chunk_to_unified_dict(
-        body: dict[str, Any], source: Model, called: set[int] | None = None
+        body: dict[str, Any], source: Model, calls: "_StreamCalls | None" = None
     ) -> dict[str, Any]:
         """Map one native Gemini stream chunk to OpenAI-style stream chunk dict.
 
-        ``called`` collects the candidates that have called a tool so far in
-        the stream, so the chunk that finishes one reports tool_calls.
+        ``calls`` is what the stream has said so far about each candidate's
+        parts and function calls; see _StreamCalls.
         """
-        called = set() if called is None else called
+        calls = _StreamCalls() if calls is None else calls
         candidates = body.get("candidates", [])
         signatures: list[dict[str, Any]] = []
+        part_order: list[dict[str, Any]] = []
         choices: list[dict[str, Any]] = []
         for index, candidate in enumerate(candidates):
             content = candidate.get("content") or {}
             parts = content.get("parts", []) if isinstance(content, dict) else []
+            candidate_index = candidate.get("index", index)
+            first_call = calls.count(candidate_index)
             text, thought_text = GeminiTranslator._split_thought_text(parts)
-            tool_calls = GeminiTranslator._extract_tool_calls_from_parts(parts)
+            tool_calls = GeminiTranslator._extract_tool_calls_from_parts(
+                parts, first_call
+            )
+            calls.add(candidate_index, len(tool_calls))
             if index == 0:
-                signatures.extend(GeminiTranslator._thought_signatures(parts))
+                signatures.extend(
+                    GeminiTranslator._thought_signatures(parts, first_call)
+                )
+                part_order = calls.part_order(
+                    GeminiTranslator._part_order(parts, first_call)
+                )
 
             delta: dict[str, Any] = {}
             if text:
@@ -701,7 +795,10 @@ class GeminiTranslator(Translator):
             if thought_text:
                 delta["reasoning_content"] = thought_text
             if tool_calls:
-                delta["tool_calls"] = [tc.to_dict() for tc in tool_calls]
+                delta["tool_calls"] = [
+                    {**tc.to_dict(), "index": first_call + number}
+                    for number, tc in enumerate(tool_calls)
+                ]
             if isinstance(content, dict):
                 role = content.get("role")
                 if role == "model":
@@ -715,16 +812,13 @@ class GeminiTranslator(Translator):
             finish_message = GeminiTranslator._candidate_field(
                 candidate, "finishMessage", "finish_message"
             )
-            candidate_index = candidate.get("index", index)
-            if tool_calls:
-                called.add(candidate_index)
             choice_entry: dict[str, Any] = {
                 "index": candidate_index,
                 "delta": delta,
             }
             if finish is not None:
                 choice_entry["finish_reason"] = GeminiTranslator._openai_finish_reason(
-                    finish, candidate_index in called
+                    finish, calls.count(candidate_index) > 0
                 )
                 gemini_finish = GeminiTranslator._finish_reason_str(finish)
                 if gemini_finish:
@@ -747,8 +841,13 @@ class GeminiTranslator(Translator):
         }
         if usage is not None:
             chunk_dict["usage"] = usage
+        state: dict[str, Any] = {}
         if signatures:
-            chunk_dict[RESPONSE_STATE_KEY] = {STATE_GEMINI_SIGNATURES: signatures}
+            state[STATE_GEMINI_SIGNATURES] = signatures
+        if part_order:
+            state[STATE_GEMINI_PARTS] = part_order
+        if state:
+            chunk_dict[RESPONSE_STATE_KEY] = state
         return chunk_dict
 
     @staticmethod
@@ -937,9 +1036,10 @@ class GeminiTranslator(Translator):
             "name": function_dict.get("name"),
             "description": function_dict.get("description", ""),
         }
-        # Preserve original Gemini native shape when it existed in source payload.
-        # Gemini backend rejects requests that set both parameters and
-        # parameters_json_schema in the same declaration.
+        # Gemini reads `parameters` as its OpenAPI subset, which refuses JSON
+        # Schema keywords such as additionalProperties, and takes full JSON
+        # Schema in parameters_json_schema; it rejects a declaration setting
+        # both. Every source's schema is JSON Schema, so it goes in the latter.
         parameters_json_schema = function_dict.get("parameters_json_schema")
         if isinstance(parameters_json_schema, dict):
             declaration["parameters_json_schema"] = parameters_json_schema
@@ -947,7 +1047,7 @@ class GeminiTranslator(Translator):
 
         parameters = function_dict.get("parameters")
         if isinstance(parameters, dict):
-            declaration["parameters"] = parameters
+            declaration["parameters_json_schema"] = parameters
 
         return declaration
 
@@ -1003,9 +1103,11 @@ class GeminiTranslator(Translator):
 
     @staticmethod
     def _extract_tool_calls_from_parts(
-        parts: list[dict[str, Any]],
+        parts: list[dict[str, Any]], first_call: int | None = None
     ) -> list[UnifiedToolCall]:
+        """The function calls among a turn's parts; see _function_call_ids."""
         tool_calls: list[UnifiedToolCall] = []
+        call_ids = GeminiTranslator._function_call_ids(parts, first_call)
         for idx, part in enumerate(parts):
             function_call = GeminiTranslator._function_call(part)
             if not function_call:
@@ -1016,7 +1118,7 @@ class GeminiTranslator(Translator):
             tool_calls.append(
                 UnifiedToolCall.from_dict(
                     {
-                        "id": GeminiTranslator._function_call_id(function_call, idx),
+                        "id": call_ids[idx],
                         "type": "function",
                         "function": {
                             "name": function_call.get("name", "tool"),
@@ -1035,11 +1137,40 @@ class GeminiTranslator(Translator):
         return function_call if isinstance(function_call, dict) else None
 
     @staticmethod
+    def _function_call_ids(
+        parts: list[dict[str, Any]], first_call: int | None = None
+    ) -> dict[int, str]:
+        """The IDs of the function calls among parts, by part position.
+
+        A call Gemini gave no ID is named by its position: among the parts,
+        or, given first_call, among a stream's calls, first_call being the
+        number of calls the stream sent before these parts. A stream sends a
+        turn's calls over several chunks, each call at part 0 of its own.
+        """
+        ids: dict[int, str] = {}
+        for index, part in enumerate(parts):
+            function_call = GeminiTranslator._function_call(part)
+            if function_call is None:
+                continue
+            position = index if first_call is None else first_call + len(ids)
+            ids[index] = GeminiTranslator._function_call_id(function_call, position)
+        return ids
+
+    @staticmethod
     def _function_call_id(function_call: dict[str, Any], index: int) -> str:
         return (
             function_call.get("id")
             or f"call_{index}_{function_call.get('name', 'tool')}"
         )
+
+    @staticmethod
+    def _answer_texts(parts: list[dict[str, Any]]) -> list[str]:
+        """The answer's text parts, which the unified message joins with newlines."""
+        return [
+            str(part["text"])
+            for part in parts
+            if not part.get("thought") and part.get("text") is not None
+        ]
 
     @staticmethod
     def _split_thought_text(parts: list[dict[str, Any]]) -> tuple[str | None, str]:
@@ -1061,22 +1192,27 @@ class GeminiTranslator(Translator):
         return value if isinstance(value, str) and value else None
 
     @staticmethod
-    def _thought_signatures(parts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _thought_signatures(
+        parts: list[dict[str, Any]], first_call: int | None = None
+    ) -> list[dict[str, Any]]:
         """Thought signatures on a model turn's parts, keyed to where they go back.
 
         Gemini puts a signature on a part, beside its functionCall or text, and
         expects it back on the same part. A functionCall part is identified by
         its call ID, as derived for the unified tool call; a text part's
-        signature belongs on the turn's text.
+        signature belongs on the turn's text. A built-in tool's toolCall and
+        toolResponse parts go back whole, signatures included, in the turn's
+        part order (see _part_order), so they are not listed here.
         """
         signatures: list[dict[str, Any]] = []
+        call_ids = GeminiTranslator._function_call_ids(parts, first_call)
         for index, part in enumerate(parts):
             signature = GeminiTranslator._part_signature(part)
-            if signature is None:
+            if signature is None or is_gemini_invocation_part(part):
                 continue
             function_call = GeminiTranslator._function_call(part)
             if function_call is not None:
-                call_id = GeminiTranslator._function_call_id(function_call, index)
+                call_id = call_ids[index]
                 signatures.append({"tool_call_id": call_id, "signature": signature})
             elif not part.get("thought"):
                 text = part.get("text")
@@ -1116,6 +1252,76 @@ class GeminiTranslator(Translator):
         return text_signature, call_signatures
 
     @staticmethod
+    def _part_order(
+        parts: list[dict[str, Any]], first_call: int | None = None
+    ) -> list[dict[str, Any]]:
+        """A model turn's parts as STATE_GEMINI_PARTS records them.
+
+        A built-in tool's toolCall and toolResponse parts are kept whole; a
+        functionCall becomes a placeholder naming its call ID, as derived for
+        the unified tool call, and answer text one for the turn's text. Thought
+        parts are not replayed and are left out.
+        """
+        order: list[dict[str, Any]] = []
+        call_ids = GeminiTranslator._function_call_ids(parts, first_call)
+        for index, part in enumerate(parts):
+            if is_gemini_invocation_part(part):
+                order.append(_recorded_part(part))
+            elif index in call_ids:
+                order.append(
+                    {
+                        GEMINI_PLACEHOLDER_KEY: GEMINI_CALL_PLACEHOLDER,
+                        "tool_call_id": call_ids[index],
+                    }
+                )
+            elif (
+                part.get("text") is not None
+                and not part.get("thought")
+                and not (order and _is_text_placeholder(order[-1]))
+            ):
+                order.append({GEMINI_PLACEHOLDER_KEY: GEMINI_TEXT_PLACEHOLDER})
+        return order
+
+    @staticmethod
+    def _ordered_parts(
+        parts: list[dict[str, Any]], message: Any
+    ) -> list[dict[str, Any]]:
+        """A model turn's parts in the order Gemini returned them, if recorded.
+
+        The recorded built-in tool parts go back as they came; the text parts
+        take the place of the first text placeholder, the unified message
+        holding the turn's text as one, and each functionCall the place of its
+        own. Parts the order does not place keep their order, at the end.
+        """
+        order = next(
+            (
+                entry["parts"]
+                for entry in message.reasoning_details or []
+                if isinstance(entry, dict) and entry.get("type") == GEMINI_PARTS_TYPE
+            ),
+            None,
+        )
+        if not order:
+            return parts
+        texts = [part for part in parts if "functionCall" not in part]
+        calls = {
+            part["functionCall"]["id"]: part for part in parts if "functionCall" in part
+        }
+        ordered: list[dict[str, Any]] = []
+        for entry in order:
+            placeholder = entry.get(GEMINI_PLACEHOLDER_KEY)
+            if placeholder == GEMINI_TEXT_PLACEHOLDER:
+                ordered.extend(texts)
+                texts = []
+            elif placeholder == GEMINI_CALL_PLACEHOLDER:
+                call = calls.pop(entry["tool_call_id"], None)
+                if call is not None:
+                    ordered.append(call)
+            else:
+                ordered.append(copy.deepcopy(entry))
+        return [*ordered, *texts, *calls.values()]
+
+    @staticmethod
     def _text_parts(
         content: str | None, text_signature: dict[str, str] | None
     ) -> list[dict[str, Any]]:
@@ -1134,6 +1340,31 @@ class GeminiTranslator(Translator):
         elif not signed_text:
             parts.append({"text": "", "thoughtSignature": text_signature["signature"]})
         return parts
+
+    @staticmethod
+    def _system_text(content: Any, index: int) -> str:
+        """A system message's text, whether a string or a list of text parts.
+
+        Gemini's system instruction is text, so a part of any other kind is
+        refused rather than dropped from the instructions.
+        """
+        if not isinstance(content, list):
+            return content or ""
+        texts: list[str] = []
+        for part_index, part in enumerate(content):
+            if (
+                isinstance(part, dict)
+                and part.get("type") in _TEXT_PART_TYPES
+                and isinstance(part.get("text"), str)
+            ):
+                texts.append(part["text"])
+                continue
+            raise UnsupportedFeatureError(
+                "a Gemini system instruction carries only text",
+                target_api_type=ModelApiType.GEMINI,
+                path=f"$.messages[{index}].content[{part_index}]",
+            )
+        return "".join(texts)
 
     @staticmethod
     def _content_parts(content: list[Any]) -> list[dict[str, Any]]:
@@ -1266,7 +1497,9 @@ class GeminiTranslator(Translator):
         call of its step has no thought signature, as for a call another
         model made. Each such step's calls, and the function responses
         answering them, become text describing what happened; adjacent turns
-        of one role are then joined, so roles still alternate.
+        of one role are then joined, so roles still alternate. A built-in
+        tool's toolCall is a call of the step too: Gemini signs a step that
+        runs one beside a function on whichever of them comes first.
         """
         start = GeminiTranslator._current_turn_start(contents)
         flattened_names: dict[str, str] = {}
@@ -1278,7 +1511,7 @@ class GeminiTranslator(Translator):
             if (
                 content.get("role") == "model"
                 and calls
-                and "thoughtSignature" not in calls[0]
+                and not GeminiTranslator._step_signed(parts)
             ):
                 new_parts: list[dict[str, Any]] = []
                 for part in parts:
@@ -1355,14 +1588,34 @@ class GeminiTranslator(Translator):
         the latest user message other than function responses, when the
         first call of its step has no thought signature. Calls another model
         made carry none; Google documents the skip value for that history.
+        A step whose built-in tool call is signed is Gemini's own.
         """
         start = GeminiTranslator._current_turn_start(contents)
         for content in contents[start:]:
             if content.get("role") != "model":
                 continue
             calls = [part for part in content["parts"] if "functionCall" in part]
-            if calls and not any("thoughtSignature" in part for part in calls):
+            signed = any(
+                GeminiTranslator._part_signature(part) is not None
+                for part in GeminiTranslator._step_calls(content["parts"])
+            )
+            if calls and not signed:
                 calls[0]["thoughtSignature"] = _SKIP_SIGNATURE_VALIDATOR
+
+    @staticmethod
+    def _step_calls(parts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """A step's calls: its functionCall parts and built-in toolCall parts."""
+        return [
+            part
+            for part in parts
+            if "functionCall" in part or gemini_invocation(part) is not None
+        ]
+
+    @staticmethod
+    def _step_signed(parts: list[dict[str, Any]]) -> bool:
+        """Whether the first of a step's calls carries a signature."""
+        calls = GeminiTranslator._step_calls(parts)
+        return bool(calls) and GeminiTranslator._part_signature(calls[0]) is not None
 
     @staticmethod
     def _gemini_modality_str(modality: Any) -> str:
@@ -1536,6 +1789,195 @@ class GeminiTranslator(Translator):
         if finish_reason == "content_filter":
             return "SAFETY"
         return "STOP"
+
+
+class _StreamCalls:
+    """The number of function calls each candidate has streamed so far.
+
+    Gemini sends each function call complete, and a turn of several calls as
+    several chunks, each call at part 0 of its own chunk. A Chat Completions
+    stream tells a choice's calls apart by index, so a call's index, and the
+    name of a call without an ID, is its position among the candidate's
+    calls in the whole stream. A candidate that called a function finishes
+    with tool_calls, though Gemini sends the finish reason in a later chunk.
+
+    It also holds the first candidate's part order (see _part_order) until a
+    built-in tool part shows the turn keeps one, then reports it chunk by
+    chunk, as the turn's other state is.
+    """
+
+    def __init__(self) -> None:
+        self._calls: dict[int, int] = {}
+        self._held_order: list[dict[str, Any]] = []
+        self._last_entry: dict[str, Any] = {}
+        self._order_kept = False
+        self._order_length = 0
+        self._order_closed = False
+
+    def count(self, candidate: int) -> int:
+        return self._calls.get(candidate, 0)
+
+    def add(self, candidate: int, count: int) -> None:
+        if count:
+            self._calls[candidate] = self.count(candidate) + count
+
+    def part_order(self, order: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """The part order entries to report with this chunk.
+
+        Text streams over many chunks, so a text placeholder following one is
+        left out. A turn whose kept parts outgrow _MAX_PART_ORDER_LENGTH ends
+        its order with an entry no replay accepts, so it is narrated.
+        """
+        if self._order_closed:
+            return []
+        entries: list[dict[str, Any]] = []
+        for entry in order:
+            if _is_text_placeholder(entry) and _is_text_placeholder(self._last_entry):
+                continue
+            entries.append(entry)
+            self._last_entry = entry
+        length = _part_order_length(entries)
+        self._order_length += length if length is not None else _MAX_PART_ORDER_LENGTH
+        if self._order_length > _MAX_PART_ORDER_LENGTH:
+            self._order_closed = True
+            self._held_order = []
+            return (
+                [{GEMINI_PLACEHOLDER_KEY: _OMITTED_PLACEHOLDER}]
+                if self._order_kept
+                else []
+            )
+        if self._order_kept:
+            return entries
+        self._held_order.extend(entries)
+        if not any(is_gemini_invocation_part(entry) for entry in entries):
+            return []
+        self._order_kept = True
+        held, self._held_order = self._held_order, []
+        return held
+
+
+class _StreamGrounding:
+    """A Gemini stream's searches, reported as hosted tool events once known.
+
+    Gemini sends groundingMetadata, the turn's sources and citations, with
+    the chunk that finishes the answer, and may repeat it; each search and
+    citation is reported once. Spans are read against the answer text
+    streamed so far.
+
+    A request asking for server-side tool invocations is answered with each
+    search as a toolCall part, streamed as it runs, and groundingMetadata then
+    lists only some of their queries. Those searches are held until the
+    grounding arrives, or the turn finishes without any, so the turn's
+    sources go with the last of them, as in a whole response.
+    """
+
+    def __init__(self) -> None:
+        self.answer = ""
+        self.queries: set[str] = set()
+        self.cited: set[tuple[str, int, int]] = set()
+        self.reported_sources = False
+        # Searches from toolCall parts not yet reported, and the queries of
+        # all such searches; None while the stream has sent none.
+        self.held: list[UnifiedHostedToolCall] = []
+        self.invoked_runs: int | None = None
+
+    def events(self, chunk: dict[str, Any]) -> list[dict[str, Any]]:
+        candidates = chunk.get("candidates") or []
+        if not candidates or not isinstance(candidates[0], dict):
+            return []
+        candidate = candidates[0]
+        content = candidate.get("content") or {}
+        parts = content.get("parts", []) if isinstance(content, dict) else []
+        texts = GeminiTranslator._answer_texts(parts)
+        if texts:
+            self.answer += "\n".join(texts)
+        searches = gemini_invoked_searches(parts)
+        if searches:
+            self.held.extend(searches)
+            self.invoked_runs = (self.invoked_runs or 0) + sum(
+                max(len(search.queries), 1) for search in searches
+            )
+        metadata = gemini_grounding_metadata(candidate)
+        if self.invoked_runs is not None:
+            finished = (
+                GeminiTranslator._candidate_field(
+                    candidate, "finishReason", "finish_reason"
+                )
+                is not None
+            )
+            if metadata is None and not (finished and self.held):
+                return []
+            output = gemini_search_output(metadata or {}, [self.answer], self.held)
+            self.held = []
+            new_calls = output.calls
+        else:
+            if metadata is None:
+                return []
+            output = gemini_search_output(metadata, [self.answer])
+            new_calls = [
+                call
+                for call in output.calls
+                if not call.queries or call.queries[0] not in self.queries
+            ]
+        if self.reported_sources:
+            for call in new_calls:
+                call.sources = []
+        events: list[dict[str, Any]] = []
+        for call in new_calls:
+            self.queries.update(call.queries)
+            self.reported_sources = self.reported_sources or bool(call.sources)
+            events.append(UnifiedHostedToolEvent(call=call).to_dict())
+        if new_calls and self.invoked_runs is not None:
+            events.append(
+                UnifiedHostedToolEvent(
+                    requests={WEB_SEARCH: self.invoked_runs}
+                ).to_dict()
+            )
+        for citation in output.citations:
+            key = (citation.url, citation.start, citation.end)
+            if key not in self.cited:
+                self.cited.add(key)
+                events.append(UnifiedHostedToolEvent(citation=citation).to_dict())
+        return events
+
+
+def _recorded_part(part: dict[str, Any]) -> dict[str, Any]:
+    """A built-in tool part as recorded for replay: unchanged, but for bytes.
+
+    The google-genai SDK gives a signature as raw bytes; it is recorded in
+    the REST shape, base64.
+    """
+    recorded = copy.deepcopy(part)
+    for key in ("thoughtSignature", "thought_signature"):
+        if isinstance(recorded.get(key), bytes):
+            recorded[key] = base64.b64encode(recorded[key]).decode("ascii")
+    return recorded
+
+
+def _is_text_placeholder(entry: dict[str, Any]) -> bool:
+    return entry.get(GEMINI_PLACEHOLDER_KEY) == GEMINI_TEXT_PLACEHOLDER
+
+
+def _part_order_length(order: list[dict[str, Any]]) -> int | None:
+    """The JSON length of a part order, or None if it is not JSON."""
+    try:
+        return len(json.dumps(order, ensure_ascii=False, separators=(",", ":")))
+    except (TypeError, ValueError):
+        return None
+
+
+def _kept_part_order(order: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """A whole turn's part order, if it is to be kept; see STATE_GEMINI_PARTS.
+
+    Only a turn that ran a built-in tool keeps one, within
+    _MAX_PART_ORDER_LENGTH.
+    """
+    if not any(is_gemini_invocation_part(entry) for entry in order):
+        return []
+    length = _part_order_length(order)
+    if length is None or length > _MAX_PART_ORDER_LENGTH:
+        return []
+    return order
 
 
 def _first_present(config: dict[str, Any], *names: str) -> Any:

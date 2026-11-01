@@ -8,7 +8,6 @@ from typing_extensions import override
 
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
 from divyam_llm_interop.translate.chat.base import translation_utils
-from divyam_llm_interop.translate.chat.base.reasoning_state import RETURNS_STATE_KEY
 from divyam_llm_interop.translate.chat.base.translation_utils import close_async_stream
 from divyam_llm_interop.translate.chat.base.translator import Translator
 from divyam_llm_interop.translate.chat.model_config.model_capabilities import (
@@ -50,6 +49,7 @@ from divyam_llm_interop.translate.chat.openai_responses.response.responses_to_co
 from divyam_llm_interop.translate.chat.openai_responses.tool_adapter import (
     ResponsesToolAdapter,
 )
+from divyam_llm_interop.translate.chat.reasoning_state import RETURNS_STATE_KEY
 from divyam_llm_interop.translate.chat.translation_errors import (
     InteropTranslationError,
     TargetCapabilityError,
@@ -60,6 +60,9 @@ from divyam_llm_interop.translate.chat.types import (
     ChatResponse,
     ChatResponseStreaming,
     Model,
+)
+from divyam_llm_interop.translate.chat.unified.unified_hosted_tools import (
+    HOSTED_TOOL_EVENTS_FIELD,
 )
 from divyam_llm_interop.translate.chat.unified.unified_request import (
     UnifiedChatCompletionsRequest,
@@ -254,7 +257,7 @@ class OpenAiResponsesTranslator(Translator):
         self, from_response: UnifiedChatCompletionsResponse, _: Model
     ) -> ChatResponse:
         responses_response_body = convert_completions_to_responses_response(
-            from_response.body.to_dict()
+            from_response.body.to_dict(), from_response.body.hosted_tools
         )
         return ChatResponse(body=responses_response_body, headers=from_response.headers)
 
@@ -285,7 +288,12 @@ class OpenAiResponsesTranslator(Translator):
         async def chunker():
             async for response in from_response.stream:
                 raise_for_internal_stream_error(response)
-                yield response.to_dict()
+                chunk = response.to_dict()
+                if response.hosted_tool_events:
+                    chunk[HOSTED_TOOL_EVENTS_FIELD] = [
+                        event.to_dict() for event in response.hosted_tool_events
+                    ]
+                yield chunk
 
         # TODO worry about instructions, tool arguments etc..
         converted_stream = converter.convert(

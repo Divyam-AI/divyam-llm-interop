@@ -18,9 +18,13 @@ from divyam_llm_interop.translate.chat.unified.unified_request import (
     UnifiedChatCompletionsRequestBody,
 )
 
+#: The tool_choice modes a target may accept, in the unified vocabulary:
+#: "required" makes the model call some tool, "named" a particular one.
+TOOL_CHOICE_MODES = frozenset({"auto", "none", "required", "named"})
+
 #: Provider-independent names for tools a provider runs on its own servers,
 #: as an endpoint declares them in `hosted_tools`. Each provider's own tool
-#: types map onto these; see provider_hosted_tools.
+#: types map onto these; see hosted_tools.split.
 HOSTED_TOOL_KINDS = frozenset(
     {
         "web_search",
@@ -30,6 +34,7 @@ HOSTED_TOOL_KINDS = frozenset(
         "image_generation",
         "mcp",
         "tool_search",
+        "maps",
     }
 )
 
@@ -245,12 +250,22 @@ class ModelCapabilities:
     # endpoint override naming it is not refused, and read by nothing.
     supports_code_execution: Optional[bool] = None
     # The provider-hosted tools this endpoint runs, by their names in
-    # HOSTED_TOOL_KINDS. Support is often per provider rather than per model,
-    # so an endpoint override replaces the list rather than adding to it.
+    # HOSTED_TOOL_KINDS: a list of kinds, each run in its API's default
+    # spelling, or a map from kind to the spelling the endpoint runs, such as
+    # {"web_search": {"type": "web_search_20260209"}} (Responses, Anthropic)
+    # or {"web_search": {"tool": "google_search"}} (Gemini); {} takes the
+    # default. Support is often per provider rather than per model, so an
+    # endpoint override replaces the declaration rather than adding to it.
     # Unset or empty, the endpoint runs none.
-    hosted_tools: Optional[list[str]] = None
+    hosted_tools: Optional[Union[list[str], dict[str, dict[str, str]]]] = None
     supports_google_thinking_config: Optional[bool] = None
     supports_google_extra_body: Optional[bool] = None
+    # The tool_choice modes the target accepts, from TOOL_CHOICE_MODES. A
+    # request choosing another is refused rather than sent, since the target
+    # would refuse it: Claude Opus 5.5 rejects a forced tool. A model's entry
+    # sets what the model accepts; an endpoint's declaration replaces it.
+    # Unset, every mode is accepted.
+    supported_tool_choices: Optional[list[str]] = None
 
     # Optional api specific field mapping rules
     api_capabilities: dict[ModelApiType, ApiTypeSpecificRules] = field(
@@ -274,6 +289,36 @@ class ModelCapabilities:
                 f"Unknown hosted tool(s): {', '.join(sorted(unknown))}; "
                 f"expected one of {', '.join(sorted(HOSTED_TOOL_KINDS))}"
             )
+        if isinstance(self.hosted_tools, dict):
+            self._validate_hosted_spellings(self.hosted_tools)
+        unknown_modes = set(self.supported_tool_choices or []) - TOOL_CHOICE_MODES
+        if unknown_modes:
+            raise ValueError(
+                f"Unknown tool_choice mode(s): {', '.join(sorted(unknown_modes))}; "
+                f"expected one of {', '.join(sorted(TOOL_CHOICE_MODES))}"
+            )
+
+    @staticmethod
+    def _validate_hosted_spellings(declared: dict[str, Any]) -> None:
+        # Imported here: the hosted tool tables import the reasoning helpers,
+        # which import this module.
+        from divyam_llm_interop.translate.chat.hosted_tools.split import (
+            spelling_kind,
+        )
+
+        for kind, spelling in declared.items():
+            if not isinstance(spelling, dict) or set(spelling) - {"type", "tool"}:
+                raise ValueError(
+                    f"hosted_tools.{kind} must be an object with a 'type' "
+                    "(Responses, Anthropic) or 'tool' (Gemini) spelling, or {}"
+                )
+            if len(spelling) > 1:
+                raise ValueError(f"hosted_tools.{kind} names more than one spelling")
+            if spelling and spelling_kind(spelling) != kind:
+                # A spelling of another kind would run a tool nobody asked for.
+                raise ValueError(
+                    f"hosted_tools.{kind} spelling {spelling} is not a {kind} tool"
+                )
 
     @staticmethod
     def _parse_api_type(value) -> ModelApiType:

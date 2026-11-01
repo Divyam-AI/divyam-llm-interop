@@ -18,7 +18,7 @@ from typing import Any
 
 from lark import Lark, LarkError
 
-from divyam_llm_interop.translate.chat.base.provider_hosted_tools import (
+from divyam_llm_interop.translate.chat.hosted_tools.split import (
     responses_tool_kind,
 )
 from divyam_llm_interop.translate.chat.openai_responses.item_ids import (
@@ -29,6 +29,32 @@ from divyam_llm_interop.translate.chat.translation_errors import (
     ResponseTranslationError,
     UnsupportedFeatureError,
 )
+
+
+def agent_message_as_user_message(item: dict[str, Any]) -> dict[str, Any]:
+    """An inter-agent message as a user message any API can carry.
+
+    Codex delivers what one of its agents sends another, such as a sub-agent's
+    final report, as an agent_message item addressed to the model. Other APIs
+    have no such item. The message is input from outside the model, so it
+    takes the user role: it is not the model's own output (assistant), and an
+    agent's report carries no operator authority (developer). A header names
+    the author and recipient, which the role alone would lose; the item stays
+    where it was in the conversation.
+    """
+    header = (
+        f"[Message from agent {item.get('author') or 'unknown'} "
+        f"to {item.get('recipient') or 'unknown'}]"
+    )
+    content = item.get("content")
+    if isinstance(content, str):
+        content = [{"type": "input_text", "text": content}]
+    parts = deepcopy(content) if isinstance(content, list) else []
+    if parts and isinstance(parts[0], dict) and parts[0].get("type") == "input_text":
+        parts[0] = {**parts[0], "text": f"{header}\n{parts[0].get('text', '')}"}
+    else:
+        parts.insert(0, {"type": "input_text", "text": header})
+    return {"type": "message", "role": "user", "content": parts}
 
 
 @lru_cache(maxsize=64)
@@ -264,6 +290,9 @@ class ResponsesToolAdapter:
         normalized = []
         for item in items:
             kind = item.get("type", "message")
+            if kind == "agent_message":
+                item = agent_message_as_user_message(item)
+                kind = "message"
             if kind == "additional_tools":
                 continue
             if kind == "reasoning":
@@ -327,11 +356,16 @@ class ResponsesToolAdapter:
         result = deepcopy(item)
         if item.get("type") != "function_call":
             return result
-        binding = self.bindings.get(item.get("name", ""))
-        if binding is None:
-            raise ResponseTranslationError("Provider returned an undeclared tool")
         if item.get("status") == "incomplete":
             raise ResponseTranslationError("Incomplete tool call cannot be executed")
+        binding = self.bindings.get(item.get("name", ""))
+        if binding is None:
+            # A model may call a tool it was not given, by a misremembered or
+            # invented name. Passed on under that name, the client answers it
+            # as an unknown tool and the model can correct itself, as it
+            # would against the provider directly; refusing it would end the
+            # whole response over one bad call.
+            return normalize_custom_tool_item_id(result)
         result["name"] = binding.name
         if binding.namespace:
             result["namespace"] = binding.namespace

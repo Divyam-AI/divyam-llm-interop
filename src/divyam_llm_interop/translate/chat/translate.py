@@ -20,24 +20,26 @@ from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
 )
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
 from divyam_llm_interop.translate.chat.base import translation_utils
-from divyam_llm_interop.translate.chat.base.provider_hosted_tools import (
-    split_provider_hosted_tools,
-)
-from divyam_llm_interop.translate.chat.base.reasoning_state import (
-    RESPONSE_DOMAIN_KEY,
-    RETURNS_STATE_KEY,
-    apply_default_effort,
-    fit_requested_effort,
-    plan_thinking,
-    reasoning_domain,
-    resolve_unified_reasoning_state,
-)
 from divyam_llm_interop.translate.chat.base.translation_utils import (
     normalize_model_name,
 )
 from divyam_llm_interop.translate.chat.base.translator import Translator
 from divyam_llm_interop.translate.chat.gemini_native.gemini_translator import (
     GeminiTranslator,
+)
+from divyam_llm_interop.translate.chat.hosted_tools.split import (
+    declared_hosted_kinds,
+    responses_call_kind,
+    split_provider_hosted_tools,
+)
+from divyam_llm_interop.translate.chat.hosted_tools.web_search import (
+    CROSS_API_KINDS,
+    WEB_SEARCH_APIS,
+    attach_hosted_tools,
+    hosted_usage,
+    responses_item_counts,
+    tools_for_target,
+    without_replayed_gemini_searches,
 )
 from divyam_llm_interop.translate.chat.model_config.model_registry import (
     ModelRegistry,
@@ -47,6 +49,19 @@ from divyam_llm_interop.translate.chat.openai_completions.completions_translator
 )
 from divyam_llm_interop.translate.chat.openai_responses.openai_responses_translator import (
     OpenAiResponsesTranslator,
+)
+from divyam_llm_interop.translate.chat.reasoning_state import (
+    RESPONSE_DOMAIN_KEY,
+    RETURNS_STATE_KEY,
+    apply_default_effort,
+    fit_requested_effort,
+    plan_thinking,
+    reasoning_domain,
+    resolve_unified_reasoning_state,
+)
+from divyam_llm_interop.translate.chat.tool_choice import (
+    requested_tool_choice_mode,
+    tool_choice_path,
 )
 from divyam_llm_interop.translate.chat.translation_errors import (
     InteropTranslationError,
@@ -66,13 +81,16 @@ from divyam_llm_interop.translate.chat.unified.unified_response import (
 
 
 def _refuse_anthropic_only(unknowns: dict[str, Any], client: Model) -> None:
-    """Refuse what only an Anthropic client has a form for, rather than lose it.
+    """Refuse what the client has no form for, rather than lose it.
 
     Server tool blocks, citations and a paused turn arrive only from a server
-    tool, which runs on an Anthropic-to-Anthropic route; see
-    provider_hosted_tools. Answered to another API, they would be dropped.
+    tool; see hosted_tools.split. A web search and its citations reach a
+    Responses or Gemini client in its own form (see hosted_tools.web_search); the
+    rest, and anything for a Chat Completions client, would be dropped.
     """
-    found = anthropic_only_content(unknowns)
+    found = anthropic_only_content(
+        unknowns, hosted_tools=client.api_type in WEB_SEARCH_APIS
+    )
     if found is not None:
         raise UnsupportedFeatureError(
             f"Anthropic {found} have no form in {client.api_type.value} and are "
@@ -92,6 +110,60 @@ async def _anthropic_only_refused(
         await translation_utils.close_async_stream(stream)
 
 
+# Responses stream events that close a response, carrying its usage.
+_RESPONSES_CLOSING_EVENTS = (
+    "response.completed",
+    "response.incomplete",
+    "response.done",
+)
+
+
+def _with_tool_usage(response: Any, counts: dict[str, int]) -> Any:
+    """A Responses response whose usage states its hosted runs.
+
+    OpenAI's own API reports runs as output items only, while Azure OpenAI and
+    every translated route state them in ``usage.tool_usage``; a response
+    passed through gets the same field, counted from its items, so a client
+    reads runs in one place whichever endpoint served. A usage block that
+    states its own is left as reported. Never changes ``response``.
+    """
+    if not isinstance(response, dict):
+        return response
+    usage = response.get("usage")
+    if not isinstance(usage, dict) or "tool_usage" in usage:
+        return response
+    stated = hosted_usage(counts, ModelApiType.RESPONSES)
+    return {**response, "usage": {**usage, **stated}} if stated else response
+
+
+async def _responses_tool_usage_stated(
+    stream: AsyncGenerator[dict[str, Any], None],
+) -> AsyncGenerator[dict[str, Any], None]:
+    """A Responses stream whose closing event's usage states its hosted runs,
+    counted from the items it streamed; see _with_tool_usage."""
+    counts: dict[str, int] = {}
+    try:
+        async for event in stream:
+            kind = event.get("type") if isinstance(event, dict) else None
+            if kind == "response.output_item.done":
+                item = event.get("item")
+                called = (
+                    responses_call_kind(item.get("type"))
+                    if isinstance(item, dict)
+                    else None
+                )
+                if called is not None:
+                    counts[called] = counts.get(called, 0) + 1
+            elif kind in _RESPONSES_CLOSING_EVENTS and counts:
+                event = {
+                    **event,
+                    "response": _with_tool_usage(event.get("response"), counts),
+                }
+            yield event
+    finally:
+        await translation_utils.close_async_stream(stream)
+
+
 @dataclass
 class ChatTranslateConfig:
     # If set uses generic translation rules when the translator encounters
@@ -103,10 +175,10 @@ class ChatTranslateConfig:
     # Tools a provider runs on its own servers, such as OpenAI's web_search or
     # Anthropic's web_search_20250305. A translated request keeps those its
     # target declares in hosted_tools, where the route can carry them. The
-    # rest are refused; with this set, they are removed instead and earlier
-    # calls to them narrated, unless tool_choice forces one. See
-    # provider_hosted_tools. Requests served natively forward them as sent
-    # whatever the setting.
+    # rest are refused; with this set, they are removed instead, the model is
+    # told they are unavailable this turn, and ChatRequest.dropped_hosted_tools
+    # names them, unless tool_choice forces one. See hosted_tools.split.
+    # Requests served natively forward them as sent whatever the setting.
     drop_provider_hosted_tools: bool = False
 
 
@@ -202,6 +274,7 @@ class ChatTranslator:
         """
         source_translator = self._find_translator_for_model(model=source)
         target_translator = self._find_translator_for_model(model=target)
+        self._refuse_unaccepted_tool_choice(chat_request.body, source, target)
 
         if (
             source_translator == target_translator
@@ -211,11 +284,21 @@ class ChatTranslator:
                 chat_request, source, target, native=True
             )
 
+        body = chat_request.body
+        if (
+            source.api_type == ModelApiType.ANTHROPIC_MESSAGES
+            and target.api_type == ModelApiType.GEMINI
+        ):
+            # Gemini's searches go back as it returned them, not as narration.
+            body = without_replayed_gemini_searches(
+                body, self._reasoning_domain(target)
+            )
         hosted = split_provider_hosted_tools(
-            chat_request.body,
+            body,
             source.api_type,
             keep=self._carried_hosted_tools(source, target),
             drop=self._config.drop_provider_hosted_tools,
+            note_dropped=True,
         )
         chat_request = replace(chat_request, body=hosted.body)
         target_translator.validate_source_request(chat_request, source)
@@ -269,11 +352,16 @@ class ChatTranslator:
             )
         translated = target_translator.request_from_unified(unified, target)
         if hosted.tools:
-            body = dict(translated.body)
-            body["tools"] = [*(body.get("tools") or []), *hosted.tools]
-            if hosted.tool_choice is not None:
-                body["tool_choice"] = hosted.tool_choice
-            translated = replace(translated, body=body)
+            carried = tools_for_target(
+                hosted,
+                source.api_type,
+                target.api_type,
+                target_capabilities.hosted_tools,
+            )
+            translated = replace(
+                translated,
+                body=attach_hosted_tools(translated.body, target.api_type, carried),
+            )
         if original_request.api_type is not None:
             translated = self.prepare_request(
                 replace(
@@ -287,6 +375,7 @@ class ChatTranslator:
             translated,
             response_adapter=chat_request.response_adapter,
             api_type=target.api_type,
+            dropped_hosted_tools=hosted.dropped,
         )
 
     def translate_response(
@@ -313,6 +402,14 @@ class ChatTranslator:
         ):
             # Short circuit the responses since the models are compatible.
             translated = chat_response
+            if source.api_type == ModelApiType.RESPONSES:
+                translated = replace(
+                    chat_response,
+                    body=_with_tool_usage(
+                        chat_response.body,
+                        responses_item_counts(chat_response.body.get("output")),
+                    ),
+                )
         else:
             unified = source_translator.response_to_unified(chat_response, source)
             if target.api_type != ModelApiType.ANTHROPIC_MESSAGES:
@@ -350,6 +447,11 @@ class ChatTranslator:
         ):
             # Short circuit the responses since the models are compatible.
             translated = chat_response
+            if source.api_type == ModelApiType.RESPONSES:
+                translated = replace(
+                    chat_response,
+                    stream=_responses_tool_usage_stated(chat_response.stream),
+                )
         else:
             unified = source_translator.stream_response_to_unified(
                 chat_response, source
@@ -368,24 +470,54 @@ class ChatTranslator:
             )
         return translated
 
+    def _refuse_unaccepted_tool_choice(
+        self, body: dict[str, Any], source: Model, target: Model
+    ) -> None:
+        """Refuse a tool choice the target does not accept, on any route.
+
+        Sent, it would only come back as the provider's 400; refused here, a
+        router can serve the request elsewhere. It is never relaxed to
+        "auto", which would answer a request that demanded a tool call
+        without one.
+        """
+        accepted = self._model_registry.get_capabilities(target).supported_tool_choices
+        mode = requested_tool_choice_mode(body, source.api_type)
+        if accepted is None or mode is None or mode in accepted:
+            return
+        what = {
+            "required": "a tool choice that requires a tool call",
+            "named": "a tool choice that names the tool to call",
+            "none": "a tool choice of none",
+            "auto": "an automatic tool choice",
+        }[mode]
+        raise TargetCapabilityError(
+            f"target does not accept {what}; let the model choose (auto) instead",
+            target_api_type=target.api_type,
+            path=tool_choice_path(source.api_type),
+        )
+
     def _carried_hosted_tools(self, source: Model, target: Model) -> frozenset[str]:
         """The hosted tool kinds a translated route keeps for its target.
 
-        A route between two endpoints of one API carries them: the target's
-        hosted tool output reaches the client in the client's own form, its
+        A route between two endpoints of one API carries every kind the target
+        declares: its output reaches the client in the client's own form, the
         response passed through (Responses) or rebuilt with those blocks
-        intact (Anthropic). A Gemini route of that kind is always native. A
-        route between two APIs would have to translate that output into
-        another API's form, which is not supported, so there the target's
-        declaration keeps no tool.
+        intact (Anthropic). A Gemini route of that kind is always native.
+        Between Responses, Anthropic and Gemini a route carries web search,
+        whose output each of them has a form for; see hosted_tools.web_search. Chat
+        Completions has no hosted tools, so a route to or from it keeps none.
         """
-        if source.api_type != target.api_type or source.api_type not in (
+        declared = declared_hosted_kinds(
+            self._model_registry.get_capabilities(target).hosted_tools
+        )
+        if source.api_type == target.api_type and source.api_type in (
             ModelApiType.RESPONSES,
             ModelApiType.ANTHROPIC_MESSAGES,
         ):
-            return frozenset()
-        declared = self._model_registry.get_capabilities(target).hosted_tools
-        return frozenset(declared or [])
+            return declared
+        if source.api_type in WEB_SEARCH_APIS and target.api_type in WEB_SEARCH_APIS:
+            return declared & CROSS_API_KINDS
+        return frozenset()
 
     def _reasoning_domain(self, model: Model) -> str:
         """The signing domain of the endpoint that produced a response."""

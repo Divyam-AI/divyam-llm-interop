@@ -5,16 +5,19 @@ import copy
 import json
 from typing import Any
 
-from divyam_llm_interop.translate.chat.base.reasoning_state import (
+from divyam_llm_interop.translate.chat.anthropic_messages.request.anthropic_to_unified import (
+    tool_reference_text,
+)
+from divyam_llm_interop.translate.chat.model_config.model_capabilities import (
+    ModelCapabilities,
+)
+from divyam_llm_interop.translate.chat.reasoning_state import (
     KIND_ANTHROPIC_REDACTED,
     KIND_ANTHROPIC_SIGNATURE,
     is_envelope,
     narrate_tool_call,
     narrate_tool_result,
     unwrap_envelope,
-)
-from divyam_llm_interop.translate.chat.model_config.model_capabilities import (
-    ModelCapabilities,
 )
 
 _REASONING_BLOCK_TYPES = {"thinking", "redacted_thinking"}
@@ -92,8 +95,10 @@ def reconcile_anthropic_history(
         and exchange is not None
         and not valid_thinking.get(exchange)
     ):
-        _flatten_tool_exchange(messages, exchange)
+        loaded = _flatten_tool_exchange(messages, exchange)
         messages_changed = True
+        if loaded:
+            changed["tools"] = _with_tools_loaded(body.get("tools"), loaded)
     if messages_changed:
         changed["messages"] = messages
 
@@ -167,9 +172,16 @@ def _unfinished_tool_exchange(messages: list[dict[str, Any]]) -> int | None:
 
 def _flatten_tool_exchange(
     messages: list[dict[str, Any]], assistant_index: int
-) -> None:
+) -> set[str]:
+    """Rewrite an unfinished tool exchange as text; return the tools it loaded.
+
+    Plain text cannot carry a tool_reference, which is what loads a deferred
+    tool. The tools the exchange's search found are named in the text instead,
+    and returned for the request to load up front.
+    """
     assistant = messages[assistant_index]
     names: dict[str, str] = {}
+    loaded: set[str] = set()
     assistant_blocks: list[dict[str, Any]] = []
     for block in assistant["content"]:
         if block.get("type") == "tool_use":
@@ -182,6 +194,14 @@ def _flatten_tool_exchange(
             )
         elif block.get("type") == "text":
             assistant_blocks.append({"type": "text", "text": block["text"]})
+        elif block.get("type") == "tool_search_tool_result":
+            found = _referenced_tools(
+                (block.get("content") or {}).get("tool_references")
+            )
+            loaded.update(found)
+            assistant_blocks.extend(
+                {"type": "text", "text": tool_reference_text(name)} for name in found
+            )
     messages[assistant_index] = {**assistant, "content": assistant_blocks}
 
     user = messages[assistant_index + 1]
@@ -195,7 +215,38 @@ def _flatten_tool_exchange(
         result = narrate_tool_result(name, text, is_error=bool(block.get("is_error")))
         user_blocks.append({"type": "text", "text": result})
         user_blocks.extend(images)
+        loaded.update(_referenced_tools(block.get("content")))
     messages[assistant_index + 1] = {**user, "content": user_blocks}
+    return loaded
+
+
+def _referenced_tools(blocks: Any) -> list[str]:
+    """The tools a list of blocks names in tool_reference blocks, in order."""
+    if not isinstance(blocks, list):
+        return []
+    return [
+        block["tool_name"]
+        for block in blocks
+        if isinstance(block, dict)
+        and block.get("type") == "tool_reference"
+        and isinstance(block.get("tool_name"), str)
+    ]
+
+
+def _with_tools_loaded(tools: Any, names: set[str]) -> Any:
+    """Tools with defer_loading removed from the named ones, else unchanged.
+
+    Only deferral is lifted, so a request that kept one tool non-deferred, as
+    Anthropic requires, still does.
+    """
+    if not isinstance(tools, list):
+        return tools
+    return [
+        {key: value for key, value in tool.items() if key != "defer_loading"}
+        if isinstance(tool, dict) and tool.get("name") in names
+        else tool
+        for tool in tools
+    ]
 
 
 def _tool_result_parts(content: Any) -> tuple[str, list[dict[str, Any]]]:
@@ -205,8 +256,17 @@ def _tool_result_parts(content: Any) -> tuple[str, list[dict[str, Any]]]:
         return "", []
     text = "".join(
         block.get("text", "")
+        if block.get("type") == "text"
+        else tool_reference_text(block["tool_name"])
         for block in content
-        if isinstance(block, dict) and block.get("type") == "text"
+        if isinstance(block, dict)
+        and (
+            block.get("type") == "text"
+            or (
+                block.get("type") == "tool_reference"
+                and isinstance(block.get("tool_name"), str)
+            )
+        )
     )
     images = [
         {"type": "image", "source": block["source"]}

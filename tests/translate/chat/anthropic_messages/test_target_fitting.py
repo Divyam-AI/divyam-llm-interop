@@ -4,13 +4,17 @@
 import pytest
 
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
-from divyam_llm_interop.translate.chat.base.reasoning_state import fit_effort
 from divyam_llm_interop.translate.chat.model_config.model_capabilities import (
     ModelCapabilities,
     ReasoningEffortConfig,
 )
+from divyam_llm_interop.translate.chat.reasoning_state import fit_effort
+from divyam_llm_interop.translate.chat.tool_choice import (
+    requested_tool_choice_mode,
+)
 from divyam_llm_interop.translate.chat.translation_errors import (
     InvalidProtocolRequestError,
+    TargetCapabilityError,
 )
 from divyam_llm_interop.translate.chat.types import ChatRequest, Model
 
@@ -100,43 +104,38 @@ def test_completions_client_sampling_is_dropped_for_new_claude(translator):
     assert not {"temperature", "top_p"} & result.body.keys()
 
 
-def test_forced_tool_becomes_auto_while_thinking_is_asked_for(translator):
+def test_forced_tool_becomes_auto_with_manual_thinking(translator):
+    """Claude rejects a forced tool with manual thinking: the model may
+    still call the tool."""
     body = _anthropic_request(
-        thinking={"type": "adaptive"},
+        thinking={"type": "enabled", "budget_tokens": 2048},
         tool_choice={"type": "tool", "name": "Read", "disable_parallel_tool_use": True},
     )
 
     result = translator.translate_request(
-        ChatRequest(body=body), _CLIENT, _claude("claude-opus-4-6")
+        ChatRequest(body=body), _CLIENT, _claude("claude-sonnet-4-5")
     )
 
-    assert result.body["thinking"] == {"type": "adaptive"}
+    assert result.body["thinking"]["type"] == "enabled"
     assert result.body["tool_choice"] == {
         "type": "auto",
         "disable_parallel_tool_use": True,
     }
 
 
-def test_forced_tool_is_kept_by_turning_default_thinking_off(translator):
-    body = _anthropic_request(tool_choice={"type": "any"})
+@pytest.mark.parametrize("thinking", [None, {"type": "adaptive"}])
+def test_forced_tool_is_kept_with_adaptive_or_default_thinking(translator, thinking):
+    """Adaptive and default thinking accept a forced tool; the forced call
+    skips thinking."""
+    fields = {"thinking": thinking} if thinking else {}
+    body = _anthropic_request(tool_choice={"type": "any"}, **fields)
 
     result = translator.translate_request(
         ChatRequest(body=body), _CLIENT, _claude("claude-sonnet-5")
     )
 
-    assert result.body["thinking"] == {"type": "disabled"}
     assert result.body["tool_choice"] == {"type": "any"}
-
-
-def test_forced_tool_becomes_auto_on_a_model_that_always_thinks(translator):
-    result = translator.translate_request(
-        ChatRequest(body=_completions_request(tool_choice="required")),
-        _COMPLETIONS_CLIENT,
-        _claude("claude-opus-5-5"),
-    )
-
-    assert "thinking" not in result.body
-    assert result.body["tool_choice"] == {"type": "auto"}
+    assert result.body.get("thinking") == thinking
 
 
 def test_forced_tool_is_kept_when_thinking_is_off(translator):
@@ -149,6 +148,168 @@ def test_forced_tool_is_kept_when_thinking_is_off(translator):
     )
 
     assert result.body["tool_choice"] == {"type": "any"}
+
+
+# --- Models that refuse a forced tool --------------------------------------
+
+_UNFORCEABLE = [
+    "claude-opus-5-5",
+    "claude-sonnet-5-5",
+    "claude-fable-5-1",
+    "claude-mythos-5-1",
+    "global.anthropic.claude-opus-5-5",
+]
+_GEMINI_CLIENT = Model("gemini-3.8-flash", ModelApiType.GEMINI)
+
+
+def _forced(api_type: ModelApiType, mode: str) -> tuple[Model, dict]:
+    """A request forcing the Read tool, in each client's own form."""
+    if api_type == ModelApiType.ANTHROPIC_MESSAGES:
+        choice = (
+            {"type": "any"} if mode == "required" else {"type": "tool", "name": "Read"}
+        )
+        return _CLIENT, _anthropic_request(tool_choice=choice)
+    if api_type == ModelApiType.COMPLETIONS:
+        choice = (
+            "required"
+            if mode == "required"
+            else {"type": "function", "function": {"name": "Read"}}
+        )
+        return _COMPLETIONS_CLIENT, _completions_request(tool_choice=choice)
+    calling: dict = {"mode": "ANY"}
+    if mode == "named":
+        calling["allowedFunctionNames"] = ["Read"]
+    return _GEMINI_CLIENT, {
+        "contents": [{"role": "user", "parts": [{"text": "Read a.py"}]}],
+        "tools": [
+            {
+                "functionDeclarations": [
+                    {
+                        "name": "Read",
+                        "description": "Read a file",
+                        "parameters": _READ["input_schema"],
+                    }
+                ]
+            }
+        ],
+        "toolConfig": {"functionCallingConfig": calling},
+    }
+
+
+@pytest.mark.parametrize("name", _UNFORCEABLE)
+@pytest.mark.parametrize("mode", ["required", "named"])
+@pytest.mark.parametrize(
+    "client_api",
+    [ModelApiType.ANTHROPIC_MESSAGES, ModelApiType.COMPLETIONS, ModelApiType.GEMINI],
+)
+def test_a_forced_tool_is_refused_on_a_model_that_cannot_be_forced(
+    translator, name, mode, client_api
+):
+    """Sent, the provider would answer 400; refused, a router serves the
+    request elsewhere. It is not relaxed to auto."""
+    client, body = _forced(client_api, mode)
+
+    with pytest.raises(TargetCapabilityError) as refused:
+        translator.translate_request(ChatRequest(body=body), client, _claude(name))
+
+    assert "requires a tool call" in refused.value.message or (
+        "names the tool" in refused.value.message
+    )
+    assert repr(mode) not in refused.value.message
+    assert refused.value.path in (
+        "$.tool_choice",
+        "$.toolConfig.functionCallingConfig.mode",
+    )
+
+
+@pytest.mark.parametrize(
+    "calling, mode",
+    [
+        ({"mode": "ANY"}, "required"),
+        ({"mode": "ANY", "allowedFunctionNames": ["Read"]}, "named"),
+        ({"mode": "none"}, "none"),
+        ({"mode": "VALIDATED"}, "auto"),
+        # No mode is Gemini's default, AUTO, whatever functions it allows.
+        ({"allowedFunctionNames": ["Read"]}, "auto"),
+        ({}, None),
+    ],
+)
+def test_a_gemini_tool_choice_is_read_in_its_own_form(calling, mode):
+    body = {"toolConfig": {"functionCallingConfig": calling}}
+    assert requested_tool_choice_mode(body, ModelApiType.GEMINI) == mode
+
+
+def test_a_forced_tool_is_refused_on_a_native_route_too(translator):
+    shared = {"anthropic_wire_profile": "account-a"}
+    client = Model(
+        "claude-opus-5-5", ModelApiType.ANTHROPIC_MESSAGES, capability_overrides=shared
+    )
+    target = Model(
+        "claude-opus-5-5", ModelApiType.ANTHROPIC_MESSAGES, capability_overrides=shared
+    )
+
+    with pytest.raises(TargetCapabilityError):
+        translator.translate_request(
+            ChatRequest(body=_anthropic_request(tool_choice={"type": "any"})),
+            client,
+            target,
+        )
+
+
+@pytest.mark.parametrize("choice", [{"type": "auto"}, {"type": "none"}])
+def test_auto_and_none_reach_a_model_that_cannot_be_forced(translator, choice):
+    result = translator.translate_request(
+        ChatRequest(body=_anthropic_request(tool_choice=choice)),
+        _CLIENT,
+        _claude("claude-opus-5-5"),
+    )
+
+    assert result.body["tool_choice"] == choice
+
+
+def test_fable_5_and_mythos_5_accept_a_forced_tool(translator):
+    for name in ("claude-fable-5", "claude-mythos-5"):
+        result = translator.translate_request(
+            ChatRequest(body=_anthropic_request(tool_choice={"type": "any"})),
+            _CLIENT,
+            _claude(name),
+        )
+        assert result.body["tool_choice"] == {"type": "any"}
+
+
+def test_an_endpoint_declares_the_tool_choices_it_accepts(translator):
+    """The model's entry is the default; an endpoint's declaration replaces
+    it, either way."""
+    narrowed = Model(
+        "claude-opus-4-6",
+        ModelApiType.ANTHROPIC_MESSAGES,
+        capability_overrides={"supported_tool_choices": ["auto", "none"]},
+    )
+    with pytest.raises(TargetCapabilityError):
+        translator.translate_request(
+            ChatRequest(body=_anthropic_request(tool_choice={"type": "any"})),
+            _CLIENT,
+            narrowed,
+        )
+
+    widened = Model(
+        "claude-opus-5-5",
+        ModelApiType.ANTHROPIC_MESSAGES,
+        capability_overrides={
+            "supported_tool_choices": ["auto", "none", "required", "named"]
+        },
+    )
+    result = translator.translate_request(
+        ChatRequest(body=_anthropic_request(tool_choice={"type": "any"})),
+        _CLIENT,
+        widened,
+    )
+    assert result.body["tool_choice"] == {"type": "any"}
+
+
+def test_an_unknown_tool_choice_is_refused_when_declared():
+    with pytest.raises(ValueError, match="tool_choice"):
+        ModelCapabilities(supported_tool_choices=["any"])
 
 
 _LOW_HIGH_MAX = ModelCapabilities(

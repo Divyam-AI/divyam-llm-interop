@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
-from divyam_llm_interop.translate.chat.base.reasoning_state import (
+from divyam_llm_interop.translate.chat.reasoning_state import (
     ENVELOPE_PREFIX,
     KIND_TURN,
     ReasoningEnvelope,
@@ -37,6 +37,14 @@ _CLIENT = Model("claude-opus-4-7", ModelApiType.ANTHROPIC_MESSAGES, provider="di
 _CLAUDE = Model("claude-opus-4-7", ModelApiType.ANTHROPIC_MESSAGES, provider="bedrock")
 _GEMINI = Model("gemini-3-pro", ModelApiType.GEMINI, provider="google")
 _OTHER_GEMINI = Model("gemini-3-pro", ModelApiType.GEMINI, provider="vertex")
+# The same endpoint as _GEMINI, narrating calls it cannot verify instead of
+# sending them with Google's skip value.
+_FLATTENING_GEMINI = Model(
+    "gemini-3-pro",
+    ModelApiType.GEMINI,
+    provider="google",
+    capability_overrides={"gemini_foreign_call_policy": "flatten"},
+)
 _GPT = Model(
     "gpt-5.1",
     ModelApiType.RESPONSES,
@@ -197,7 +205,7 @@ def test_claude_gemini_claude_gemini_loop_returns_gemini_its_signatures(translat
     )
     third = _continue(second, claude_answer, "toolu_2", "print(2)")
     back_to_gemini = translator.translate_request(
-        ChatRequest(body=third), _CLIENT, _GEMINI
+        ChatRequest(body=third), _CLIENT, _FLATTENING_GEMINI
     )
 
     serialized = json.dumps(back_to_gemini.body)
@@ -243,13 +251,9 @@ def test_claude_gemini_claude_gemini_loop_returns_gemini_its_signatures(translat
     assert "skip_thought_signature_validator" not in serialized
 
 
-def test_gemini_skip_signature_policy_keeps_foreign_calls(translator):
-    skipping = Model(
-        "gemini-3-pro",
-        ModelApiType.GEMINI,
-        provider="google",
-        capability_overrides={"gemini_foreign_call_policy": "skip_signature"},
-    )
+def test_gemini_3_keeps_foreign_calls_with_the_skip_value(translator):
+    # The catalog declares skip_signature for Gemini 3 and 4.
+    skipping = _GEMINI
     first = _request()
     answer = translator.translate_response(
         ChatResponse(body=_gemini_tool_response("a.py")), _OTHER_GEMINI, _CLIENT
@@ -275,12 +279,11 @@ def test_gemini_signatures_do_not_reach_another_gemini_domain(translator):
     )
 
     serialized = json.dumps(result.body)
-    assert "gem-sig-1" not in serialized and "functionCall" not in serialized
-    assert [content["role"] for content in result.body["contents"]] == [
-        "user",
-        "model",
-        "user",
-    ]
+    assert "gem-sig-1" not in serialized
+    # The other endpoint cannot verify the call, so it carries the skip value.
+    assert _gemini_turn(result.body["contents"], 0)[0]["thoughtSignature"] == (
+        "skip_thought_signature_validator"
+    )
 
 
 def test_gemini_2_5_and_completed_turns_get_no_skip_signature(translator):
@@ -704,7 +707,9 @@ def test_claude_gpt_gemini_loop_flattens_gpts_current_turn_call(translator):
     assert [block["type"] for block in gpt_answer.body["content"]] == ["tool_use"]
     third = _continue(second, gpt_answer, "call_2", "print(2)")
 
-    result = translator.translate_request(ChatRequest(body=third), _CLIENT, _GEMINI)
+    result = translator.translate_request(
+        ChatRequest(body=third), _CLIENT, _FLATTENING_GEMINI
+    )
 
     contents = result.body["contents"]
     # Both calls are in Gemini's current turn and neither has a Gemini

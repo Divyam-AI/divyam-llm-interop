@@ -1,5 +1,19 @@
 # Entries are tried in order and the first match wins, so a narrower family
 # precedes a broader one that also matches its names.
+# Fable 5.1 and Mythos 5.1 refuse a forced tool_choice, which Fable 5 and
+# Mythos 5 accept.
+- name: claude-fable-5-1
+  provider: anthropic
+  name_match:
+    regex:
+      - claude-fable-5[-.]1(?:[-.@].*)?
+      - anthropic[./-]claude-fable-5[-.]1(?:[-.@].*)?
+- name: claude-mythos-5-1
+  provider: anthropic
+  name_match:
+    regex:
+      - claude-mythos-5[-.]1(?:[-.@].*)?
+      - anthropic[./-]claude-mythos-5[-.]1(?:[-.@].*)?
 - name: claude-fable-5
   provider: anthropic
   name_match:

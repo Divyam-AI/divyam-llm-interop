@@ -8,17 +8,19 @@ from typing import Any
 
 from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
     DOCUMENT_BLOCK_TYPES,
+    TOOL_REFERENCE_BLOCK_TYPE,
     is_openai_strict_schema,
     text_from_blocks,
     validate_anthropic_request,
     without_null_fields,
 )
-from divyam_llm_interop.translate.chat.base.reasoning_state import (
+from divyam_llm_interop.translate.chat.reasoning_state import (
     DEFAULT_EFFORT_KEY,
     DISPLAY_TEXT_KEY,
     KIND_ANTHROPIC_GENUINE,
     KIND_DISPLAY,
     STATE_ENTRY_TYPE,
+    narrate_tool_loaded,
     tool_images_label,
     unwrap_envelope,
 )
@@ -307,12 +309,23 @@ def _tool_result_to_unified(
     if not isinstance(content, list):
         return text_from_blocks(content, path), []
     text = "".join(
-        block["text"] if block["type"] == "text" else document_text(block)
-        for block in content
-        if block["type"] == "text" or block["type"] in DOCUMENT_BLOCK_TYPES
+        _tool_result_block_text(block) for block in content if block["type"] != "image"
     )
     images = [_image_part(block) for block in content if block["type"] == "image"]
     return text, images
+
+
+def _tool_result_block_text(block: dict[str, Any]) -> str:
+    if block["type"] == "text":
+        return block["text"]
+    if block["type"] == TOOL_REFERENCE_BLOCK_TYPE:
+        return tool_reference_text(block["tool_name"])
+    return document_text(block)
+
+
+def tool_reference_text(tool_name: str) -> str:
+    """A tool_reference as text a model behind another API reads."""
+    return narrate_tool_loaded(tool_name)
 
 
 def document_text(block: dict[str, Any]) -> str:

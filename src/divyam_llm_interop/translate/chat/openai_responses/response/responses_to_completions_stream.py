@@ -7,9 +7,18 @@ from collections.abc import AsyncGenerator
 from typing import Any
 
 from divyam_llm_interop.interop_logging import logger
-from divyam_llm_interop.translate.chat.base.reasoning_state import (
+from divyam_llm_interop.translate.chat.hosted_tools.web_search import (
+    responses_citation,
+    responses_reported_requests,
+    responses_search_call,
+)
+from divyam_llm_interop.translate.chat.reasoning_state import (
     RESPONSE_STATE_KEY,
     STATE_RESPONSES_OUTPUT,
+)
+from divyam_llm_interop.translate.chat.unified.unified_hosted_tools import (
+    HOSTED_TOOL_EVENTS_FIELD,
+    UnifiedHostedToolEvent,
 )
 
 from .reasoning import reasoning_output_state
@@ -42,6 +51,10 @@ class ResponsesToCompletionsStreamConverter:
         # been reported ahead of the message.
         self.done_items: list[dict[str, Any]] = []
         self.state_reported = False
+        # Length of the text streamed so far, and where the open part began:
+        # annotations locate their span within their part.
+        self.text_length = 0
+        self.part_start = 0
 
     def _create_base_chunk(self) -> dict[str, Any]:
         """Creates the boilerplate for a ChatCompletionChunk."""
@@ -126,9 +139,15 @@ class ResponsesToCompletionsStreamConverter:
             elif event_type == "response.output_text.delta":
                 delta_text = event.get("delta", "")
                 if delta_text:
+                    self.text_length += len(delta_text)
                     chunk = self._create_base_chunk()
                     chunk["choices"][0]["delta"] = {"content": delta_text}
                     yield chunk
+
+            elif event_type == "response.output_text.annotation.added":
+                citation = responses_citation(event.get("annotation"), self.part_start)
+                if citation is not None:
+                    yield self._hosted_chunk(UnifiedHostedToolEvent(citation=citation))
 
             elif event_type == "response.reasoning_summary_text.delta":
                 delta_text = event.get("delta", "")
@@ -156,9 +175,12 @@ class ResponsesToCompletionsStreamConverter:
                     }
                     yield chunk
 
+            elif event_type == "response.content_part.added":
+                self.part_start = self.text_length
+                continue
+
             # Lifecycle events we skip over
             elif event_type in (
-                "response.content_part.added",
                 "response.content_part.done",
                 "response.output_text.done",
                 "response.function_call_arguments.done",
@@ -170,6 +192,10 @@ class ResponsesToCompletionsStreamConverter:
                 item = event.get("item")
                 if isinstance(item, dict):
                     self.done_items.append(item)
+                    if item.get("type") == "web_search_call":
+                        yield self._hosted_chunk(
+                            UnifiedHostedToolEvent(call=responses_search_call(item))
+                        )
                 continue
 
             # Terminal events — emit final chunk and stop
@@ -194,6 +220,11 @@ class ResponsesToCompletionsStreamConverter:
 
             else:
                 logger.debug(f"Ignoring unknown Responses event type: {event_type}")
+
+    def _hosted_chunk(self, event: UnifiedHostedToolEvent) -> dict[str, Any]:
+        chunk = self._create_base_chunk()
+        chunk[HOSTED_TOOL_EVENTS_FIELD] = [event.to_dict()]
+        return chunk
 
     def _build_final_chunk(
         self,
@@ -230,6 +261,11 @@ class ResponsesToCompletionsStreamConverter:
         if reasoning_state is not None and not self.state_reported:
             chunk[RESPONSE_STATE_KEY] = {STATE_RESPONSES_OUTPUT: reasoning_state}
 
+        requests = responses_reported_requests(usage)
+        if requests:
+            chunk[HOSTED_TOOL_EVENTS_FIELD] = [
+                UnifiedHostedToolEvent(requests=requests).to_dict()
+            ]
         if usage:
             chunk["usage"] = {
                 "prompt_tokens": usage.get("input_tokens", 0),

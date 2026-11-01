@@ -18,16 +18,16 @@ from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
     validate_portable_schema,
 )
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
-from divyam_llm_interop.translate.chat.base.reasoning_state import (
-    ThinkingPlan,
-    plan_thinking,
-    reasoning_domain,
-)
 from divyam_llm_interop.translate.chat.model_config.model_capabilities import (
     ModelCapabilities,
 )
 from divyam_llm_interop.translate.chat.model_config.model_registry import (
     ModelRegistry,
+)
+from divyam_llm_interop.translate.chat.reasoning_state import (
+    ThinkingPlan,
+    plan_thinking,
+    reasoning_domain,
 )
 from divyam_llm_interop.translate.chat.translation_errors import (
     TargetCapabilityError,
@@ -513,10 +513,11 @@ def _fit_to_target(
     Fields the target's catalogue entry drops are removed, such as sampling
     controls on models that take only their defaults, and top_k while the
     model thinks, which Claude rejects. Claude also rejects a forced
-    tool_choice ("any" or a named tool) while it thinks. When the model
-    thinks only by default and can stop, thinking is turned off and the
-    forced tool kept; when thinking was asked for, or cannot be turned off,
-    the choice becomes "auto", so the model may still call the tool.
+    tool_choice ("any" or a named tool) with manual thinking ({"type":
+    "enabled"}); there the choice becomes "auto", so the model may still call
+    the tool. Adaptive and default thinking accept a forced tool, which skips
+    thinking. Models that refuse forcing whatever the thinking declare it in
+    supported_tool_choices, and such a request is refused before translation.
     """
     drop_fields = capabilities.api_capabilities[
         ModelApiType.ANTHROPIC_MESSAGES
@@ -530,13 +531,8 @@ def _fit_to_target(
     if not isinstance(choice, dict) or choice.get("type") not in ("any", "tool"):
         return result
     thinking = result.get("thinking")
-    mode = thinking.get("type") if isinstance(thinking, dict) else None
-    if mode == "disabled" or (
-        mode is None and not capabilities.reasoning_enabled_by_default
-    ):
+    if not (isinstance(thinking, dict) and thinking.get("type") == "enabled"):
         return result
-    if mode is None and capabilities.reasoning_can_be_disabled is not False:
-        return {**result, "thinking": {"type": "disabled"}}
     auto: dict[str, Any] = {"type": "auto"}
     if "disable_parallel_tool_use" in choice:
         auto["disable_parallel_tool_use"] = choice["disable_parallel_tool_use"]

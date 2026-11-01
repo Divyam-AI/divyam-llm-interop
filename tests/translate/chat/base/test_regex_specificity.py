@@ -1,7 +1,9 @@
 # Copyright 2025 Divyam.ai
 # SPDX-License-Identifier: Apache-2.0
 
-from divyam_llm_interop.translate.chat.base.regex_specificity import specificity_score
+from divyam_llm_interop.translate.chat.model_config.regex_specificity import (
+    specificity_score,
+)
 
 
 def test_specificity_score():

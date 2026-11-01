@@ -1,0 +1,169 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "parts": [
+          {
+            "thoughtSignature": "EuwHCukHCAIS5AcBaRR9E7Ki2Tam9uhdx0ZwveCPgG1imDle",
+            "toolCall": {
+              "toolType": "GOOGLE_SEARCH_WEB",
+              "args": {
+                "queries": [
+                  "site:bbc.com/news",
+                  "bbc news headlines today"
+                ]
+              },
+              "id": "call_241569"
+            }
+          },
+          {
+            "thoughtSignature": "EtVhCtJhCAISzWEBaRR9E9YiPpqwtOjZ/ycMcZYfiedCFgex",
+            "toolResponse": {
+              "toolType": "GOOGLE_SEARCH_WEB",
+              "response": {
+                "search_suggestions": "<style>\n.container {\n  align-items: center;\n  border-radius: 8px;\n  display: fle"
+              },
+              "id": "call_241569"
+            }
+          },
+          {
+            "thoughtSignature": "EvEDCu4DCAIS6QMBaRR9E1EvpIU+0p0U0coGddFRsTV/5ck8",
+            "toolCall": {
+              "toolType": "GOOGLE_SEARCH_WEB",
+              "args": {
+                "queries": [
+                  "site:bbc.co.uk/news",
+                  "\"bbc.com\" news October 31 2026",
+                  "bbc news October 31 2026",
+                  "bbc news live update October 31 2026"
+                ]
+              },
+              "id": "call_241610"
+            }
+          },
+          {
+            "thoughtSignature": "EtvxAgrX8QIIAhLR8QIBaRR9Ex6MPyEVR5tGsHvI7r8RUfHT",
+            "toolResponse": {
+              "toolType": "GOOGLE_SEARCH_WEB",
+              "response": {
+                "search_suggestions": "<style>\n.container {\n  align-items: center;\n  border-radius: 8px;\n  display: fle"
+              },
+              "id": "call_241610"
+            }
+          },
+          {
+            "thoughtSignature": "EugECuUECAIS4AQBaRR9ExBM0CbBbBJqVDwtaciKhrM9oxko",
+            "toolCall": {
+              "toolType": "GOOGLE_SEARCH_WEB",
+              "args": {
+                "queries": [
+                  "\"bbc.com/news\" \"2026\"",
+                  "\"US tariffs halt paper mill in Canada\" bbc",
+                  "\"bbc.com\" headline today",
+                  "\"bbc.com/news/articles\""
+                ]
+              },
+              "id": "call_241673"
+            }
+          },
+          {
+            "thoughtSignature": "Eo7OAwqKzgMIAhKEzgMBaRR9EyvXoiFNimIlu/BGw9sHjdAN",
+            "toolResponse": {
+              "toolType": "GOOGLE_SEARCH_WEB",
+              "response": {
+                "search_suggestions": "<style>\n.container {\n  align-items: center;\n  border-radius: 8px;\n  display: fle"
+              },
+              "id": "call_241673"
+            }
+          },
+          {
+            "thoughtSignature": "ErsJCrgJCAISswkBaRR9E8+Xp2MKxlzYFloF+d0IP+4hOwo2",
+            "toolCall": {
+              "toolType": "GOOGLE_SEARCH_WEB",
+              "args": {
+                "queries": [
+                  "\"bbc.com\" \"Spain train crash\"",
+                  "\"bbc.com\" \"Google value\""
+                ]
+              },
+              "id": "call_241765"
+            }
+          },
+          {
+            "thoughtSignature": "EsHPAQq9zwEIAhK3zwEBaRR9E7n60ecG4RQ13tS18U3fV7bU",
+            "toolResponse": {
+              "toolType": "GOOGLE_SEARCH_WEB",
+              "response": {
+                "search_suggestions": "<style>\n.container {\n  align-items: center;\n  border-radius: 8px;\n  display: fle"
+              },
+              "id": "call_241765"
+            }
+          },
+          {
+            "text": "Today's top headline on BBC News is: \"Google value plunges by $500bn as AI fears rattle Wall Street\".",
+            "thoughtSignature": "ErMFCrAFAWkUfRPUTu0KVfBTMNuHo6p08EM4u6VfZQsvFNor"
+          }
+        ],
+        "role": "model"
+      },
+      "finishReason": "STOP",
+      "index": 0,
+      "groundingMetadata": {
+        "searchEntryPoint": {
+          "renderedContent": "<style>\n.container {\n  align-items: center;\n  border-radius: 8px;\n  display: fle"
+        },
+        "groundingChunks": [
+          {
+            "web": {
+              "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHFd3qruhSdPwbMCgW2svOXZumRc1qBpwl2wKtAeoycoFexHJT7X1ryLnMpPhTGYdcJgZ1pewQF6zKgEtXdJAS0pcF_77e21IrQmL-cwxZoScmivw0XNyGJrRvj_tMyizrFdnzVb5ySyYw9l6j2wiurTPu-xpUSlfTcCDmH4aMdaZ_YlFOnsIwMu5cSq9a0tG0IHsR5X9bt1pYDtvj6Av8gZQUdqnPrMZX5TAwjuXe0",
+              "title": "ghanaweb.com"
+            }
+          },
+          {
+            "web": {
+              "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEjpwTFvEYljekHvC2ocXvA7f0rgIOCaulRpgl6ypQXVQAApP6sBY6I8w0B-7nNVljfp4RmMNqemOC2KabeRo4skFEh3S3n6sw3V9HcVIBKsFULjmpr14T5v3wWlzYvnF4EnDJ8bNlm6CD0FAvr5wetO4cANes6ojkBX_1nIKOiR_0QlbT9io0VblPN0GAyePrkKgAgXcJEGJbQnQ==",
+              "title": "reddit.com"
+            }
+          }
+        ],
+        "groundingSupports": [
+          {
+            "segment": {
+              "endIndex": 100,
+              "text": "Today's top headline on BBC News is: \"Google value plunges by $500bn as AI fears rattle Wall Street\""
+            },
+            "groundingChunkIndices": [
+              0,
+              1
+            ]
+          }
+        ],
+        "webSearchQueries": [
+          "\"bbc.com\" \"Google value\""
+        ]
+      }
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 696,
+    "candidatesTokenCount": 42,
+    "totalTokenCount": 1514,
+    "cachedContentTokenCount": 393,
+    "promptTokensDetails": [
+      {
+        "modality": "TEXT",
+        "tokenCount": 696
+      }
+    ],
+    "cacheTokensDetails": [
+      {
+        "modality": "TEXT",
+        "tokenCount": 393
+      }
+    ],
+    "thoughtsTokenCount": 776,
+    "serviceTier": "standard"
+  },
+  "modelVersion": "gemini-3.8-flash",
+  "responseId": "Hablap25Isjg3LUPi5P6-Ao"
+}
