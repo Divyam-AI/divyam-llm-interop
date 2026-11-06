@@ -5,7 +5,7 @@ import copy
 import hashlib
 import json
 import re
-from typing import Any, NoReturn
+from typing import Any, NoReturn, cast
 
 from divyam_llm_interop.translate.chat.anthropic_messages.request import (
     structured_output,
@@ -65,6 +65,7 @@ def unified_request_to_anthropic(
     unified = UnifiedChatCompletionsRequestBody.from_dict(
         from_request.body.to_dict(keep_unknowns=True)
     )
+    _join_text_parts(unified)
     _validate_unified_request(unified)
     body = _build_request_body(unified, target, model_registry)
     capabilities = model_registry.get_capabilities(target)
@@ -548,6 +549,31 @@ def _thinks(body: dict[str, Any], capabilities: ModelCapabilities) -> bool:
     return mode != "disabled"
 
 
+def _join_text_parts(unified: UnifiedChatCompletionsRequestBody) -> None:
+    """Write content made only of text parts as the text it spells.
+
+    Chat Completions lets a message's content be a list of parts, and pi sends
+    its user turns that way even when every part is text. Parts that are all
+    text become their text, joined as given; any other part is left for
+    validation to refuse.
+    """
+    for message in unified.messages:
+        content: Any = message.content
+        if (
+            isinstance(content, list)
+            and content
+            and all(
+                isinstance(part, dict)
+                and part.get("type") == "text"
+                and isinstance(part.get("text"), str)
+                for part in cast(list[Any], content)
+            )
+        ):
+            message.content = "".join(
+                part["text"] for part in cast(list[dict[str, Any]], content)
+            )
+
+
 def _validate_unified_request(unified: UnifiedChatCompletionsRequestBody) -> None:
     unsupported_fields = (
         "presence_penalty",
@@ -569,6 +595,10 @@ def _validate_unified_request(unified: UnifiedChatCompletionsRequestBody) -> Non
         "best_of",
     )
     for field in unsupported_fields:
+        # store false asks for nothing a target could fail to do, and pi sends it
+        # on every request. Only a request to keep the completion is refused.
+        if field == "store" and unified.store is False:
+            continue
         if getattr(unified, field) is not None:
             _target_error(
                 f"{field} is not supported by the text/tool profile", f"$.{field}"

@@ -42,6 +42,10 @@ _COMPLETIONS_FIELDS = {
     "n",
     # Mapped to Claude thinking; see plan_thinking.
     "reasoning_effort",
+    # Whether OpenAI keeps the completion for its own dashboard, which pi sends
+    # on every request: conversion leaves out store false and refuses store
+    # true, as it does a Responses request's.
+    "store",
 }
 _RESPONSES_FIELDS = {
     "model",
