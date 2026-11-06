@@ -64,13 +64,19 @@ def normalize_system_messages(body: dict[str, Any]) -> dict[str, Any]:
     )
     for message in system_messages:
         content = message["content"]
-        if blocks:
-            blocks.append({"type": "text", "text": "\n"})
-        blocks.extend(
+        lifted = (
             [{"type": "text", "text": content}]
             if isinstance(content, str)
             else copy.deepcopy(content)
         )
+        # A newline keeps the lifted text apart from what precedes it, at the
+        # start of its own first block: Anthropic refuses a text block that is
+        # only whitespace, so the separator cannot be a block of its own.
+        if blocks and lifted and isinstance(lifted[0], dict):
+            first = lifted[0]
+            if first.get("type") == "text" and isinstance(first.get("text"), str):
+                first["text"] = "\n" + first["text"]
+        blocks.extend(lifted)
     normalized["system"] = blocks
     normalized["messages"] = [
         message

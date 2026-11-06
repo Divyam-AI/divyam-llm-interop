@@ -1042,3 +1042,60 @@ def test_server_tool_search_reaches_other_apis_naming_the_found_tools(
     else:
         names = [tool["function"]["name"] for tool in result.body["tools"]]
     assert names == ["WebSearch"]
+
+
+def _with_system_turn(body: dict) -> dict:
+    """Claude Code's environment notes, sent as a system turn after the user's."""
+    body["messages"].append(
+        {
+            "role": "system",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "# Environment\nToday is 2026-11-06.",
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+        }
+    )
+    return body
+
+
+def test_lifted_system_turn_carries_its_separator_in_its_own_text(
+    translator, anthropic_model
+):
+    body = _with_system_turn(_claude_code_request())
+    target = Model("claude-opus-4-7", ModelApiType.ANTHROPIC_MESSAGES)
+
+    result = translator.translate_request(
+        ChatRequest(body=body), anthropic_model, target
+    )
+
+    assert result.body["system"] == [
+        *body["system"],
+        {
+            "type": "text",
+            "text": "\n# Environment\nToday is 2026-11-06.",
+            "cache_control": {"type": "ephemeral"},
+        },
+    ]
+    # Anthropic refuses a text block that is only whitespace.
+    assert all(block["text"].strip() for block in result.body["system"])
+    assert all(turn["role"] != "system" for turn in result.body["messages"])
+
+
+def test_lifted_system_turn_stays_apart_from_the_system_prompt(
+    translator, anthropic_model
+):
+    body = _with_system_turn(_claude_code_request())
+
+    result = translator.translate_request(
+        ChatRequest(body=body),
+        anthropic_model,
+        _reasoning_target(ModelApiType.COMPLETIONS),
+    )
+
+    assert result.body["messages"][0] == {
+        "role": "system",
+        "content": "You are Claude Code. Be concise.\n# Environment\nToday is 2026-11-06.",
+    }

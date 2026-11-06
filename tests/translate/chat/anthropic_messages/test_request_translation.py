@@ -180,8 +180,7 @@ def test_claude_system_messages_preserve_instructions_without_mutating_input(
     assert forwarded.body["messages"] == original["messages"][:1]
     assert forwarded.body["system"] == [
         {"type": "text", "text": "Follow policy."},
-        {"type": "text", "text": "\n"},
-        {"type": "text", "text": "Environment."},
+        {"type": "text", "text": "\nEnvironment."},
     ]
     assert body == original
 
