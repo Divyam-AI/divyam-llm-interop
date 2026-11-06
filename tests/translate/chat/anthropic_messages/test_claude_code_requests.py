@@ -1099,3 +1099,19 @@ def test_lifted_system_turn_stays_apart_from_the_system_prompt(
         "role": "system",
         "content": "You are Claude Code. Be concise.\n# Environment\nToday is 2026-11-06.",
     }
+
+
+def test_system_turn_output_settings_apply_to_the_turn_being_answered(
+    translator, anthropic_model
+):
+    body = _with_system_turn(_claude_code_request())
+    body["messages"][-1]["output_config"] = {"effort": "medium"}
+    target = Model("claude-opus-4-7", ModelApiType.ANTHROPIC_MESSAGES)
+
+    result = translator.translate_request(
+        ChatRequest(body=body), anthropic_model, target
+    )
+
+    assert result.body["output_config"] == {"effort": "medium"}
+    assert result.body["system"][-1]["text"] == "\n# Environment\nToday is 2026-11-06."
+    assert all(turn["role"] != "system" for turn in result.body["messages"])
