@@ -154,6 +154,23 @@ def test_anthropic_same_protocol_response_preserves_native_shape_and_rewrites_mo
     assert result.body is not body
 
 
+def test_anthropic_same_protocol_response_keeps_context_management_and_diagnostics(
+    translator, anthropic_model
+):
+    """A request with context_management answers with what its edits cleared,
+    and Anthropic adds diagnostics; neither is refused, and both reach the client."""
+    body = _anthropic_response()
+    body["context_management"] = {"applied_edits": []}
+    body["diagnostics"] = {}
+
+    result = translator.translate_response(
+        ChatResponse(body=body), anthropic_model, anthropic_model
+    )
+
+    assert result.body["context_management"] == {"applied_edits": []}
+    assert result.body["diagnostics"] == {}
+
+
 @pytest.mark.parametrize(
     ("finish_reason", "expected_stop_reason"),
     [
