@@ -52,6 +52,11 @@ _RESPONSE_FIELDS = {
     "usage",
     # The container a code execution ran in, for the client to reuse.
     "container",
+    # What the request's context_management edits cleared, which the client
+    # reads to keep its own history in step.
+    "context_management",
+    # Anthropic's notes on how the request was served; nothing in the answer.
+    "diagnostics",
 }
 
 

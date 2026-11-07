@@ -36,6 +36,11 @@ _PORTABLE_EFFORT = {"xhigh": "high", "max": "high"}
 _BUDGET_EFFORT = ((4096, "low"), (16384, "medium"))
 
 
+# A system turn among the messages, as Claude Code sends one: its text, and
+# optionally the output settings that apply from it on.
+_SYSTEM_TURN_FIELDS = {"role", "content", "output_config"}
+
+
 def normalize_system_messages(body: dict[str, Any]) -> dict[str, Any]:
     """Lift Claude Code's conversation-level system text into Anthropic's field."""
     messages = body.get("messages")
@@ -52,11 +57,23 @@ def normalize_system_messages(body: dict[str, Any]) -> dict[str, Any]:
     if system is not None and not isinstance(system, (str, list)):
         return body  # Preserve malformed input for the existing validator.
     for message in system_messages:
-        if set(message) != {"role", "content"} or not isinstance(
-            message["content"], (str, list)
+        if (
+            not {"role", "content"} <= set(message) <= _SYSTEM_TURN_FIELDS
+            or not isinstance(message["content"], (str, list))
+            or not isinstance(message.get("output_config", {}), dict)
         ):
             return body
     normalized = copy.deepcopy(body)
+    # A system turn's output_config is the setting for the turns after it, so
+    # the latest one is the setting for the turn being answered.
+    turn_output: dict[str, Any] = {}
+    for message in system_messages:
+        turn_output.update(message.get("output_config") or {})
+    if turn_output:
+        normalized["output_config"] = {
+            **(body.get("output_config") or {}),
+            **copy.deepcopy(turn_output),
+        }
     blocks = (
         [{"type": "text", "text": system}]
         if isinstance(system, str)
@@ -64,13 +81,19 @@ def normalize_system_messages(body: dict[str, Any]) -> dict[str, Any]:
     )
     for message in system_messages:
         content = message["content"]
-        if blocks:
-            blocks.append({"type": "text", "text": "\n"})
-        blocks.extend(
+        lifted = (
             [{"type": "text", "text": content}]
             if isinstance(content, str)
             else copy.deepcopy(content)
         )
+        # A newline keeps the lifted text apart from what precedes it, at the
+        # start of its own first block: Anthropic refuses a text block that is
+        # only whitespace, so the separator cannot be a block of its own.
+        if blocks and lifted and isinstance(lifted[0], dict):
+            first = lifted[0]
+            if first.get("type") == "text" and isinstance(first.get("text"), str):
+                first["text"] = "\n" + first["text"]
+        blocks.extend(lifted)
     normalized["system"] = blocks
     normalized["messages"] = [
         message

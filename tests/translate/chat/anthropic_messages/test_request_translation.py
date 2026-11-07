@@ -79,6 +79,56 @@ def test_completions_to_anthropic_still_enforces_target_tool_capability(
         translator.translate_request(ChatRequest(body), completions_model, target)
 
 
+def test_completions_store_reaches_anthropic_left_out(translator, completions_model):
+    """pi sends OpenAI's store flag on every request; Anthropic has no use for
+    it, so the request is translated without it rather than refused."""
+    body = {
+        "model": completions_model.name,
+        "messages": [{"role": "user", "content": "Hello"}],
+        "max_completion_tokens": 512,
+        "store": False,
+        "stream": True,
+        "stream_options": {"include_usage": True},
+    }
+    target = Model("claude-target", ModelApiType.ANTHROPIC_MESSAGES)
+
+    result = translator.translate_request(ChatRequest(body), completions_model, target)
+
+    assert "store" not in result.body
+    assert result.body["messages"] == [{"role": "user", "content": "Hello"}]
+    # Asking for the completion to be kept is a request no Claude target can serve.
+    with pytest.raises(TargetCapabilityError, match="store"):
+        translator.translate_request(
+            ChatRequest({**body, "store": True}), completions_model, target
+        )
+
+
+def test_completions_text_parts_reach_anthropic_as_their_text(
+    translator, completions_model
+):
+    """pi sends its user turn as a list of text parts; it is text all the same."""
+    body = {
+        "model": completions_model.name,
+        "messages": [
+            {"role": "system", "content": "Be brief."},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Read "},
+                    {"type": "text", "text": "acceptance.txt"},
+                ],
+            },
+        ],
+    }
+    target = Model("claude-target", ModelApiType.ANTHROPIC_MESSAGES)
+
+    result = translator.translate_request(ChatRequest(body), completions_model, target)
+
+    assert result.body["messages"] == [
+        {"role": "user", "content": "Read acceptance.txt"}
+    ]
+
+
 def _anthropic_tool_request() -> dict:
     return {
         "model": "claude-sonnet-test",
@@ -180,8 +230,7 @@ def test_claude_system_messages_preserve_instructions_without_mutating_input(
     assert forwarded.body["messages"] == original["messages"][:1]
     assert forwarded.body["system"] == [
         {"type": "text", "text": "Follow policy."},
-        {"type": "text", "text": "\n"},
-        {"type": "text", "text": "Environment."},
+        {"type": "text", "text": "\nEnvironment."},
     ]
     assert body == original
 
