@@ -26,7 +26,7 @@ For non-Anthropic clients, response verdict metadata (including explicit null)
 is dropped with a warning; it does not fail an otherwise supported response.
 This does not relax the request-side restriction on `safeguards`.
 See [release notes](CHANGELOG.md) for consumer upgrade implications.
-A gateway must also forward `anthropic-beta` verbatim. Upstream support for
+A gateway must also forward the `anthropic-beta` values these features need. Upstream support for
 server-side classifier checks depends on the provider, model and credentials.
 See [Claude Code classifier billing](https://code.claude.com/docs/en/auto-mode-classifier-billing).
 
