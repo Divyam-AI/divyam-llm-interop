@@ -198,3 +198,17 @@ def test_absent_verdict_does_not_warn(
         completions_model,
     )
     assert "safeguard_results" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_absent_stream_verdict_does_not_warn(
+    translator, anthropic_model, completions_model, caplog
+):
+    await _collect(
+        translator.translate_response_streaming(
+            ChatResponseStreaming(_stream(_anthropic_tool_stream())),
+            anthropic_model,
+            completions_model,
+        )
+    )
+    assert "safeguard_results" not in caplog.text
