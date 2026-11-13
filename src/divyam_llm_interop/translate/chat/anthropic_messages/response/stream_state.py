@@ -49,8 +49,6 @@ def anthropic_only_content(
     citations; see hosted_tools.web_search. Nothing else here has one outside
     Anthropic.
     """
-    if unknowns.get(ANTHROPIC_SAFEGUARD_FIELDS):
-        return "safeguard_results"
     named = unknowns.get(ANTHROPIC_ONLY_CONTENT_KEY)
     if isinstance(named, list) and named:
         return str(named[0])
