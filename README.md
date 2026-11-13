@@ -17,12 +17,21 @@ messages as a user message, since Chat Completions tool messages carry only
 text. A target declaring `supports_vision: false`, or native Gemini, refuses
 them.
 
-Anthropic Messages requests translated to another protocol keep what the target
-can express and drop what is only a hint:
+Requests carrying a non-null `safeguards` field require an Anthropic Messages
+target. Translation to another API raises `UnsupportedFeatureError` at
+`$.safeguards`, so a router can exclude that route before invoking a provider.
+Anthropic responses retain opaque `safeguard_results` and their tool-use IDs,
+including fields on streaming message-start and message-delta envelopes.
+A gateway must also forward `anthropic-beta` verbatim. Upstream support for
+server-side classifier checks depends on the provider, model and credentials.
+See [Claude Code classifier billing](https://code.claude.com/docs/en/auto-mode-classifier-billing).
+
+Other Anthropic Messages requests translated to another protocol keep what the
+target can express and drop what is only a hint:
 
 - Prompt-cache controls, citations on text blocks, `defer_loading`,
   `eager_input_streaming`, metadata keys other than `user_id`, and the
-  operational fields `context_management`, `safeguards`, `service_tier`,
+  operational fields `context_management`, `service_tier`,
   `inference_geo`, `speed`, `fallbacks`, `container` and `diagnostics` are
   dropped. Explicit nulls on optional fields count as absent.
 - Deferred tools are sent with every other tool, so a `tool_reference` that a
