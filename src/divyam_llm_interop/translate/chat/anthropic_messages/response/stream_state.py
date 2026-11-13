@@ -16,6 +16,22 @@ ANTHROPIC_CITATION_KEY = "anthropic_citation"
 # Set on a chunk whose server event or citation belongs to a web search,
 # which other clients receive as the chunk's hosted_tool_events instead.
 ANTHROPIC_PORTABLE_KEY = "anthropic_portable"
+# Opaque verdict fields retain their original envelope position.
+ANTHROPIC_SAFEGUARD_FIELDS = "anthropic_safeguard_fields"
+
+
+def safeguard_fields(event: dict[str, Any]) -> dict[str, Any]:
+    """The verdict fields of an event, with their original nesting intact."""
+    fields = {}
+    if "safeguard_results" in event:
+        fields["safeguard_results"] = event["safeguard_results"]
+    for name in ("message", "delta"):
+        nested = event.get(name)
+        if isinstance(nested, dict) and "safeguard_results" in nested:
+            fields[name] = {"safeguard_results": nested["safeguard_results"]}
+    return fields
+
+
 # A unified response field naming what in it only an Anthropic client has a
 # form for: server tool blocks, citations, a paused turn.
 ANTHROPIC_ONLY_CONTENT_KEY = "anthropic_only_content"
@@ -33,6 +49,8 @@ def anthropic_only_content(
     citations; see hosted_tools.web_search. Nothing else here has one outside
     Anthropic.
     """
+    if unknowns.get(ANTHROPIC_SAFEGUARD_FIELDS):
+        return "safeguard_results"
     named = unknowns.get(ANTHROPIC_ONLY_CONTENT_KEY)
     if isinstance(named, list) and named:
         return str(named[0])
@@ -76,6 +94,7 @@ class SourceStreamState:
 @dataclass
 class TargetStreamState:
     target_model: str
+    safeguard_delta_fields: dict[str, Any] = field(default_factory=dict)
     started: bool = False
     terminal_seen: bool = False
     message_id: str = ""

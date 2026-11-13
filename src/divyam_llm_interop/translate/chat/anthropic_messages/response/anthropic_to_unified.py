@@ -57,6 +57,7 @@ _RESPONSE_FIELDS = {
     "context_management",
     # Anthropic's notes on how the request was served; nothing in the answer.
     "diagnostics",
+    "safeguard_results",
 }
 
 
@@ -111,6 +112,8 @@ def _anthropic_only_content(
     """
     content = [block for block in body["content"] if isinstance(block, dict)]
     found: list[str] = []
+    if not web_search and "safeguard_results" in body:
+        found.append("safeguard_results")
     if any(
         is_anthropic_server_block(block)
         and is_web_search_server_block(block) == web_search
