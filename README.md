@@ -22,6 +22,10 @@ target. Translation to another API raises `UnsupportedFeatureError` at
 `$.safeguards`, so a router can exclude that route before invoking a provider.
 Anthropic responses retain opaque `safeguard_results` and their tool-use IDs,
 including fields on streaming message-start and message-delta envelopes.
+For non-Anthropic clients, response verdict metadata (including explicit null)
+is dropped with a warning; it does not fail an otherwise supported response.
+This does not relax the request-side restriction on `safeguards`.
+See [release notes](CHANGELOG.md) for consumer upgrade implications.
 A gateway must also forward `anthropic-beta` verbatim. Upstream support for
 server-side classifier checks depends on the provider, model and credentials.
 See [Claude Code classifier billing](https://code.claude.com/docs/en/auto-mode-classifier-billing).
