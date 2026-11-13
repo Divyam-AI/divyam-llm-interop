@@ -1,6 +1,7 @@
 # Copyright 2025 Divyam.ai
 # SPDX-License-Identifier: Apache-2.0
 
+import logging
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, replace
 from typing import Any
@@ -12,6 +13,7 @@ from divyam_llm_interop.translate.chat.anthropic_messages.request.anthropic_to_u
     normalize_system_messages,
 )
 from divyam_llm_interop.translate.chat.anthropic_messages.response.stream_state import (
+    ANTHROPIC_SAFEGUARD_FIELDS,
     anthropic_only_content,
 )
 from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
@@ -79,6 +81,23 @@ from divyam_llm_interop.translate.chat.unified.unified_response import (
     UnifiedChatCompletionsStreamChunk,
 )
 
+logger = logging.getLogger(__name__)
+
+
+def _drop_anthropic_safeguards(unknowns: dict[str, Any], client: Model) -> None:
+    """Drop verdict metadata for a non-Anthropic client and warn without payloads."""
+    present = ANTHROPIC_SAFEGUARD_FIELDS in unknowns
+    unknowns.pop(ANTHROPIC_SAFEGUARD_FIELDS, None)
+    raw = unknowns.get("anthropic_response_raw")
+    if isinstance(raw, dict) and "safeguard_results" in raw:
+        present = True
+        raw.pop("safeguard_results")
+    if present:
+        logger.warning(
+            "Dropping Anthropic safeguard_results when translating a response to %s",
+            client.api_type.value,
+        )
+
 
 def _refuse_anthropic_only(unknowns: dict[str, Any], client: Model) -> None:
     """Refuse what the client has no form for, rather than lose it.
@@ -88,6 +107,7 @@ def _refuse_anthropic_only(unknowns: dict[str, Any], client: Model) -> None:
     Responses or Gemini client in its own form (see hosted_tools.web_search); the
     rest, and anything for a Chat Completions client, would be dropped.
     """
+    _drop_anthropic_safeguards(unknowns, client)
     found = anthropic_only_content(
         unknowns, hosted_tools=client.api_type in WEB_SEARCH_APIS
     )
