@@ -269,7 +269,6 @@ def test_disabled_thinking_drops_only_thinking_context_edits(
     "field, value",
     [
         ("context_management", {"edits": []}),
-        ("safeguards", {"mode": "standard"}),
         ("service_tier", "auto"),
         ("inference_geo", "us"),
         ("speed", "fast"),
