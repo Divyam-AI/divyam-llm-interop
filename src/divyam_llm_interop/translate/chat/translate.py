@@ -86,8 +86,7 @@ logger = logging.getLogger(__name__)
 
 def _drop_anthropic_safeguards(unknowns: dict[str, Any], client: Model) -> None:
     """Drop verdict metadata for a non-Anthropic client and warn without payloads."""
-    present = ANTHROPIC_SAFEGUARD_FIELDS in unknowns
-    unknowns.pop(ANTHROPIC_SAFEGUARD_FIELDS, None)
+    present = bool(unknowns.pop(ANTHROPIC_SAFEGUARD_FIELDS, {}))
     raw = unknowns.get("anthropic_response_raw")
     if isinstance(raw, dict) and "safeguard_results" in raw:
         present = True
