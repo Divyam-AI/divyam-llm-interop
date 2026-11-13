@@ -4,6 +4,7 @@
 """Classifier verdicts remain opaque and retain their tool-use references."""
 
 import copy
+import json
 from dataclasses import replace
 
 import pytest
@@ -62,9 +63,7 @@ def test_safeguards_cannot_silently_disappear_on_a_cross_api_route(
     assert error.value.path == "$.safeguards"
 
 
-def test_whole_verdict_and_tool_id_survive(
-    translator, anthropic_model, completions_model
-):
+def test_whole_verdict_and_tool_id_survive(translator, anthropic_model):
     response = _anthropic_tool_response()
     # Synthetic opaque payload, deliberately including fields the translator does not know.
     response["safeguard_results"] = {
@@ -77,10 +76,6 @@ def test_whole_verdict_and_tool_id_survive(
     assert result.body["safeguard_results"] == response["safeguard_results"]
     assert result.body["content"][1]["id"] == "toolu_weather"
     assert response == original
-    with pytest.raises(UnsupportedFeatureError):
-        translator.translate_response(
-            ChatResponse(body=response), anthropic_model, completions_model
-        )
 
 
 @pytest.mark.asyncio
@@ -121,3 +116,85 @@ async def test_stream_verdicts_keep_their_location_and_tool_ids(
     assert tool["id"] == "toolu_stream"
     assert output[-1]["type"] == "message_stop"
     assert events == original
+
+
+@pytest.mark.parametrize(
+    "api_type", [ModelApiType.COMPLETIONS, ModelApiType.RESPONSES, ModelApiType.GEMINI]
+)
+@pytest.mark.parametrize(
+    "verdicts",
+    [{"toolu_weather": {"verdict": "deny", "private": "do-not-log"}}, [], None],
+)
+def test_cross_api_whole_response_drops_verdicts_with_warning(
+    translator, anthropic_model, completions_model, api_type, verdicts, caplog
+):
+    response = _anthropic_tool_response()
+    response["safeguard_results"] = verdicts
+    original = copy.deepcopy(response)
+    result = translator.translate_response(
+        ChatResponse(body=response),
+        anthropic_model,
+        replace(completions_model, api_type=api_type),
+    )
+    assert "safeguard_results" not in json.dumps(result.body)
+    assert "get_weather" in json.dumps(result.body)
+    assert "Dropping Anthropic safeguard_results" in caplog.text
+    assert "do-not-log" not in caplog.text
+    assert response == original
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "api_type", [ModelApiType.COMPLETIONS, ModelApiType.RESPONSES, ModelApiType.GEMINI]
+)
+@pytest.mark.parametrize(
+    "event_type,nesting",
+    [
+        ("message_start", None),
+        ("message_start", "message"),
+        ("message_delta", None),
+        ("message_delta", "delta"),
+    ],
+)
+@pytest.mark.parametrize(
+    "verdicts",
+    [{"toolu_stream": {"verdict": "deny", "private": "do-not-log"}}, [], None],
+)
+async def test_cross_api_stream_drops_verdicts_with_warning(
+    translator,
+    anthropic_model,
+    completions_model,
+    api_type,
+    event_type,
+    nesting,
+    verdicts,
+    caplog,
+):
+    events = _anthropic_tool_stream()
+    event = next(event for event in events if event["type"] == event_type)
+    destination = event[nesting] if nesting else event
+    destination["safeguard_results"] = verdicts
+    original = copy.deepcopy(events)
+    output = await _collect(
+        translator.translate_response_streaming(
+            ChatResponseStreaming(_stream(events)),
+            anthropic_model,
+            replace(completions_model, api_type=api_type),
+        )
+    )
+    assert "safeguard_results" not in json.dumps(output)
+    assert "get_weather" in json.dumps(output)
+    assert "Dropping Anthropic safeguard_results" in caplog.text
+    assert "do-not-log" not in caplog.text
+    assert events == original
+
+
+def test_absent_verdict_does_not_warn(
+    translator, anthropic_model, completions_model, caplog
+):
+    translator.translate_response(
+        ChatResponse(body=_anthropic_tool_response()),
+        anthropic_model,
+        completions_model,
+    )
+    assert "safeguard_results" not in caplog.text
