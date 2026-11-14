@@ -10,6 +10,12 @@ from dataclasses import replace
 
 import pytest
 
+from divyam_llm_interop.translate.chat.anthropic_messages.response.anthropic_stream_to_unified import (
+    anthropic_stream_to_unified,
+)
+from divyam_llm_interop.translate.chat.anthropic_messages.response.stream_state import (
+    ANTHROPIC_SAFEGUARD_FIELDS,
+)
 from divyam_llm_interop.translate.chat.anthropic_messages.safeguards import (
     REVIEW_BETAS,
     is_review_beta,
@@ -342,3 +348,22 @@ async def test_absent_stream_verdict_does_not_warn(
         )
     )
     assert "safeguard_results" not in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("verdicts", [False, True], ids=["none", "verdict"])
+async def test_a_stream_carries_verdict_metadata_only_where_it_has_verdicts(
+    anthropic_model, verdicts
+):
+    """A stream with no review carries nothing for one, so nothing reading its
+    chunks has to tell an empty review from none."""
+    events = _anthropic_tool_stream()
+    if verdicts:
+        start = next(e for e in events if e["type"] == "message_start")
+        start["safeguard_results"] = [{"type": "dangerous_tool_use"}]
+    unified = anthropic_stream_to_unified(
+        ChatResponseStreaming(_stream(events)), anthropic_model
+    )
+    chunks = [chunk async for chunk in unified.stream]
+    carrying = [c for c in chunks if ANTHROPIC_SAFEGUARD_FIELDS in c.unknowns]
+    assert len(carrying) == (1 if verdicts else 0)

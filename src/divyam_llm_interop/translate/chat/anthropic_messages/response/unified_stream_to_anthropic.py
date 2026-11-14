@@ -86,10 +86,11 @@ def unified_stream_to_anthropic(
             merge_provider_state(
                 state.provider_state, chunk.unknowns.get(RESPONSE_STATE_KEY)
             )
-            if state.started and any(choice.finish_reason for choice in chunk.choices):
-                state.safeguard_delta_fields = (
-                    chunk.unknowns.get(ANTHROPIC_SAFEGUARD_FIELDS) or {}
-                )
+            verdicts = chunk.unknowns.get(ANTHROPIC_SAFEGUARD_FIELDS)
+            if verdicts and any(choice.finish_reason for choice in chunk.choices):
+                # Kept from the finishing chunk that carried them; a later
+                # finishing chunk without any never clears them.
+                state.safeguard_delta_fields = verdicts
             events = _consume_chunk(chunk, state)
             for event in events:
                 yield event
