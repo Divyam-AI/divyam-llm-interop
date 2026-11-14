@@ -16,6 +16,9 @@ from divyam_llm_interop.translate.chat.anthropic_messages.response.stream_state 
     ANTHROPIC_SAFEGUARD_FIELDS,
     anthropic_only_content,
 )
+from divyam_llm_interop.translate.chat.anthropic_messages.safeguards import (
+    safeguards_for_target,
+)
 from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
     validate_anthropic_request,
     without_null_fields,
@@ -294,6 +297,12 @@ class ChatTranslator:
         source_translator = self._find_translator_for_model(model=source)
         target_translator = self._find_translator_for_model(model=target)
         self._refuse_unaccepted_tool_choice(chat_request.body, source, target)
+        if source.api_type == ModelApiType.ANTHROPIC_MESSAGES:
+            # Anthropic's own protocol; another API's request is held to its
+            # own profile, which has no such field.
+            chat_request = safeguards_for_target(
+                chat_request, target, self._model_registry.get_capabilities(target)
+            )
 
         if (
             source_translator == target_translator

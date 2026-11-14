@@ -43,10 +43,7 @@ from divyam_llm_interop.translate.chat.reasoning_state import (
     STATE_ENTRY_TYPE,
     reasoning_domain,
 )
-from divyam_llm_interop.translate.chat.translation_errors import (
-    InteropTranslationError,
-    UnsupportedFeatureError,
-)
+from divyam_llm_interop.translate.chat.translation_errors import InteropTranslationError
 from divyam_llm_interop.translate.chat.types import (
     ChatRequest,
     ChatResponse,
@@ -127,13 +124,6 @@ class AnthropicMessagesTranslator(Translator):
             source.api_type == ModelApiType.ANTHROPIC_MESSAGES
             and target.api_type != source.api_type
         ):
-            if request.body.get("safeguards") is not None:
-                raise UnsupportedFeatureError(
-                    "Server-side safeguards require an Anthropic Messages target",
-                    source_api_type=source.api_type,
-                    target_api_type=target.api_type,
-                    path="$.safeguards",
-                )
             validate_no_assistant_prefill(normalize_system_messages(request.body))
         validate_portable_target_capabilities(
             unified.body, target, self._model_registry

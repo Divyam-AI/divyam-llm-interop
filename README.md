@@ -17,25 +17,28 @@ messages as a user message, since Chat Completions tool messages carry only
 text. A target declaring `supports_vision: false`, or native Gemini, refuses
 them.
 
-Requests carrying a non-null `safeguards` field require an Anthropic Messages
-target. Translation to another API raises `UnsupportedFeatureError` at
-`$.safeguards`, so a router can exclude that route before invoking a provider.
-Anthropic responses retain opaque `safeguard_results` and their tool-use IDs,
-including fields on streaming message-start and message-delta envelopes.
-For non-Anthropic clients, response verdict metadata (including explicit null)
-is dropped with a warning; it does not fail an otherwise supported response.
-This does not relax the request-side restriction on `safeguards`.
-See [release notes](CHANGELOG.md) for consumer upgrade implications.
-A gateway must also forward the `anthropic-beta` values these features need. Upstream support for
-server-side classifier checks depends on the provider, model and credentials.
-See [Claude Code classifier billing](https://code.claude.com/docs/en/auto-mode-classifier-billing).
+Claude Code's server-side safety review (`safeguards` in the request,
+`safeguard_results` in the response) runs only where Anthropic runs it, and
+that depends on the endpoint's platform, region and credential rather than the
+model. An endpoint declares the review types it runs in its
+`anthropic_safeguards` capability, such as `["dangerous_tool_use"]`. A request
+keeps the `safeguards` entries its target declares; with none left, the field
+and the `afk-mode` beta are removed, on Anthropic targets as on every other
+API, so an endpoint is never sent a review it may refuse. Claude Code then gets
+no verdict and judges the action with its own classifier, a separate model
+call. Verdicts pass through unchanged between Anthropic endpoints, including
+explicit nulls and their place on streaming `message_start` and `message_delta`
+events, so tool-use IDs still match; a non-Anthropic client never receives
+them, and they are dropped with a warning that leaves the payload out. See
+[Claude Code classifier
+billing](https://code.claude.com/docs/en/auto-mode-classifier-billing).
 
-Other Anthropic Messages requests translated to another protocol keep what the
+Anthropic Messages requests translated to another protocol keep what the
 target can express and drop what is only a hint:
 
 - Prompt-cache controls, citations on text blocks, `defer_loading`,
   `eager_input_streaming`, metadata keys other than `user_id`, and the
-  operational fields `context_management`, `service_tier`,
+  operational fields `context_management`, `safeguards`, `service_tier`,
   `inference_geo`, `speed`, `fallbacks`, `container` and `diagnostics` are
   dropped. Explicit nulls on optional fields count as absent.
 - Deferred tools are sent with every other tool, so a `tool_reference` that a
