@@ -7,9 +7,11 @@ from typing import Any, NoReturn
 from divyam_llm_interop.translate.chat.anthropic_messages.response.stream_state import (
     ANTHROPIC_CITATION_KEY,
     ANTHROPIC_PORTABLE_KEY,
+    ANTHROPIC_SAFEGUARD_FIELDS,
     ANTHROPIC_SERVER_EVENT_KEY,
     ANTHROPIC_THINKING_EVENT_KEY,
     SourceStreamState,
+    safeguard_fields,
 )
 from divyam_llm_interop.translate.chat.anthropic_messages.response.usage import (
     unified_usage,
@@ -84,7 +86,7 @@ def _translate_event(
         state.stopped = True
         return [_internal_error_chunk(event, state)]
     if event_type == "message_start":
-        return [_message_start(event, state)]
+        return [_with_verdicts(_message_start(event, state), event)]
     if not state.started:
         _stream_error("message_start must be the first semantic event", "$.type")
     if event_type == "content_block_start":
@@ -94,11 +96,18 @@ def _translate_event(
     if event_type == "content_block_stop":
         return _content_block_stop(event, state)
     if event_type == "message_delta":
-        return [_message_delta(event, state)]
+        return [_with_verdicts(_message_delta(event, state), event)]
     if event_type == "message_stop":
         _message_stop(state)
         return []
     return [_internal_anthropic_event_chunk(event, state)]
+
+
+def _with_verdicts(chunk: dict[str, Any], event: dict[str, Any]) -> dict[str, Any]:
+    """`chunk` carrying the event's review verdicts, where it has any, for an
+    Anthropic client to get back in their place."""
+    fields = safeguard_fields(event)
+    return {**chunk, ANTHROPIC_SAFEGUARD_FIELDS: fields} if fields else chunk
 
 
 def _message_start(event: dict[str, Any], state: SourceStreamState) -> dict[str, Any]:

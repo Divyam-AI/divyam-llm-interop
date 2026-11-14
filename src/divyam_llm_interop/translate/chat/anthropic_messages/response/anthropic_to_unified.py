@@ -57,6 +57,7 @@ _RESPONSE_FIELDS = {
     "context_management",
     # Anthropic's notes on how the request was served; nothing in the answer.
     "diagnostics",
+    "safeguard_results",
 }
 
 

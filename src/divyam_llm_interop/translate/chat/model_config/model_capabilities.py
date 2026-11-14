@@ -258,6 +258,14 @@ class ModelCapabilities:
     # endpoint override replaces the declaration rather than adding to it.
     # Unset or empty, the endpoint runs none.
     hosted_tools: Optional[Union[list[str], dict[str, dict[str, str]]]] = None
+    # The Anthropic `safeguards` types this endpoint runs, such as
+    # "dangerous_tool_use": the server-side review a client asks for in a
+    # request's `safeguards` and reads back from `safeguard_results`. Whether
+    # it runs depends on the platform, region and credential, not the model,
+    # so an endpoint declares it. Types are Anthropic's and not checked here,
+    # so a new one needs no release. Unset or empty, the endpoint runs none
+    # and a request's safeguards are removed before it is sent there.
+    anthropic_safeguards: Optional[list[str]] = None
     supports_google_thinking_config: Optional[bool] = None
     supports_google_extra_body: Optional[bool] = None
     # The tool_choice modes the target accepts, from TOOL_CHOICE_MODES. A
@@ -291,6 +299,14 @@ class ModelCapabilities:
             )
         if isinstance(self.hosted_tools, dict):
             self._validate_hosted_spellings(self.hosted_tools)
+        if self.anthropic_safeguards is not None and (
+            not isinstance(self.anthropic_safeguards, list)
+            or not all(
+                isinstance(kind, str) and kind.strip()
+                for kind in self.anthropic_safeguards
+            )
+        ):
+            raise ValueError("anthropic_safeguards must be a list of safeguard types")
         unknown_modes = set(self.supported_tool_choices or []) - TOOL_CHOICE_MODES
         if unknown_modes:
             raise ValueError(

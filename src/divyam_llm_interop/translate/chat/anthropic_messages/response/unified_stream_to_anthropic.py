@@ -17,6 +17,7 @@ from divyam_llm_interop.translate.chat.anthropic_messages.response.reasoning_blo
 )
 from divyam_llm_interop.translate.chat.anthropic_messages.response.stream_state import (
     ANTHROPIC_CITATION_KEY,
+    ANTHROPIC_SAFEGUARD_FIELDS,
     ANTHROPIC_SERVER_EVENT_KEY,
     ANTHROPIC_THINKING_EVENT_KEY,
     TargetStreamState,
@@ -76,12 +77,20 @@ def unified_stream_to_anthropic(
                 state.started = True
                 state.message_id = _message_id(chunk.id)
                 _capture_usage(chunk, state)
-                yield _message_start(state)
+                yield _with_safeguards(
+                    _message_start(state),
+                    chunk.unknowns.get(ANTHROPIC_SAFEGUARD_FIELDS),
+                )
                 last_output_at = monotonic()
             _capture_usage(chunk, state)
             merge_provider_state(
                 state.provider_state, chunk.unknowns.get(RESPONSE_STATE_KEY)
             )
+            verdicts = chunk.unknowns.get(ANTHROPIC_SAFEGUARD_FIELDS)
+            if verdicts and any(choice.finish_reason for choice in chunk.choices):
+                # Kept from the finishing chunk that carried them; a later
+                # finishing chunk without any never clears them.
+                state.safeguard_delta_fields = verdicts
             events = _consume_chunk(chunk, state)
             for event in events:
                 yield event
@@ -102,7 +111,7 @@ def unified_stream_to_anthropic(
             _close_answer_blocks(state) + _state_block(state) + _flush_tool_calls(state)
         ):
             yield event
-        yield _message_delta(state)
+        yield _with_safeguards(_message_delta(state), state.safeguard_delta_fields)
         yield {"type": "message_stop"}
 
     translated = translated_stream()
@@ -116,6 +125,17 @@ def unified_stream_to_anthropic(
             await close_async_stream(from_response.stream)
 
     return ChatResponseStreaming(stream=closing_stream(), headers=from_response.headers)
+
+
+def _with_safeguards(event: dict[str, Any], fields: Any) -> dict[str, Any]:
+    """Restore opaque verdicts without changing their tool-use references."""
+    if not isinstance(fields, dict):
+        return event
+    result = {**event, **fields}
+    for name in ("message", "delta"):
+        if name in fields:
+            result[name] = {**event.get(name, {}), **fields[name]}
+    return result
 
 
 def _consume_chunk(

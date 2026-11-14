@@ -17,8 +17,25 @@ messages as a user message, since Chat Completions tool messages carry only
 text. A target declaring `supports_vision: false`, or native Gemini, refuses
 them.
 
-Anthropic Messages requests translated to another protocol keep what the target
-can express and drop what is only a hint:
+Claude Code's server-side safety review (`safeguards` in the request,
+`safeguard_results` in the response) runs only where Anthropic runs it, and
+that depends on the endpoint's platform, region and credential rather than the
+model. An endpoint declares the review types it runs in its
+`anthropic_safeguards` capability, such as `["dangerous_tool_use"]`. A request
+keeps the `safeguards` entries its target declares; with none left, the field
+and the `afk-mode` beta are removed, on Anthropic targets as on every other
+API, so an endpoint is never sent a review it may refuse. Claude Code then gets
+no verdict and judges the action with its own classifier, a separate model
+call. Verdicts pass through unchanged between Anthropic endpoints, including
+explicit nulls and their place on streaming `message_start` and `message_delta`
+events, so tool-use IDs still match; a non-Anthropic client never receives
+them, and a lost verdict is logged as a warning that leaves the payload out.
+See
+[Claude Code classifier
+billing](https://code.claude.com/docs/en/auto-mode-classifier-billing).
+
+Anthropic Messages requests translated to another protocol keep what the
+target can express and drop what is only a hint:
 
 - Prompt-cache controls, citations on text blocks, `defer_loading`,
   `eager_input_streaming`, metadata keys other than `user_id`, and the
