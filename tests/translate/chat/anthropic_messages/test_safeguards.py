@@ -11,6 +11,8 @@ from dataclasses import replace
 import pytest
 
 from divyam_llm_interop.translate.chat.anthropic_messages.safeguards import (
+    REVIEW_BETAS,
+    is_review_beta,
     requested_safeguards,
     safeguards_for_target,
 )
@@ -150,6 +152,12 @@ def test_another_apis_client_is_held_to_its_own_profile(
         translator.translate_request(request, completions_model, target)
 
 
+def test_review_betas_are_known_values_and_any_variant_is_stripped() -> None:
+    assert REVIEW_BETAS == {"afk-mode-2026-01-31"}
+    assert is_review_beta("afk-mode-2027-01-01")
+    assert not is_review_beta("claude-code-20250219")
+
+
 def test_requested_types_are_read_from_the_entries() -> None:
     body = {"safeguards": [_REVIEW, {"type": "future_check"}, "junk", {}]}
     assert requested_safeguards(body) == {"dangerous_tool_use", "future_check"}
@@ -240,6 +248,7 @@ async def test_stream_verdicts_keep_their_location_and_tool_ids(
 @pytest.mark.parametrize(
     "verdicts",
     [{"toolu_weather": {"verdict": "deny", "private": "do-not-log"}}, [], None],
+    ids=["verdict", "empty", "null"],
 )
 def test_cross_api_whole_response_drops_verdicts_with_warning(
     translator, anthropic_model, completions_model, api_type, verdicts, caplog
@@ -254,7 +263,10 @@ def test_cross_api_whole_response_drops_verdicts_with_warning(
     )
     assert "safeguard_results" not in json.dumps(result.body)
     assert "get_weather" in json.dumps(result.body)
-    assert "Dropping Anthropic safeguard_results" in caplog.text
+    # Anthropic answers an empty list or null where nothing was reviewed:
+    # dropped too, but nothing is lost, so nothing is logged.
+    warned = "Dropping Anthropic safeguard_results" in caplog.text
+    assert warned == (verdicts not in ([], None))
     assert "do-not-log" not in caplog.text
     assert response == original
 
@@ -275,6 +287,7 @@ def test_cross_api_whole_response_drops_verdicts_with_warning(
 @pytest.mark.parametrize(
     "verdicts",
     [{"toolu_stream": {"verdict": "deny", "private": "do-not-log"}}, [], None],
+    ids=["verdict", "empty", "null"],
 )
 async def test_cross_api_stream_drops_verdicts_with_warning(
     translator,
@@ -300,7 +313,8 @@ async def test_cross_api_stream_drops_verdicts_with_warning(
     )
     assert "safeguard_results" not in json.dumps(output)
     assert "get_weather" in json.dumps(output)
-    assert "Dropping Anthropic safeguard_results" in caplog.text
+    warned = "Dropping Anthropic safeguard_results" in caplog.text
+    assert warned == (verdicts not in ([], None))
     assert "do-not-log" not in caplog.text
     assert events == original
 

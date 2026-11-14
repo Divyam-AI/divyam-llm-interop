@@ -27,7 +27,8 @@ _REQUEST_FIELDS = {
     "metadata",
     "output_config",
     # Prompt-cache and operational hints. Non-Anthropic targets have no
-    # equivalent and none of them changes what the answer says.
+    # equivalent and none of them changes what the answer says, except
+    # `safeguards`, whose verdicts the client then never gets (safeguards.py).
     "cache_control",
     "context_management",
     "safeguards",

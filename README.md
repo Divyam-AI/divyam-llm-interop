@@ -29,7 +29,8 @@ no verdict and judges the action with its own classifier, a separate model
 call. Verdicts pass through unchanged between Anthropic endpoints, including
 explicit nulls and their place on streaming `message_start` and `message_delta`
 events, so tool-use IDs still match; a non-Anthropic client never receives
-them, and they are dropped with a warning that leaves the payload out. See
+them, and a lost verdict is logged as a warning that leaves the payload out.
+See
 [Claude Code classifier
 billing](https://code.claude.com/docs/en/auto-mode-classifier-billing).
 

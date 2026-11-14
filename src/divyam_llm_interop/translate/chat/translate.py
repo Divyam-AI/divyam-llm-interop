@@ -87,13 +87,29 @@ from divyam_llm_interop.translate.chat.unified.unified_response import (
 logger = logging.getLogger(__name__)
 
 
+def _carries_verdicts(fields: Any) -> bool:
+    """Whether verdict metadata, at any of its envelope positions, holds a
+    verdict. Anthropic answers an empty list, or null, where nothing was
+    reviewed."""
+    if not isinstance(fields, dict):
+        return False
+    for name, value in fields.items():
+        if name == "safeguard_results":
+            if value not in (None, [], {}):
+                return True
+        elif _carries_verdicts(value):
+            return True
+    return False
+
+
 def _drop_anthropic_safeguards(unknowns: dict[str, Any], client: Model) -> None:
-    """Drop verdict metadata for a non-Anthropic client and warn without payloads."""
-    present = bool(unknowns.pop(ANTHROPIC_SAFEGUARD_FIELDS, {}))
+    """Drop verdict metadata for a non-Anthropic client, and warn, without the
+    payload, only when a verdict is lost."""
+    present = _carries_verdicts(unknowns.pop(ANTHROPIC_SAFEGUARD_FIELDS, {}))
     raw = unknowns.get("anthropic_response_raw")
     if isinstance(raw, dict) and "safeguard_results" in raw:
-        present = True
-        raw.pop("safeguard_results")
+        verdicts = {"safeguard_results": raw.pop("safeguard_results")}
+        present = present or _carries_verdicts(verdicts)
     if present:
         logger.warning(
             "Dropping Anthropic safeguard_results when translating a response to %s",

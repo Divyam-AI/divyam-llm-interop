@@ -27,8 +27,17 @@ from divyam_llm_interop.translate.chat.types import ChatRequest, Model
 
 SAFEGUARDS_FIELD = "safeguards"
 _BETA_HEADER = "anthropic-beta"
-# The beta Claude Code sends with `safeguards`; dated, so matched by prefix.
+#: The review betas a gateway may forward to an endpoint that runs the review:
+#: the values Claude Code is known to send with `safeguards`. A new one is
+#: added here, not let through by its name.
+REVIEW_BETAS = frozenset({"afk-mode-2026-01-31"})
+# Every dated variant is removed where no review runs, known or not.
 _REVIEW_BETA_PREFIX = "afk-mode-"
+
+
+def is_review_beta(beta: str) -> bool:
+    """Whether `beta` asks for the server-side review, in any dated variant."""
+    return beta.startswith(_REVIEW_BETA_PREFIX)
 
 
 def requested_safeguards(body: dict[str, Any]) -> frozenset[str]:
@@ -93,13 +102,14 @@ def _without_review_beta(
         return headers
     result: dict[str, str] = {}
     for name, value in headers.items():
-        betas = [beta.strip() for beta in value.split(",") if beta.strip()]
-        if name.lower() != _BETA_HEADER or not any(
-            beta.startswith(_REVIEW_BETA_PREFIX) for beta in betas
-        ):
+        if name.lower() != _BETA_HEADER:
             result[name] = value
             continue
-        kept = [beta for beta in betas if not beta.startswith(_REVIEW_BETA_PREFIX)]
+        betas = [beta.strip() for beta in value.split(",") if beta.strip()]
+        if not any(is_review_beta(beta) for beta in betas):
+            result[name] = value
+            continue
+        kept = [beta for beta in betas if not is_review_beta(beta)]
         if kept:
             result[name] = ",".join(kept)
     return result
