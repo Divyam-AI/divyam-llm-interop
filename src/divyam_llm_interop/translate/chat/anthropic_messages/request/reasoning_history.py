@@ -47,13 +47,19 @@ def reconcile_anthropic_history(
       user turns either side of it.
 
     Removing earlier turns' thinking is safe: Anthropic ignores thinking in
-    completed turns. The exception is the last assistant turn of a tool loop
-    still in progress, which must be replayed with its thinking while thinking
-    is on. When that turn has no thinking this domain can verify, that turn
-    and the tool results answering it are rewritten as plain text, whoever
-    produced it: another provider, another Claude account, or Claude itself
-    having skipped thinking. Claude then sees a fresh user turn, and thinking
-    stays on.
+    completed turns. The exception is budget thinking ({"type": "enabled"}),
+    under which the last assistant turn of a tool loop still in progress must
+    be replayed with its thinking. There, a tool-calling turn with no thinking
+    this domain can verify is rewritten as plain text, with the tool results
+    answering it, whoever produced it: another provider, another Claude
+    account, or Claude itself. Claude then sees a fresh user turn, and
+    thinking stays on. Adaptive thinking may skip any turn, so a turn without
+    thinking is sent as it is.
+
+    Every such turn is rewritten, not only the latest. Anthropic binds each
+    thinking block to the history it was generated after, so a turn sent as
+    text while it was the latest has to stay text on every later request, or
+    the thinking that followed it no longer verifies.
 
     Thinking {"type": "disabled"} is removed for a model that cannot stop
     reasoning, which rejects it. Context edits that clear thinking are removed
@@ -87,16 +93,18 @@ def reconcile_anthropic_history(
         valid_thinking[len(messages)] = has_valid
         messages.append(message)
 
+    budget = mode == "enabled" or (
+        mode is None
+        and thinking_on
+        and capabilities.supports_adaptive_thinking is False
+    )
     requires_replay = capabilities.tool_loop_requires_reasoning_replay is not False
-    exchange = _unfinished_tool_exchange(messages)
-    if (
-        thinking_on
-        and requires_replay
-        and exchange is not None
-        and not valid_thinking.get(exchange)
-    ):
-        loaded = _flatten_tool_exchange(messages, exchange)
-        messages_changed = True
+    if budget and requires_replay:
+        loaded: set[str] = set()
+        for exchange in _tool_exchanges(messages):
+            if not valid_thinking.get(exchange):
+                loaded |= _flatten_tool_exchange(messages, exchange)
+                messages_changed = True
         if loaded:
             changed["tools"] = _with_tools_loaded(body.get("tools"), loaded)
     if messages_changed:
@@ -148,26 +156,28 @@ def _reconcile_blocks(
     return blocks, has_valid
 
 
-def _unfinished_tool_exchange(messages: list[dict[str, Any]]) -> int | None:
-    """Index of an assistant tool_use turn answered by the final user turn."""
-    if len(messages) < 2:
-        return None
-    final, previous = messages[-1], messages[-2]
-    if final.get("role") != "user" or previous.get("role") != "assistant":
-        return None
-    final_content = final.get("content")
-    previous_content = previous.get("content")
-    if not isinstance(final_content, list) or not isinstance(previous_content, list):
-        return None
-    answers = any(
+def _tool_exchanges(messages: list[dict[str, Any]]) -> list[int]:
+    """Indexes of the assistant tool_use turns the next user turn answers."""
+    return [
+        index
+        for index in range(len(messages) - 1)
+        if _is_tool_exchange(messages[index], messages[index + 1])
+    ]
+
+
+def _is_tool_exchange(assistant: dict[str, Any], user: dict[str, Any]) -> bool:
+    if assistant.get("role") != "assistant" or user.get("role") != "user":
+        return False
+    calls = assistant.get("content")
+    answers = user.get("content")
+    if not isinstance(calls, list) or not isinstance(answers, list):
+        return False
+    return any(
+        isinstance(block, dict) and block.get("type") == "tool_use" for block in calls
+    ) and any(
         isinstance(block, dict) and block.get("type") == "tool_result"
-        for block in final_content
+        for block in answers
     )
-    calls = any(
-        isinstance(block, dict) and block.get("type") == "tool_use"
-        for block in previous_content
-    )
-    return len(messages) - 2 if answers and calls else None
 
 
 def _flatten_tool_exchange(
@@ -177,13 +187,23 @@ def _flatten_tool_exchange(
 
     Plain text cannot carry a tool_reference, which is what loads a deferred
     tool. The tools the exchange's search found are named in the text instead,
-    and returned for the request to load up front.
+    and returned for the request to load up front. The provider's own tool
+    calls and results, such as a web search, need no answer from the client
+    and are kept as they are.
     """
     assistant = messages[assistant_index]
     names: dict[str, str] = {}
     loaded: set[str] = set()
     assistant_blocks: list[dict[str, Any]] = []
+    # A tool search's call goes with its result, which becomes text.
+    searches = {
+        block.get("tool_use_id")
+        for block in assistant["content"]
+        if block.get("type") == "tool_search_tool_result"
+    }
     for block in assistant["content"]:
+        if block.get("type") == "server_tool_use" and block.get("id") in searches:
+            continue
         if block.get("type") == "tool_use":
             names[block["id"]] = block["name"]
             arguments = json.dumps(
@@ -202,6 +222,8 @@ def _flatten_tool_exchange(
             assistant_blocks.extend(
                 {"type": "text", "text": tool_reference_text(name)} for name in found
             )
+        else:
+            assistant_blocks.append(block)
     messages[assistant_index] = {**assistant, "content": assistant_blocks}
 
     user = messages[assistant_index + 1]

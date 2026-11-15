@@ -12,6 +12,9 @@ from divyam_llm_interop.translate.chat.anthropic_messages import (
 from divyam_llm_interop.translate.chat.anthropic_messages.request.anthropic_to_unified import (
     normalize_system_messages,
 )
+from divyam_llm_interop.translate.chat.anthropic_messages.request.unified_to_anthropic import (
+    thinking_for_target,
+)
 from divyam_llm_interop.translate.chat.anthropic_messages.response.stream_state import (
     ANTHROPIC_SAFEGUARD_FIELDS,
     anthropic_only_content,
@@ -319,6 +322,17 @@ class ChatTranslator:
             chat_request = safeguards_for_target(
                 chat_request, target, self._model_registry.get_capabilities(target)
             )
+        if (
+            source.api_type == ModelApiType.ANTHROPIC_MESSAGES
+            and target.api_type == ModelApiType.ANTHROPIC_MESSAGES
+        ):
+            # Served natively too: a shared wire profile says how blocks are
+            # signed, not which thinking forms the model takes.
+            body = thinking_for_target(
+                chat_request.body, self._model_registry.get_capabilities(target)
+            )
+            if body is not chat_request.body:
+                chat_request = replace(chat_request, body=body)
 
         if (
             source_translator == target_translator

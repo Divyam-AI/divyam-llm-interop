@@ -374,10 +374,12 @@ def resolve_unified_reasoning_state(
     the reasoning_content it returned on the turns that setting names; Gemini
     gets its thought signatures and a Responses endpoint its reasoning items.
     Nothing else receives replayed state. With reasoning on, a target that
-    requires replay in a tool loop (Claude unless declared otherwise) whose
-    unfinished tool exchange has no state of its own sees that exchange
-    flattened into text, whoever produced it, so it starts a fresh turn and
-    keeps reasoning on. A Chat Completions target that requires replay and
+    requires replay in a tool loop whose unfinished tool exchange has no state
+    of its own sees that exchange flattened into text, whoever produced it, so
+    it starts a fresh turn and keeps reasoning on. Claude requires it only
+    under budget thinking, and then has every exchange without its own state
+    flattened, so each turn reaches it the same way on every request. A Chat
+    Completions target that requires replay and
     declares reasoning_content_replay has every tool exchange in that span
     without its own reasoning flattened the same way, since it checks each.
     One that takes back every turn ("all") checks text turns too while the
@@ -429,6 +431,16 @@ def resolve_unified_reasoning_state(
     if requires_replay is None:
         requires_replay = target.api_type == ModelApiType.ANTHROPIC_MESSAGES
     if not (thinking_on and requires_replay):
+        return
+    if target.api_type == ModelApiType.ANTHROPIC_MESSAGES:
+        # Claude is sent adaptive thinking unless it takes only a budget, and
+        # adaptive thinking may skip any turn. Under a budget every exchange
+        # without its own state is flattened, not only the last: Anthropic
+        # binds thinking to the history before it, so a turn flattened once
+        # must stay flattened on every later request.
+        if capabilities.supports_adaptive_thinking is not False:
+            return
+        _flatten_tool_exchanges_without_state(messages, 0, restored)
         return
     if content_from is not None:
         # Flattening moves messages; restored turns are tracked by identity.

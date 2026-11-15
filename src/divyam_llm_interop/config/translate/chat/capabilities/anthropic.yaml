@@ -22,7 +22,8 @@
     supports_vision: true
     supports_reasoning: true
     # Claude rejects an unfinished tool loop whose last assistant turn lost
-    # the thinking it was generated with while thinking is on.
+    # the thinking it was generated with while budget thinking is on;
+    # adaptive thinking may skip a turn, and takes such a turn back.
     tool_loop_requires_reasoning_replay: true
     # Anthropic's documented default effort; an endpoint may override it.
     default_reasoning_effort: high
@@ -79,6 +80,18 @@
         - claude-4
   capabilities:
     supports_adaptive_thinking: false
+
+# Thinking only as adaptive thinking with an effort level: these refuse
+# thinking {"type": "enabled"} with a budget.
+- selector:
+    name:
+      regex:
+        - claude-opus-4-7
+        - claude-opus-5-5
+        - claude-sonnet-5-5
+        - claude-haiku-5-5
+  capabilities:
+    supports_budget_thinking: false
 
 - selector:
     name:

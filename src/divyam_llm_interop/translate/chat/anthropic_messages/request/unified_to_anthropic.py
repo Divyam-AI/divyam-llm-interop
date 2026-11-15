@@ -52,7 +52,7 @@ def unified_request_to_anthropic(
         # anthropic_wire_profile is forwarded natively and does not reach here.
         body = copy.deepcopy(
             reconcile_anthropic_history(
-                _thinking_for_target(raw, capabilities),
+                thinking_for_target(raw, capabilities),
                 reasoning_domain(target, capabilities),
                 capabilities,
                 genuine_verifiable=False,
@@ -219,6 +219,11 @@ def _build_regular_message(
             f"unsupported message role {message.role!r}", f"$.messages[{index}].role"
         )
     if message.role == "user":
+        if isinstance(message.content, list):
+            return {
+                "role": "user",
+                "content": _content_blocks(message.content, f"$.messages[{index}]"),
+            }
         return {"role": "user", "content": message.content or ""}
 
     blocks: list[dict[str, Any]] = []
@@ -283,21 +288,84 @@ def _build_tool_result_message(
                 "tool result name does not match its tool call",
                 f"$.messages[{index}].tool_name",
             )
+        content: Any = message.content or ""
+        if isinstance(content, list):
+            content = _content_blocks(content, f"$.messages[{index}]") or ""
         block: dict[str, Any] = {
             "type": "tool_result",
             "tool_use_id": tool_call_id,
-            "content": message.content or "",
+            "content": content,
         }
         if message.tool_result_is_error is not None:
             block["is_error"] = message.tool_result_is_error
         blocks.append(block)
         index += 1
 
+    # Clients that cannot put an image in a tool result send it in the user turn
+    # that follows, which Claude reads as part of the same turn.
     if index < len(messages) and messages[index].role == "user":
         user_message = messages[index]
-        blocks.append({"type": "text", "text": user_message.content or ""})
+        if isinstance(user_message.content, list):
+            blocks.extend(_content_blocks(user_message.content, f"$.messages[{index}]"))
+        elif user_message.content:
+            blocks.append({"type": "text", "text": user_message.content})
         index += 1
     return {"role": "user", "content": blocks}, index, result_ids
+
+
+# The image formats Anthropic reads from base64 data, and the names some
+# clients give them that Anthropic does not accept.
+_IMAGE_MEDIA_TYPES = frozenset({"image/jpeg", "image/png", "image/gif", "image/webp"})
+_MEDIA_TYPE_ALIASES = {"image/jpg": "image/jpeg", "image/pjpeg": "image/jpeg"}
+# Images uploaded to the Gemini Files API, which only Google's API can read.
+_GEMINI_FILES = re.compile(
+    r"^https://generativelanguage\.googleapis\.com/[^?#]*/files/"
+)
+
+
+def _content_blocks(parts: list[Any], path: str) -> list[dict[str, Any]]:
+    """Chat Completions text and image_url parts as Anthropic content blocks.
+    Empty text parts are left out, since Anthropic refuses an empty text
+    block."""
+    blocks: list[dict[str, Any]] = []
+    for part_index, part in enumerate(parts):
+        part_path = f"{path}.content[{part_index}]"
+        if part.get("type") != "text":
+            blocks.append(_image_block(part["image_url"]["url"], part_path))
+        elif part.get("text"):
+            blocks.append({"type": "text", "text": part["text"]})
+    return blocks
+
+
+def _image_block(url: str, path: str) -> dict[str, Any]:
+    """An image part's URL as an Anthropic image block: a data URL becomes
+    base64 data, an http(s) URL a URL source that Anthropic fetches."""
+    if url.startswith("data:"):
+        header, _, data = url[len("data:") :].partition(",")
+        # data:[<media type>][;<parameter>]*;base64,<data>
+        fields = [field.strip().lower() for field in header.split(";")]
+        if len(fields) < 2 or fields[-1] != "base64" or not data:
+            _target_error("image data URLs must be base64 encoded", path)
+        media_type = _MEDIA_TYPE_ALIASES.get(fields[0], fields[0])
+        if media_type not in _IMAGE_MEDIA_TYPES:
+            _target_error(
+                "image must be JPEG, PNG, GIF or WebP, not "
+                + (media_type or "unknown"),
+                path,
+            )
+        return {
+            "type": "image",
+            "source": {"type": "base64", "media_type": media_type, "data": data},
+        }
+    if _GEMINI_FILES.match(url):
+        _target_error(
+            "images uploaded to the Gemini Files API cannot be read by this model; "
+            "send the image inline",
+            path,
+        )
+    if url.startswith(("https://", "http://")):
+        return {"type": "image", "source": {"type": "url", "url": url}}
+    _target_error("image URL must be a data URL or an http(s) URL", path)
 
 
 def _add_optional_fields(
@@ -432,20 +500,30 @@ _EFFORT_BUDGET = {"low": 4096, "medium": 16384, "high": 32000}
 _MIN_THINKING_BUDGET = 1024
 
 
-def _thinking_for_target(
+def thinking_for_target(
     body: dict[str, Any], capabilities: ModelCapabilities
 ) -> dict[str, Any]:
-    """Restate adaptive thinking as a budget for a model that only takes one.
+    """`body`'s thinking in the form the target takes.
 
-    The client chose its thinking for the model it named; a translated route
-    may serve another. The effort level picks the budget, as for a request
-    from another protocol, and is dropped since such models predate it.
+    The client chose its thinking for the model it named, and a route may
+    serve another. Adaptive thinking becomes a budget for a model that only
+    takes one: the effort level picks the budget, as for a request from
+    another protocol, and is dropped since such models predate it. A budget
+    becomes adaptive thinking for a model that refuses one: the budget picks
+    the effort level, unless the request names one.
     """
     thinking = body.get("thinking")
+    if not isinstance(thinking, dict):
+        return body
+    if (
+        capabilities.supports_budget_thinking is False
+        and thinking.get("type") == "enabled"
+    ):
+        return _budget_as_adaptive(body, thinking)
     if (
         capabilities.supports_adaptive_thinking is not False
-        or not isinstance(thinking, dict)
         or thinking.get("type") != "adaptive"
+        or not isinstance(body.get("max_tokens"), int)
     ):
         return body
     output_config = dict(body.get("output_config") or {})
@@ -460,6 +538,26 @@ def _thinking_for_target(
     else:
         result["thinking"] = {"type": "enabled", "budget_tokens": budget}
     return result
+
+
+def _budget_as_adaptive(
+    body: dict[str, Any], thinking: dict[str, Any]
+) -> dict[str, Any]:
+    adaptive = {"type": "adaptive"}
+    if "display" in thinking:
+        adaptive["display"] = thinking["display"]
+    output_config = dict(body.get("output_config") or {})
+    if "effort" not in output_config:
+        budget = thinking.get("budget_tokens")
+        output_config["effort"] = next(
+            (
+                level
+                for level, ceiling in _EFFORT_BUDGET.items()
+                if isinstance(budget, int) and budget <= ceiling
+            ),
+            "high",
+        )
+    return {**body, "thinking": adaptive, "output_config": output_config}
 
 
 def _add_thinking(
@@ -554,8 +652,8 @@ def _join_text_parts(unified: UnifiedChatCompletionsRequestBody) -> None:
 
     Chat Completions lets a message's content be a list of parts, and pi sends
     its user turns that way even when every part is text. Parts that are all
-    text become their text, joined as given; any other part is left for
-    validation to refuse.
+    text become their text, joined as given; content with an image keeps its
+    parts, and any other part is left for validation to refuse.
     """
     for message in unified.messages:
         content: Any = message.content
@@ -609,14 +707,33 @@ def _validate_unified_request(unified: UnifiedChatCompletionsRequestBody) -> Non
         key = min(unified.unknowns)
         _target_error(f"unsupported unified field {key!r}", f"$.{key}")
     for index, message in enumerate(unified.messages):
-        if message.content is not None and not isinstance(message.content, str):
+        content: Any = message.content
+        if content is None or isinstance(content, str):
+            pass
+        elif not (message.role in {"user", "tool"} and _text_and_images(content)):
             _target_error(
-                "only text message content is supported", f"$.messages[{index}].content"
+                "only text, and images in user and tool content, are supported",
+                f"$.messages[{index}].content",
             )
         if message.refusal is not None:
             _target_error(
                 "refusal content is not portable", f"$.messages[{index}].refusal"
             )
+
+
+def _text_and_images(content: Any) -> bool:
+    return isinstance(content, list) and all(
+        isinstance(part, dict)
+        and (
+            (part.get("type") == "text" and isinstance(part.get("text"), str))
+            or (
+                part.get("type") == "image_url"
+                and isinstance(part.get("image_url"), dict)
+                and isinstance(part["image_url"].get("url"), str)
+            )
+        )
+        for part in cast(list[Any], content)
+    )
 
 
 def _json_object(value: str, path: str) -> dict[str, Any]:

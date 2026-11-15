@@ -1,5 +1,53 @@
 # Release notes
 
+## 0.4.1
+
+### Thinking in the form the target takes
+
+- New model capability `supports_budget_thinking`: false for Claude models
+  that take thinking only as `{"type": "adaptive"}` with an effort level and
+  refuse `{"type": "enabled"}` with a budget. Declared for Claude Opus 4.7
+  and Claude Opus, Sonnet and Haiku 5.5.
+- An Anthropic Messages request's budget thinking becomes adaptive thinking
+  for such a target, its effort chosen from the budget (up to 4096 tokens
+  low, up to 16384 medium, above that high) unless the request names one.
+- The thinking fit now applies on native Anthropic routes as well as
+  translated ones, so adaptive thinking also becomes a budget for a model
+  that takes only budgets when the route is served natively.
+
+### Earlier turns reach Claude unchanged across a session
+
+- A tool-calling turn without thinking the target can verify is narrated
+  only under budget thinking (`{"type": "enabled"}`), where Claude needs the
+  last turn of an unfinished tool loop to carry its thinking. Under adaptive
+  thinking a turn may have no thinking, and Claude takes it back as made, so
+  it is sent as the tool call it was, from any client API.
+- Where turns are narrated, every such turn is, not only the last: Anthropic
+  binds each thinking block to the history before it, and a turn narrated
+  once and then sent as a tool call made later thinking fail with "bound to
+  a different conversation". This holds for Anthropic Messages clients and
+  for Chat Completions, Responses and Gemini clients routed to Claude.
+- A narrated turn keeps the provider's own tool calls and results, such as
+  a web search, as they were.
+
+### Images from Chat Completions, Responses and Gemini clients reach Claude
+
+- Images in user content and in tool results now translate to Anthropic
+  `image` blocks instead of being refused: Chat Completions `image_url`
+  parts, Responses `input_image` parts in user messages and
+  `function_call_output`, and Gemini `inlineData` and `fileData` in user
+  turns. A base64 data URL becomes a base64 source, and an http(s) URL a URL
+  source that Anthropic fetches.
+- Images a client sends in the user turn after a tool result, as pi and
+  Codex do, join that turn's tool results.
+- Data URL media types are read case-insensitively, with `image/jpg` taken
+  as `image/jpeg`; empty text parts beside an image are left out, since
+  Anthropic refuses an empty text block.
+- Refused, with the reason: an image format Anthropic does not read (only
+  JPEG, PNG, GIF and WebP), a data URL that is not base64, any other URL
+  scheme, an image uploaded to the Gemini Files API, an image in an
+  assistant turn, and non-image media.
+
 ## 0.4.0
 
 ### Claude Code server-side safety review
