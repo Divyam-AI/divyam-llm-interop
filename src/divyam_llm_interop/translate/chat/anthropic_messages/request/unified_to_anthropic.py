@@ -290,7 +290,7 @@ def _build_tool_result_message(
             )
         content: Any = message.content or ""
         if isinstance(content, list):
-            content = _content_blocks(content, f"$.messages[{index}]")
+            content = _content_blocks(content, f"$.messages[{index}]") or ""
         block: dict[str, Any] = {
             "type": "tool_result",
             "tool_use_id": tool_call_id,
@@ -307,25 +307,33 @@ def _build_tool_result_message(
         user_message = messages[index]
         if isinstance(user_message.content, list):
             blocks.extend(_content_blocks(user_message.content, f"$.messages[{index}]"))
-        else:
-            blocks.append({"type": "text", "text": user_message.content or ""})
+        elif user_message.content:
+            blocks.append({"type": "text", "text": user_message.content})
         index += 1
     return {"role": "user", "content": blocks}, index, result_ids
 
 
-# The image formats Anthropic reads from base64 data.
+# The image formats Anthropic reads from base64 data, and the names some
+# clients give them that Anthropic does not accept.
 _IMAGE_MEDIA_TYPES = frozenset({"image/jpeg", "image/png", "image/gif", "image/webp"})
+_MEDIA_TYPE_ALIASES = {"image/jpg": "image/jpeg", "image/pjpeg": "image/jpeg"}
+# Images uploaded to the Gemini Files API, which only Google's API can read.
+_GEMINI_FILES = re.compile(
+    r"^https://generativelanguage\.googleapis\.com/[^?#]*/files/"
+)
 
 
 def _content_blocks(parts: list[Any], path: str) -> list[dict[str, Any]]:
-    """Chat Completions text and image_url parts as Anthropic content blocks."""
+    """Chat Completions text and image_url parts as Anthropic content blocks.
+    Empty text parts are left out, since Anthropic refuses an empty text
+    block."""
     blocks: list[dict[str, Any]] = []
     for part_index, part in enumerate(parts):
         part_path = f"{path}.content[{part_index}]"
-        if part.get("type") == "text":
-            blocks.append({"type": "text", "text": part.get("text", "")})
-        else:
+        if part.get("type") != "text":
             blocks.append(_image_block(part["image_url"]["url"], part_path))
+        elif part.get("text"):
+            blocks.append({"type": "text", "text": part["text"]})
     return blocks
 
 
@@ -334,9 +342,11 @@ def _image_block(url: str, path: str) -> dict[str, Any]:
     base64 data, an http(s) URL a URL source that Anthropic fetches."""
     if url.startswith("data:"):
         header, _, data = url[len("data:") :].partition(",")
-        media_type, _, encoding = header.partition(";")
-        if encoding != "base64" or not data:
+        # data:[<media type>][;<parameter>]*;base64,<data>
+        fields = [field.strip().lower() for field in header.split(";")]
+        if len(fields) < 2 or fields[-1] != "base64" or not data:
             _target_error("image data URLs must be base64 encoded", path)
+        media_type = _MEDIA_TYPE_ALIASES.get(fields[0], fields[0])
         if media_type not in _IMAGE_MEDIA_TYPES:
             _target_error(
                 "image must be JPEG, PNG, GIF or WebP, not "
@@ -347,6 +357,12 @@ def _image_block(url: str, path: str) -> dict[str, Any]:
             "type": "image",
             "source": {"type": "base64", "media_type": media_type, "data": data},
         }
+    if _GEMINI_FILES.match(url):
+        _target_error(
+            "images uploaded to the Gemini Files API cannot be read by this model; "
+            "send the image inline",
+            path,
+        )
     if url.startswith(("https://", "http://")):
         return {"type": "image", "source": {"type": "url", "url": url}}
     _target_error("image URL must be a data URL or an http(s) URL", path)

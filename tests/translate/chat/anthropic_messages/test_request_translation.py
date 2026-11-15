@@ -1951,11 +1951,52 @@ def test_gemini_user_images_reach_anthropic(translator, gemini_model, anthropic_
 
 
 @pytest.mark.parametrize(
+    "url, media_type",
+    [
+        ("data:image/jpg;base64,AAAA", "image/jpeg"),
+        ("data:IMAGE/PNG;base64,AAAA", "image/png"),
+        ("data:image/webp;charset=binary;base64,AAAA", "image/webp"),
+    ],
+)
+def test_image_data_urls_are_read_as_anthropic_names_them(
+    translator, completions_model, anthropic_model, url, media_type
+):
+    source = {
+        "model": "gpt-4.1-mini",
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": ""},
+                    {"type": "image_url", "image_url": {"url": url}},
+                ],
+            }
+        ],
+    }
+
+    result = translator.translate_request(
+        ChatRequest(body=source), completions_model, anthropic_model
+    )
+
+    # The empty caption is left out: Anthropic refuses an empty text block.
+    assert result.body["messages"][0]["content"] == [
+        {
+            "type": "image",
+            "source": {"type": "base64", "media_type": media_type, "data": "AAAA"},
+        }
+    ]
+
+
+@pytest.mark.parametrize(
     "url, message",
     [
         ("data:image/tiff;base64,AAAA", "JPEG, PNG, GIF or WebP"),
         ("data:image/png,raw", "base64"),
         ("ftp://example.test/image.png", "data URL or an http"),
+        (
+            "https://generativelanguage.googleapis.com/v1beta/files/abc123",
+            "Gemini Files API",
+        ),
     ],
 )
 def test_images_anthropic_cannot_read_are_refused(
