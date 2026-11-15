@@ -1115,3 +1115,71 @@ def test_system_turn_output_settings_apply_to_the_turn_being_answered(
     assert result.body["output_config"] == {"effort": "medium"}
     assert result.body["system"][-1]["text"] == "\n# Environment\nToday is 2026-11-06."
     assert all(turn["role"] != "system" for turn in result.body["messages"])
+
+
+@pytest.mark.parametrize(
+    "budget, effort, expected",
+    [
+        (2000, None, "low"),
+        (4096, None, "low"),
+        (10000, None, "medium"),
+        (16384, None, "medium"),
+        (31999, None, "high"),
+        (31999, "low", "low"),
+    ],
+)
+@pytest.mark.parametrize(
+    "source_name",
+    ["claude-opus-5-5", "claude-sonnet-test"],
+    ids=["native", "translated"],
+)
+def test_budget_thinking_becomes_adaptive_for_a_model_that_refuses_budgets(
+    translator, source_name, budget, effort, expected
+):
+    body: dict = {
+        "model": source_name,
+        "messages": [{"role": "user", "content": "Hello"}],
+        "max_tokens": 32000,
+        "thinking": {"type": "enabled", "budget_tokens": budget, "display": "omitted"},
+    }
+    if effort is not None:
+        body["output_config"] = {"effort": effort}
+    source = Model(source_name, ModelApiType.ANTHROPIC_MESSAGES)
+    target = Model("claude-opus-5-5", ModelApiType.ANTHROPIC_MESSAGES)
+
+    result = translator.translate_request(ChatRequest(body=body), source, target)
+
+    assert result.body["thinking"] == {"type": "adaptive", "display": "omitted"}
+    assert result.body["output_config"]["effort"] == expected
+    assert body["thinking"]["type"] == "enabled"
+
+
+def test_adaptive_thinking_reaches_a_model_that_refuses_budgets_as_sent(translator):
+    thinking_type = "adaptive"
+    model = Model("claude-opus-5-5", ModelApiType.ANTHROPIC_MESSAGES)
+    body = {
+        "model": "claude-opus-5-5",
+        "messages": [{"role": "user", "content": "Hello"}],
+        "max_tokens": 32000,
+        "thinking": {"type": thinking_type},
+    }
+
+    result = translator.translate_request(ChatRequest(body=body), model, model)
+
+    assert result.body["thinking"] == {"type": thinking_type}
+    assert "output_config" not in result.body
+
+
+def test_budget_thinking_reaches_a_model_that_takes_budgets_as_sent(translator):
+    model = Model("claude-sonnet-4-5", ModelApiType.ANTHROPIC_MESSAGES)
+    thinking = {"type": "enabled", "budget_tokens": 2000}
+    body = {
+        "model": "claude-sonnet-4-5",
+        "messages": [{"role": "user", "content": "Hello"}],
+        "max_tokens": 32000,
+        "thinking": thinking,
+    }
+
+    result = translator.translate_request(ChatRequest(body=body), model, model)
+
+    assert result.body["thinking"] == thinking

@@ -80,6 +80,17 @@
   capabilities:
     supports_adaptive_thinking: false
 
+# Thinking only as adaptive thinking with an effort level: these refuse
+# thinking {"type": "enabled"} with a budget.
+- selector:
+    name:
+      regex:
+        - claude-opus-5-5
+        - claude-sonnet-5-5
+        - claude-haiku-5-5
+  capabilities:
+    supports_budget_thinking: false
+
 - selector:
     name:
       regex:

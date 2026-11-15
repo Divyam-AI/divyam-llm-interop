@@ -223,6 +223,9 @@ class ModelCapabilities:
     # False for Claude models that take thinking only as an explicit token
     # budget, not as {"type": "adaptive"} with an effort level.
     supports_adaptive_thinking: Optional[bool] = None
+    # False for Claude models that take thinking only as {"type": "adaptive"}
+    # with an effort level, and refuse {"type": "enabled"} with a budget.
+    supports_budget_thinking: Optional[bool] = None
     # True when, with reasoning on, the last assistant turn of an unfinished
     # tool loop must be replayed with the reasoning state the model returned.
     tool_loop_requires_reasoning_replay: Optional[bool] = None

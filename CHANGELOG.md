@@ -1,5 +1,20 @@
 # Release notes
 
+## 0.4.1
+
+### Thinking in the form the target takes
+
+- New model capability `supports_budget_thinking`: false for Claude models
+  that take thinking only as `{"type": "adaptive"}` with an effort level and
+  refuse `{"type": "enabled"}` with a budget. Declared for Claude Opus,
+  Sonnet and Haiku 5.5.
+- An Anthropic Messages request's budget thinking becomes adaptive thinking
+  for such a target, its effort chosen from the budget (up to 4096 tokens
+  low, up to 16384 medium, above that high) unless the request names one.
+- The thinking fit now applies on native Anthropic routes as well as
+  translated ones, so adaptive thinking also becomes a budget for a model
+  that takes only budgets when the route is served natively.
+
 ## 0.4.0
 
 ### Claude Code server-side safety review

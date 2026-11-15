@@ -52,7 +52,7 @@ def unified_request_to_anthropic(
         # anthropic_wire_profile is forwarded natively and does not reach here.
         body = copy.deepcopy(
             reconcile_anthropic_history(
-                _thinking_for_target(raw, capabilities),
+                thinking_for_target(raw, capabilities),
                 reasoning_domain(target, capabilities),
                 capabilities,
                 genuine_verifiable=False,
@@ -432,20 +432,30 @@ _EFFORT_BUDGET = {"low": 4096, "medium": 16384, "high": 32000}
 _MIN_THINKING_BUDGET = 1024
 
 
-def _thinking_for_target(
+def thinking_for_target(
     body: dict[str, Any], capabilities: ModelCapabilities
 ) -> dict[str, Any]:
-    """Restate adaptive thinking as a budget for a model that only takes one.
+    """`body`'s thinking in the form the target takes.
 
-    The client chose its thinking for the model it named; a translated route
-    may serve another. The effort level picks the budget, as for a request
-    from another protocol, and is dropped since such models predate it.
+    The client chose its thinking for the model it named, and a route may
+    serve another. Adaptive thinking becomes a budget for a model that only
+    takes one: the effort level picks the budget, as for a request from
+    another protocol, and is dropped since such models predate it. A budget
+    becomes adaptive thinking for a model that refuses one: the budget picks
+    the effort level, unless the request names one.
     """
     thinking = body.get("thinking")
+    if not isinstance(thinking, dict):
+        return body
+    if (
+        capabilities.supports_budget_thinking is False
+        and thinking.get("type") == "enabled"
+    ):
+        return _budget_as_adaptive(body, thinking)
     if (
         capabilities.supports_adaptive_thinking is not False
-        or not isinstance(thinking, dict)
         or thinking.get("type") != "adaptive"
+        or not isinstance(body.get("max_tokens"), int)
     ):
         return body
     output_config = dict(body.get("output_config") or {})
@@ -460,6 +470,26 @@ def _thinking_for_target(
     else:
         result["thinking"] = {"type": "enabled", "budget_tokens": budget}
     return result
+
+
+def _budget_as_adaptive(
+    body: dict[str, Any], thinking: dict[str, Any]
+) -> dict[str, Any]:
+    adaptive = {"type": "adaptive"}
+    if "display" in thinking:
+        adaptive["display"] = thinking["display"]
+    output_config = dict(body.get("output_config") or {})
+    if "effort" not in output_config:
+        budget = thinking.get("budget_tokens")
+        output_config["effort"] = next(
+            (
+                level
+                for level, ceiling in _EFFORT_BUDGET.items()
+                if isinstance(budget, int) and budget <= ceiling
+            ),
+            "high",
+        )
+    return {**body, "thinking": adaptive, "output_config": output_config}
 
 
 def _add_thinking(
