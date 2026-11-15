@@ -219,6 +219,11 @@ def _build_regular_message(
             f"unsupported message role {message.role!r}", f"$.messages[{index}].role"
         )
     if message.role == "user":
+        if isinstance(message.content, list):
+            return {
+                "role": "user",
+                "content": _content_blocks(message.content, f"$.messages[{index}]"),
+            }
         return {"role": "user", "content": message.content or ""}
 
     blocks: list[dict[str, Any]] = []
@@ -283,21 +288,68 @@ def _build_tool_result_message(
                 "tool result name does not match its tool call",
                 f"$.messages[{index}].tool_name",
             )
+        content: Any = message.content or ""
+        if isinstance(content, list):
+            content = _content_blocks(content, f"$.messages[{index}]")
         block: dict[str, Any] = {
             "type": "tool_result",
             "tool_use_id": tool_call_id,
-            "content": message.content or "",
+            "content": content,
         }
         if message.tool_result_is_error is not None:
             block["is_error"] = message.tool_result_is_error
         blocks.append(block)
         index += 1
 
+    # Clients that cannot put an image in a tool result send it in the user turn
+    # that follows, which Claude reads as part of the same turn.
     if index < len(messages) and messages[index].role == "user":
         user_message = messages[index]
-        blocks.append({"type": "text", "text": user_message.content or ""})
+        if isinstance(user_message.content, list):
+            blocks.extend(_content_blocks(user_message.content, f"$.messages[{index}]"))
+        else:
+            blocks.append({"type": "text", "text": user_message.content or ""})
         index += 1
     return {"role": "user", "content": blocks}, index, result_ids
+
+
+# The image formats Anthropic reads from base64 data.
+_IMAGE_MEDIA_TYPES = frozenset({"image/jpeg", "image/png", "image/gif", "image/webp"})
+
+
+def _content_blocks(parts: list[Any], path: str) -> list[dict[str, Any]]:
+    """Chat Completions text and image_url parts as Anthropic content blocks."""
+    blocks: list[dict[str, Any]] = []
+    for part_index, part in enumerate(parts):
+        part_path = f"{path}.content[{part_index}]"
+        if part.get("type") == "text":
+            blocks.append({"type": "text", "text": part.get("text", "")})
+        else:
+            blocks.append(_image_block(part["image_url"]["url"], part_path))
+    return blocks
+
+
+def _image_block(url: str, path: str) -> dict[str, Any]:
+    """An image part's URL as an Anthropic image block: a data URL becomes
+    base64 data, an http(s) URL a URL source that Anthropic fetches."""
+    if url.startswith("data:"):
+        header, _, data = url[len("data:") :].partition(",")
+        media_type, _, encoding = header.partition(";")
+        if encoding != "base64" or not data:
+            _target_error("image data URLs must be base64 encoded", path)
+        if media_type not in _IMAGE_MEDIA_TYPES:
+            _target_error(
+                "image must be JPEG, PNG, GIF or WebP, not "
+                + (media_type or "unknown"),
+                path,
+            )
+        return {
+            "type": "image",
+            "source": {"type": "base64", "media_type": media_type, "data": data},
+        }
+    if url.startswith(("https://", "http://")):
+        return {"type": "image", "source": {"type": "url", "url": url}}
+    _target_error("image URL must be a data URL or an http(s) URL", path)
 
 
 def _add_optional_fields(
@@ -584,8 +636,8 @@ def _join_text_parts(unified: UnifiedChatCompletionsRequestBody) -> None:
 
     Chat Completions lets a message's content be a list of parts, and pi sends
     its user turns that way even when every part is text. Parts that are all
-    text become their text, joined as given; any other part is left for
-    validation to refuse.
+    text become their text, joined as given; content with an image keeps its
+    parts, and any other part is left for validation to refuse.
     """
     for message in unified.messages:
         content: Any = message.content
@@ -639,14 +691,33 @@ def _validate_unified_request(unified: UnifiedChatCompletionsRequestBody) -> Non
         key = min(unified.unknowns)
         _target_error(f"unsupported unified field {key!r}", f"$.{key}")
     for index, message in enumerate(unified.messages):
-        if message.content is not None and not isinstance(message.content, str):
+        content: Any = message.content
+        if content is None or isinstance(content, str):
+            pass
+        elif not (message.role in {"user", "tool"} and _text_and_images(content)):
             _target_error(
-                "only text message content is supported", f"$.messages[{index}].content"
+                "only text, and images in user and tool content, are supported",
+                f"$.messages[{index}].content",
             )
         if message.refusal is not None:
             _target_error(
                 "refusal content is not portable", f"$.messages[{index}].refusal"
             )
+
+
+def _text_and_images(content: Any) -> bool:
+    return isinstance(content, list) and all(
+        isinstance(part, dict)
+        and (
+            (part.get("type") == "text" and isinstance(part.get("text"), str))
+            or (
+                part.get("type") == "image_url"
+                and isinstance(part.get("image_url"), dict)
+                and isinstance(part["image_url"].get("url"), str)
+            )
+        )
+        for part in cast(list[Any], content)
+    )
 
 
 def _json_object(value: str, path: str) -> dict[str, Any]:

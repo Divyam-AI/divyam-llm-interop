@@ -1729,7 +1729,38 @@ def test_anthropic_target_requires_catalog_default_when_source_omits_limit(
         )
 
 
-def test_chat_completions_image_is_rejected_before_anthropic_translation(
+_ANTHROPIC_PNG = {
+    "type": "image",
+    "source": {"type": "base64", "media_type": "image/png", "data": "iVBORw0KGgo="},
+}
+_READ_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "read",
+        "parameters": {"type": "object", "properties": {"path": {"type": "string"}}},
+    },
+}
+
+
+def _completions_tool_turn(result: object) -> list[dict]:
+    return [
+        {"role": "user", "content": "read number.png"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "read", "arguments": '{"path":"number.png"}'},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_1", "content": result},
+    ]
+
+
+def test_chat_completions_user_images_reach_anthropic_as_image_blocks(
     translator, completions_model, anthropic_model
 ):
     source = {
@@ -1739,16 +1770,236 @@ def test_chat_completions_image_is_rejected_before_anthropic_translation(
                 "role": "user",
                 "content": [
                     {"type": "text", "text": "describe"},
+                    {"type": "image_url", "image_url": {"url": _PNG_DATA_URL}},
                     {
                         "type": "image_url",
-                        "image_url": {"url": "https://example.test/image.png"},
+                        "image_url": {
+                            "url": "https://example.test/image.png",
+                            "detail": "high",
+                        },
                     },
                 ],
             }
         ],
     }
 
-    with pytest.raises(UnsupportedFeatureError, match="only text"):
+    result = translator.translate_request(
+        ChatRequest(body=source), completions_model, anthropic_model
+    )
+
+    assert result.body["messages"] == [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "describe"},
+                _ANTHROPIC_PNG,
+                {
+                    "type": "image",
+                    "source": {"type": "url", "url": "https://example.test/image.png"},
+                },
+            ],
+        }
+    ]
+
+
+def test_chat_completions_tool_result_images_reach_anthropic_in_the_result(
+    translator, completions_model, anthropic_model
+):
+    source = {
+        "model": "gpt-4.1-mini",
+        "tools": [_READ_TOOL],
+        "messages": _completions_tool_turn(
+            [
+                {"type": "text", "text": "Read image file [image/png]"},
+                {"type": "image_url", "image_url": {"url": _PNG_DATA_URL}},
+            ]
+        ),
+    }
+
+    result = translator.translate_request(
+        ChatRequest(body=source), completions_model, anthropic_model
+    )
+
+    assert result.body["messages"][-1]["content"] == [
+        {
+            "type": "tool_result",
+            "tool_use_id": "call_1",
+            "content": [
+                {"type": "text", "text": "Read image file [image/png]"},
+                _ANTHROPIC_PNG,
+            ],
+        }
+    ]
+
+
+def test_images_sent_after_a_tool_result_join_its_user_turn(
+    translator, completions_model, anthropic_model
+):
+    # pi sends a read tool's image as a user message after the tool result,
+    # since Chat Completions has no image in a tool message.
+    source = {
+        "model": "gpt-4.1-mini",
+        "tools": [_READ_TOOL],
+        "messages": [
+            *_completions_tool_turn("Read image file [image/png]"),
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Attached image(s) from tool result:"},
+                    {"type": "image_url", "image_url": {"url": _PNG_DATA_URL}},
+                ],
+            },
+        ],
+    }
+
+    result = translator.translate_request(
+        ChatRequest(body=source), completions_model, anthropic_model
+    )
+
+    assert result.body["messages"][-1] == {
+        "role": "user",
+        "content": [
+            {
+                "type": "tool_result",
+                "tool_use_id": "call_1",
+                "content": "Read image file [image/png]",
+            },
+            {"type": "text", "text": "Attached image(s) from tool result:"},
+            _ANTHROPIC_PNG,
+        ],
+    }
+
+
+def test_responses_user_and_tool_output_images_reach_anthropic(
+    translator, responses_model, anthropic_model
+):
+    source = {
+        "model": "gpt-4.1-mini",
+        "tools": [
+            {
+                "type": "function",
+                "name": "view_image",
+                "parameters": {"type": "object", "properties": {}},
+            }
+        ],
+        "input": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": "compare"},
+                    {"type": "input_image", "image_url": _PNG_DATA_URL},
+                ],
+            },
+            {
+                "type": "function_call",
+                "call_id": "call_1",
+                "name": "view_image",
+                "arguments": "{}",
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_1",
+                "output": [{"type": "input_image", "image_url": _PNG_DATA_URL}],
+            },
+        ],
+    }
+
+    result = translator.translate_request(
+        ChatRequest(body=source), responses_model, anthropic_model
+    )
+
+    messages = result.body["messages"]
+    assert messages[0]["content"] == [
+        {"type": "text", "text": "compare"},
+        _ANTHROPIC_PNG,
+    ]
+    assert messages[-1]["content"][0]["type"] == "tool_result"
+    assert messages[-1]["content"][-1] == _ANTHROPIC_PNG
+
+
+def test_gemini_user_images_reach_anthropic(translator, gemini_model, anthropic_model):
+    source = {
+        "contents": [
+            {
+                "role": "user",
+                "parts": [
+                    {"text": "compare"},
+                    {"inlineData": {"mimeType": "image/png", "data": "iVBORw0KGgo"}},
+                    {
+                        "fileData": {
+                            "mimeType": "image/png",
+                            "fileUri": "https://example.test/map.png",
+                        }
+                    },
+                ],
+            }
+        ]
+    }
+
+    result = translator.translate_request(
+        ChatRequest(body=source), gemini_model, anthropic_model
+    )
+
+    assert result.body["messages"][0]["content"] == [
+        {"type": "text", "text": "compare"},
+        _ANTHROPIC_PNG,
+        {
+            "type": "image",
+            "source": {"type": "url", "url": "https://example.test/map.png"},
+        },
+    ]
+
+
+@pytest.mark.parametrize(
+    "url, message",
+    [
+        ("data:image/tiff;base64,AAAA", "JPEG, PNG, GIF or WebP"),
+        ("data:image/png,raw", "base64"),
+        ("ftp://example.test/image.png", "data URL or an http"),
+    ],
+)
+def test_images_anthropic_cannot_read_are_refused(
+    translator, completions_model, anthropic_model, url, message
+):
+    source = {
+        "model": "gpt-4.1-mini",
+        "messages": [
+            {
+                "role": "user",
+                "content": [{"type": "image_url", "image_url": {"url": url}}],
+            }
+        ],
+    }
+
+    with pytest.raises(TargetCapabilityError, match=message):
+        translator.translate_request(
+            ChatRequest(body=source), completions_model, anthropic_model
+        )
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        {
+            "role": "user",
+            "content": [{"type": "input_audio", "input_audio": {"data": "AAAA"}}],
+        },
+        {
+            "role": "assistant",
+            "content": [{"type": "image_url", "image_url": {"url": _PNG_DATA_URL}}],
+        },
+    ],
+    ids=["audio", "assistant-image"],
+)
+def test_content_claude_cannot_take_is_still_refused(
+    translator, completions_model, anthropic_model, message
+):
+    source = {
+        "model": "gpt-4.1-mini",
+        "messages": [{"role": "user", "content": "hi"}, message],
+    }
+
+    with pytest.raises(UnsupportedFeatureError, match="images in user and tool"):
         translator.translate_request(
             ChatRequest(body=source), completions_model, anthropic_model
         )
@@ -1792,7 +2043,7 @@ def test_responses_reasoning_input_item_does_not_reach_an_anthropic_target(
     assert "rs_1" not in str(translated["messages"])
 
 
-def test_gemini_media_part_is_rejected_before_anthropic_translation(
+def test_gemini_media_other_than_images_is_rejected_for_anthropic(
     translator, gemini_model, anthropic_model
 ):
     source = {
@@ -1801,10 +2052,10 @@ def test_gemini_media_part_is_rejected_before_anthropic_translation(
             {
                 "role": "user",
                 "parts": [
-                    {"text": "describe"},
+                    {"text": "transcribe"},
                     {
                         "inlineData": {
-                            "mimeType": "image/png",
+                            "mimeType": "audio/wav",
                             "data": "aGVsbG8=",
                         }
                     },
@@ -1813,7 +2064,7 @@ def test_gemini_media_part_is_rejected_before_anthropic_translation(
         ],
     }
 
-    with pytest.raises(UnsupportedFeatureError, match="media"):
+    with pytest.raises(UnsupportedFeatureError, match="only images"):
         translator.translate_request(
             ChatRequest(body=source), gemini_model, anthropic_model
         )

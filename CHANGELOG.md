@@ -27,6 +27,21 @@
   `tool_loop_requires_reasoning_replay: false`: with adaptive thinking a turn
   may have no thinking, and they accept it back as made, so their history is
   sent without narration.
+
+### Images from Chat Completions, Responses and Gemini clients reach Claude
+
+- Images in user content and in tool results now translate to Anthropic
+  `image` blocks instead of being refused: Chat Completions `image_url`
+  parts, Responses `input_image` parts in user messages and
+  `function_call_output`, and Gemini `inlineData` and `fileData` in user
+  turns. A base64 data URL becomes a base64 source, and an http(s) URL a URL
+  source that Anthropic fetches.
+- Images a client sends in the user turn after a tool result, as pi and
+  Codex do, join that turn's tool results.
+- Refused, with the reason: an image format Anthropic does not read (only
+  JPEG, PNG, GIF and WebP), a data URL that is not base64, any other URL
+  scheme, an image in an assistant turn, and non-image media.
+
 ## 0.4.0
 
 ### Claude Code server-side safety review

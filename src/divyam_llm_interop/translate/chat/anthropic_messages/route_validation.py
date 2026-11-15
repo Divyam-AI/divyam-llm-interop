@@ -256,6 +256,11 @@ def _validate_parallel_tool_calls(value: bool | None, target: Model) -> None:
     )
 
 
+# Roles whose content may carry images to Claude: what the user sends, and what
+# a tool returns, which Claude reads as part of the next user turn.
+_IMAGE_ROLES = frozenset({"user", "tool"})
+
+
 def _validate_openai_message_content(messages: Any, source: Model) -> None:
     if not isinstance(messages, list):
         return
@@ -265,14 +270,25 @@ def _validate_openai_message_content(messages: Any, source: Model) -> None:
         content = message.get("content")
         if not isinstance(content, list):
             continue
+        images = message.get("role") in _IMAGE_ROLES
         for part_index, part in enumerate(content):
             path = f"$.messages[{message_index}].content[{part_index}]"
-            if not isinstance(part, dict) or part.get("type") != "text":
-                _source_unsupported(
-                    "only text Chat Completions content is portable",
-                    source,
-                    path,
-                )
+            if isinstance(part, dict) and part.get("type") == "text":
+                continue
+            if images and _is_image_url_part(part):
+                continue
+            _source_unsupported(
+                "only text, and images in user and tool content, are portable",
+                source,
+                path,
+            )
+
+
+def _is_image_url_part(part: Any) -> bool:
+    if not isinstance(part, dict) or part.get("type") != "image_url":
+        return False
+    image_url = part.get("image_url")
+    return isinstance(image_url, dict) and isinstance(image_url.get("url"), str)
 
 
 def _validate_responses_input(input_value: Any, source: Model) -> None:
@@ -317,13 +333,15 @@ def _validate_responses_input(input_value: Any, source: Model) -> None:
             continue
         for part_index, part in enumerate(content):
             part_path = f"{path}.content[{part_index}]"
+            if item.get("role") == "user" and _is_input_image_part(part):
+                continue
             if not isinstance(part, dict) or part.get("type") not in {
                 "text",
                 "input_text",
                 "output_text",
             }:
                 _source_unsupported(
-                    "only text Responses message content is portable",
+                    "only text, and images in user content, are portable",
                     source,
                     part_path,
                 )
@@ -373,16 +391,29 @@ def _validate_responses_function_output_item(
     if not isinstance(output, list):
         return
     for index, part in enumerate(output):
+        if _is_input_image_part(part):
+            continue
         if (
             not isinstance(part, dict)
             or part.get("type") not in {"text", "input_text", "output_text"}
             or set(part) - {"type", "text"}
         ):
             _source_unsupported(
-                "only text Responses function output is portable",
+                "only text and image Responses function output is portable",
                 source,
                 f"{path}.output[{index}]",
             )
+
+
+def _is_input_image_part(part: Any) -> bool:
+    """An input_image given by URL or data URL. One given by file_id names an
+    upload only the Responses endpoint can read, and is refused when the
+    request is translated."""
+    return (
+        isinstance(part, dict)
+        and part.get("type") == "input_image"
+        and not set(part) - {"type", "image_url", "detail", "file_id"}
+    )
 
 
 def _validate_responses_message_item(
@@ -435,6 +466,7 @@ def _validate_gemini_contents(value: Any, source: Model, path: str) -> None:
             content.get("parts"),
             source,
             f"{path}[{content_index}].parts",
+            images=content.get("role", "user") != "model",
         )
 
 
@@ -450,7 +482,11 @@ def _validate_gemini_system(value: Any, source: Model) -> None:
     _validate_gemini_parts(value.get("parts"), source, "$.systemInstruction.parts")
 
 
-def _validate_gemini_parts(value: Any, source: Model, path: str) -> None:
+def _validate_gemini_parts(
+    value: Any, source: Model, path: str, *, images: bool = False
+) -> None:
+    """Text and function parts, and in a user turn, inline or file media,
+    which translation refuses unless it is an image."""
     if not isinstance(value, list):
         return
     allowed = {
@@ -460,6 +496,8 @@ def _validate_gemini_parts(value: Any, source: Model, path: str) -> None:
         "functionResponse",
         "function_response",
     }
+    if images:
+        allowed |= {"inlineData", "inline_data", "fileData", "file_data"}
     for index, part in enumerate(value):
         if not isinstance(part, dict) or not part or not set(part).issubset(allowed):
             _source_unsupported(
