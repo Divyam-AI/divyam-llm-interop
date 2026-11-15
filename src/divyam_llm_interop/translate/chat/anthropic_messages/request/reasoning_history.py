@@ -47,13 +47,19 @@ def reconcile_anthropic_history(
       user turns either side of it.
 
     Removing earlier turns' thinking is safe: Anthropic ignores thinking in
-    completed turns. The exception is the last assistant turn of a tool loop
-    still in progress, which must be replayed with its thinking while thinking
-    is on. When that turn has no thinking this domain can verify, that turn
-    and the tool results answering it are rewritten as plain text, whoever
-    produced it: another provider, another Claude account, or Claude itself
-    having skipped thinking. Claude then sees a fresh user turn, and thinking
-    stays on.
+    completed turns. The exception, on a model that declares
+    tool_loop_requires_reasoning_replay, is the last assistant turn of a tool
+    loop still in progress, which must be replayed with its thinking while
+    thinking is on. A tool-calling turn with no thinking this domain can
+    verify is therefore rewritten as plain text, with the tool results
+    answering it, whoever produced it: another provider, another Claude
+    account, or Claude itself having skipped thinking. Claude then sees a
+    fresh user turn, and thinking stays on.
+
+    Every such turn is rewritten, not only the latest. Anthropic binds each
+    thinking block to the history it was generated after, so a turn sent as
+    text while it was the latest has to stay text on every later request, or
+    the thinking that followed it no longer verifies.
 
     Thinking {"type": "disabled"} is removed for a model that cannot stop
     reasoning, which rejects it. Context edits that clear thinking are removed
@@ -88,15 +94,12 @@ def reconcile_anthropic_history(
         messages.append(message)
 
     requires_replay = capabilities.tool_loop_requires_reasoning_replay is not False
-    exchange = _unfinished_tool_exchange(messages)
-    if (
-        thinking_on
-        and requires_replay
-        and exchange is not None
-        and not valid_thinking.get(exchange)
-    ):
-        loaded = _flatten_tool_exchange(messages, exchange)
-        messages_changed = True
+    if thinking_on and requires_replay:
+        loaded: set[str] = set()
+        for exchange in _tool_exchanges(messages):
+            if not valid_thinking.get(exchange):
+                loaded |= _flatten_tool_exchange(messages, exchange)
+                messages_changed = True
         if loaded:
             changed["tools"] = _with_tools_loaded(body.get("tools"), loaded)
     if messages_changed:
@@ -148,26 +151,28 @@ def _reconcile_blocks(
     return blocks, has_valid
 
 
-def _unfinished_tool_exchange(messages: list[dict[str, Any]]) -> int | None:
-    """Index of an assistant tool_use turn answered by the final user turn."""
-    if len(messages) < 2:
-        return None
-    final, previous = messages[-1], messages[-2]
-    if final.get("role") != "user" or previous.get("role") != "assistant":
-        return None
-    final_content = final.get("content")
-    previous_content = previous.get("content")
-    if not isinstance(final_content, list) or not isinstance(previous_content, list):
-        return None
-    answers = any(
+def _tool_exchanges(messages: list[dict[str, Any]]) -> list[int]:
+    """Indexes of the assistant tool_use turns the next user turn answers."""
+    return [
+        index
+        for index in range(len(messages) - 1)
+        if _is_tool_exchange(messages[index], messages[index + 1])
+    ]
+
+
+def _is_tool_exchange(assistant: dict[str, Any], user: dict[str, Any]) -> bool:
+    if assistant.get("role") != "assistant" or user.get("role") != "user":
+        return False
+    calls = assistant.get("content")
+    answers = user.get("content")
+    if not isinstance(calls, list) or not isinstance(answers, list):
+        return False
+    return any(
+        isinstance(block, dict) and block.get("type") == "tool_use" for block in calls
+    ) and any(
         isinstance(block, dict) and block.get("type") == "tool_result"
-        for block in final_content
+        for block in answers
     )
-    calls = any(
-        isinstance(block, dict) and block.get("type") == "tool_use"
-        for block in previous_content
-    )
-    return len(messages) - 2 if answers and calls else None
 
 
 def _flatten_tool_exchange(

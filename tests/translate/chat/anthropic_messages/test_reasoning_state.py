@@ -939,6 +939,65 @@ def test_native_route_flattens_its_own_thinking_less_tool_turn(translator):
     ]
 
 
+def _tool_turn(tool_id: str, thinking: str | None = None) -> list[dict]:
+    """An assistant tool call, with thinking when given, and its answer."""
+    content: list[dict] = []
+    if thinking is not None:
+        content.append({"type": "thinking", "thinking": "", "signature": thinking})
+    content.append({"type": "tool_use", "id": tool_id, "name": "Read", "input": {}})
+    return [
+        {"role": "assistant", "content": content},
+        {
+            "role": "user",
+            "content": [
+                {"type": "tool_result", "tool_use_id": tool_id, "content": "ok"}
+            ],
+        },
+    ]
+
+
+@pytest.mark.parametrize("model", ["claude-opus-4-7", "claude-opus-5-5"])
+def test_earlier_turns_reach_the_target_alike_on_every_later_request(translator, model):
+    # Anthropic binds each thinking block to the history before it, so a turn
+    # must reach the target in the same form on every request after it first
+    # appears. Here Claude skipped thinking on its first call and thought on
+    # its second, the thinking signed over the first call as it was then sent.
+    native = Model(
+        model,
+        ModelApiType.ANTHROPIC_MESSAGES,
+        capability_overrides={"anthropic_wire_profile": "account-a"},
+    )
+    earlier = _first_request()
+    earlier["messages"] += _tool_turn("toolu_1")
+    later = copy.deepcopy(earlier)
+    later["messages"] += _tool_turn("toolu_2", thinking="sig-2")
+
+    sent_earlier = translator.translate_request(
+        ChatRequest(body=earlier), native, native
+    ).body["messages"]
+    sent_later = translator.translate_request(
+        ChatRequest(body=later), native, native
+    ).body["messages"]
+
+    assert sent_later[: len(sent_earlier)] == sent_earlier
+
+
+def test_adaptive_only_model_takes_its_thinking_less_tool_turn_as_made(translator):
+    native = Model(
+        "claude-opus-5-5",
+        ModelApiType.ANTHROPIC_MESSAGES,
+        capability_overrides={"anthropic_wire_profile": "account-a"},
+    )
+    body = _first_request()
+    body["messages"] += _tool_turn("toolu_1")
+
+    result = translator.translate_request(ChatRequest(body=body), native, native)
+
+    # Adaptive thinking may skip a turn, and the model accepts that turn back
+    # as it made it, so nothing is narrated.
+    assert result.body["messages"][1:] == body["messages"][1:]
+
+
 def test_disabled_thinking_is_not_sent_to_a_model_that_always_reasons(
     translator, anthropic_model
 ):

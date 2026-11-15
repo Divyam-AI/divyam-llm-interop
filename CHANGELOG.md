@@ -15,6 +15,18 @@
   translated ones, so adaptive thinking also becomes a budget for a model
   that takes only budgets when the route is served natively.
 
+### Earlier turns reach Claude unchanged across a session
+
+- A tool-calling turn without thinking the target can verify is now sent as
+  narration on every request, not only while it is the last turn of an
+  unfinished tool loop. Anthropic binds each thinking block to the history
+  before it, and a turn narrated once and then sent as a tool call made
+  later thinking fail with "bound to a different conversation", on native
+  routes as well as translated ones.
+- Claude Opus, Sonnet and Haiku 5.5 declare
+  `tool_loop_requires_reasoning_replay: false`: with adaptive thinking a turn
+  may have no thinking, and they accept it back as made, so their history is
+  sent without narration.
 ## 0.4.0
 
 ### Claude Code server-side safety review
