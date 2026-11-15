@@ -215,24 +215,14 @@ def test_translated_anthropic_route_keeps_hints_and_thinking(
     assert result.body["tools"] == body["tools"]
     assert result.body["cache_control"] == {"type": "ephemeral"}
     assert result.body["output_config"] == {"effort": "xhigh"}
-    # The client's own thinking does not verify on another account, so the
-    # unfinished tool exchange it belonged to is replayed as plain text.
-    assert result.body["messages"][1:] == [
-        {
-            "role": "assistant",
-            "content": [
-                {"type": "text", "text": "Reading it."},
-                {
-                    "type": "text",
-                    "text": '[Earlier, another assistant called the tool Read with input {"file_path":"a.py"}.]',
-                },
-            ],
-        },
-        {
-            "role": "user",
-            "content": [{"type": "text", "text": "[The tool Read returned: print(1)]"}],
-        },
+    # The client's own thinking does not verify on another account and is
+    # removed; adaptive thinking takes the tool call without it.
+    assert result.body["messages"][1]["content"] == [
+        {key: value for key, value in block.items() if value is not None}
+        for block in body["messages"][1]["content"]
+        if block["type"] not in {"thinking", "redacted_thinking"}
     ]
+    assert result.body["messages"][2] == body["messages"][2]
 
 
 def test_translated_anthropic_route_restates_adaptive_thinking_as_a_budget(
@@ -877,22 +867,33 @@ def test_tool_reference_to_an_undeclared_tool_is_invalid(
     assert error.value.path == "$.messages[2].content[0].content[0].tool_name"
 
 
-def _native_claude(api_type: ModelApiType = ModelApiType.ANTHROPIC_MESSAGES) -> Model:
+def _native_claude(
+    api_type: ModelApiType = ModelApiType.ANTHROPIC_MESSAGES,
+    name: str = "claude-opus-4-7",
+) -> Model:
     return Model(
-        "claude-opus-4-7",
+        name,
         api_type,
         capability_overrides={"anthropic_wire_profile": "account-a"},
     )
+
+
+# A model that takes thinking as a budget, under which an unfinished tool
+# exchange without verifiable thinking is rewritten as text.
+_BUDGET_CLAUDE = "claude-sonnet-4-5"
+_BUDGET = {"type": "enabled", "budget_tokens": 2048}
 
 
 def _tool_search_after_gemini_turn() -> dict:
     """A Gemini turn's ToolSearch call, answered, sent on to Claude.
 
     The turn's only reasoning is a Gemini envelope no Claude endpoint can
-    verify, so the unfinished exchange is rewritten as text.
+    verify, so under budget thinking the unfinished exchange is rewritten as
+    text.
     """
     body = _tool_search_request()
-    body["thinking"] = {"type": "adaptive", "display": "omitted"}
+    body["max_tokens"] = 4096
+    body["thinking"] = _BUDGET
     body["tools"].append(
         {"name": "Read", "description": "Read a file", "input_schema": _READ_SCHEMA}
     )
@@ -918,9 +919,9 @@ def test_rewritten_tool_search_exchange_loads_the_referenced_tools(
     body = _tool_search_after_gemini_turn()
     original = copy.deepcopy(body)
     target = (
-        _native_claude()
+        _native_claude(name=_BUDGET_CLAUDE)
         if native
-        else Model("claude-opus-4-7", ModelApiType.ANTHROPIC_MESSAGES)
+        else Model(_BUDGET_CLAUDE, ModelApiType.ANTHROPIC_MESSAGES)
     )
 
     result = translator.translate_request(
@@ -980,13 +981,14 @@ def _server_tool_search_request() -> dict:
 
 
 def test_rewritten_server_tool_search_names_and_loads_the_found_tools(translator):
-    # Claude searched, then called the tool it found without thinking first.
+    # Claude searched, then called the tool it found without thinking first,
+    # under budget thinking.
     body = _server_tool_search_request()
-    body["thinking"] = {"type": "adaptive"}
+    body["max_tokens"] = 4096
+    body["thinking"] = _BUDGET
+    claude = _native_claude(name=_BUDGET_CLAUDE)
 
-    result = translator.translate_request(
-        ChatRequest(body=body), _native_claude(), _native_claude()
-    )
+    result = translator.translate_request(ChatRequest(body=body), claude, claude)
 
     assert "defer_loading" not in result.body["tools"][1]
     assert {"type": "text", "text": _LOADED_NOTE} in result.body["messages"][1][

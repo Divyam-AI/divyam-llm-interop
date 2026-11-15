@@ -194,10 +194,11 @@ def test_claude_gemini_claude_gemini_loop_returns_gemini_its_signatures(translat
     to_claude = translator.translate_request(ChatRequest(body=second), _CLIENT, _CLAUDE)
     assert "gem-sig-1" not in json.dumps(to_claude.body)
     assert ENVELOPE_PREFIX not in json.dumps(to_claude.body)
-    # Gemini's unfinished tool call reaches Claude as text, keeping thinking on.
+    # Gemini's unfinished tool call reaches Claude as the call it was:
+    # adaptive thinking may skip a turn, so one without thinking is taken.
     assert to_claude.body["thinking"] == {"type": "adaptive"}
     assert to_claude.body["messages"][-1]["content"] == [
-        {"type": "text", "text": "[The tool Read returned: print(1)]"}
+        {"type": "tool_result", "tool_use_id": "call_1_Read", "content": "print(1)"}
     ]
 
     claude_answer = translator.translate_response(
@@ -484,7 +485,7 @@ def test_gpt_claude_gpt_loop_returns_gpt_its_encrypted_reasoning(translator):
     to_claude = translator.translate_request(ChatRequest(body=second), _CLIENT, _CLAUDE)
     assert "enc-1" not in json.dumps(to_claude.body)
     assert to_claude.body["messages"][-1]["content"] == [
-        {"type": "text", "text": "[The tool Read returned: print(1)]"}
+        {"type": "tool_result", "tool_use_id": "call_1", "content": "print(1)"}
     ]
 
     claude_answer = translator.translate_response(

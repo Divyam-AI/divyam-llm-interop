@@ -210,7 +210,7 @@ def test_claude_turn_replays_its_thinking_to_the_same_domain(translator):
     assert ENVELOPE_PREFIX not in json.dumps(result.body)
 
 
-def test_claude_turn_is_flattened_for_another_signing_domain(translator):
+def test_claude_turn_loses_only_its_thinking_for_another_signing_domain(translator):
     first = _first_request()
     answer = _serve(
         translator, first, _CLAUDE, _claude_tool_response("toolu_1", "a.py", "sig-1")
@@ -221,22 +221,15 @@ def test_claude_turn_is_flattened_for_another_signing_domain(translator):
         ChatRequest(body=following), _CLIENT, _OTHER_CLAUDE
     )
 
+    # The signature does not verify there, so the thinking goes; adaptive
+    # thinking takes the call without it.
     assert result.body["thinking"] == {"type": "adaptive"}
-    assert result.body["messages"][1:] == [
-        {
-            "role": "assistant",
-            "content": [
-                {
-                    "type": "text",
-                    "text": '[Earlier, another assistant called the tool Read with input {"file_path":"a.py"}.]',
-                }
-            ],
-        },
-        {
-            "role": "user",
-            "content": [{"type": "text", "text": "[The tool Read returned: print(1)]"}],
-        },
+    assert result.body["messages"][1]["content"] == [
+        block
+        for block in following["messages"][1]["content"]
+        if block["type"] != "thinking"
     ]
+    assert result.body["messages"][2] == following["messages"][2]
     assert ENVELOPE_PREFIX not in json.dumps(result.body)
     assert "sig-1" not in json.dumps(result.body)
 
@@ -278,23 +271,10 @@ def test_mixed_session_keeps_each_providers_reasoning(translator):
         "signature": "sig-1",
     }
     assert messages[1]["content"][1]["type"] == "tool_use"
-    # GPT's unfinished tool call is replayed as text so thinking stays on.
-    assert messages[3:] == [
-        {
-            "role": "assistant",
-            "content": [
-                {"type": "text", "text": "Now the next file."},
-                {
-                    "type": "text",
-                    "text": '[Earlier, another assistant called the tool Read with input {"file_path":"b.py"}.]',
-                },
-            ],
-        },
-        {
-            "role": "user",
-            "content": [{"type": "text", "text": "[The tool Read returned: print(2)]"}],
-        },
-    ]
+    # GPT's unfinished tool call reaches Claude as the call it was: adaptive
+    # thinking may skip a turn, so a turn without thinking is taken as made.
+    assert messages[3:] == third["messages"][3:]
+    assert messages[3]["content"][-1]["type"] == "tool_use"
     assert ENVELOPE_PREFIX not in json.dumps(result.body)
 
 
@@ -885,24 +865,62 @@ def test_budget_thinking_flattens_an_unsigned_tool_loop(translator):
     ]
 
 
-def test_adaptive_thinking_also_flattens_an_unsigned_tool_loop(translator):
+def test_adaptive_thinking_keeps_an_unsigned_tool_loop(translator):
     result = translator.translate_request(
         ChatRequest(body=_completions_tool_loop()),
         _COMPLETIONS_CLIENT,
         Model("claude-opus-4-7", ModelApiType.ANTHROPIC_MESSAGES),
     )
 
+    # Adaptive thinking may skip a turn, so the call is sent as a call.
     assert result.body["thinking"] == {"type": "adaptive"}
-    assert result.body["messages"][1]["content"][0]["type"] == "text"
+    assert result.body["messages"][1]["content"][0]["type"] == "tool_use"
 
 
-def test_native_route_flattens_its_own_thinking_less_tool_turn(translator):
+def test_budget_thinking_flattens_earlier_exchanges_alike_on_every_request(
+    translator,
+):
+    # The same rule as on a native route: a call flattened while it was the
+    # last must stay flattened once another follows it.
+    earlier = _completions_tool_loop()
+    later = copy.deepcopy(earlier)
+    later["messages"] += [
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "call_2",
+                    "type": "function",
+                    "function": {"name": "Read", "arguments": '{"file_path":"b.py"}'},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_2", "content": "print(2)"},
+    ]
+    target = Model("claude-sonnet-4-5", ModelApiType.ANTHROPIC_MESSAGES)
+
+    sent_earlier = translator.translate_request(
+        ChatRequest(body=earlier), _COMPLETIONS_CLIENT, target
+    ).body["messages"]
+    sent_later = translator.translate_request(
+        ChatRequest(body=later), _COMPLETIONS_CLIENT, target
+    ).body["messages"]
+
+    assert sent_later[: len(sent_earlier)] == sent_earlier
+    assert sent_later[1]["content"][0]["type"] == "text"
+
+
+def test_native_route_flattens_its_own_thinking_less_tool_turn_under_a_budget(
+    translator,
+):
     native = Model(
-        "claude-opus-4-7",
+        "claude-sonnet-4-5",
         ModelApiType.ANTHROPIC_MESSAGES,
         capability_overrides={"anthropic_wire_profile": "account-a"},
     )
-    body = _first_request()
+    body = {**_first_request(), "thinking": {"type": "enabled", "budget_tokens": 2048}}
+    body.pop("output_config")
     body["messages"] += [
         {
             "role": "assistant",
@@ -920,8 +938,8 @@ def test_native_route_flattens_its_own_thinking_less_tool_turn(translator):
 
     result = translator.translate_request(ChatRequest(body=body), native, native)
 
-    # Claude skipped thinking on that turn; with thinking on it is replayed as
-    # narration, since nothing tells it apart from another provider's call.
+    # Claude skipped thinking on that turn; under budget thinking it is replayed
+    # as narration, since nothing tells it apart from another provider's call.
     assert result.body["messages"][1:] == [
         {
             "role": "assistant",
@@ -956,8 +974,20 @@ def _tool_turn(tool_id: str, thinking: str | None = None) -> list[dict]:
     ]
 
 
-@pytest.mark.parametrize("model", ["claude-opus-4-7", "claude-opus-5-5"])
-def test_earlier_turns_reach_the_target_alike_on_every_later_request(translator, model):
+_BUDGET = {"type": "enabled", "budget_tokens": 2048}
+
+
+@pytest.mark.parametrize(
+    "model, thinking",
+    [
+        ("claude-sonnet-4-5", _BUDGET),
+        ("claude-opus-4-7", {"type": "adaptive"}),
+        ("claude-opus-5-5", {"type": "adaptive"}),
+    ],
+)
+def test_earlier_turns_reach_the_target_alike_on_every_later_request(
+    translator, model, thinking
+):
     # Anthropic binds each thinking block to the history before it, so a turn
     # must reach the target in the same form on every request after it first
     # appears. Here Claude skipped thinking on its first call and thought on
@@ -967,7 +997,8 @@ def test_earlier_turns_reach_the_target_alike_on_every_later_request(translator,
         ModelApiType.ANTHROPIC_MESSAGES,
         capability_overrides={"anthropic_wire_profile": "account-a"},
     )
-    earlier = _first_request()
+    earlier = {**_first_request(), "thinking": thinking}
+    earlier.pop("output_config")
     earlier["messages"] += _tool_turn("toolu_1")
     later = copy.deepcopy(earlier)
     later["messages"] += _tool_turn("toolu_2", thinking="sig-2")
@@ -982,9 +1013,10 @@ def test_earlier_turns_reach_the_target_alike_on_every_later_request(translator,
     assert sent_later[: len(sent_earlier)] == sent_earlier
 
 
-def test_adaptive_only_model_takes_its_thinking_less_tool_turn_as_made(translator):
+@pytest.mark.parametrize("model", ["claude-opus-4-7", "claude-opus-5-5"])
+def test_adaptive_thinking_takes_a_thinking_less_tool_turn_as_made(translator, model):
     native = Model(
-        "claude-opus-5-5",
+        model,
         ModelApiType.ANTHROPIC_MESSAGES,
         capability_overrides={"anthropic_wire_profile": "account-a"},
     )
@@ -996,6 +1028,37 @@ def test_adaptive_only_model_takes_its_thinking_less_tool_turn_as_made(translato
     # Adaptive thinking may skip a turn, and the model accepts that turn back
     # as it made it, so nothing is narrated.
     assert result.body["messages"][1:] == body["messages"][1:]
+
+
+def test_narration_keeps_the_providers_own_tool_calls(translator):
+    native = Model(
+        "claude-sonnet-4-5",
+        ModelApiType.ANTHROPIC_MESSAGES,
+        capability_overrides={"anthropic_wire_profile": "account-a"},
+    )
+    search = [
+        {
+            "type": "server_tool_use",
+            "id": "srvtoolu_1",
+            "name": "web_search",
+            "input": {"query": "python release"},
+        },
+        {
+            "type": "web_search_tool_result",
+            "tool_use_id": "srvtoolu_1",
+            "content": [{"type": "web_search_result", "url": "https://x.test"}],
+        },
+    ]
+    body = {**_first_request(), "thinking": _BUDGET}
+    body.pop("output_config")
+    body["messages"] += _tool_turn("toolu_1")
+    body["messages"][1]["content"][:0] = search
+
+    result = translator.translate_request(ChatRequest(body=body), native, native)
+
+    turn = result.body["messages"][1]["content"]
+    assert turn[:2] == search
+    assert turn[2]["type"] == "text"
 
 
 def test_disabled_thinking_is_not_sent_to_a_model_that_always_reasons(
