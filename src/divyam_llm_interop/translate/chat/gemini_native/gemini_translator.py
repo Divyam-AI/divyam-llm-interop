@@ -55,6 +55,9 @@ from divyam_llm_interop.translate.chat.types import (
     ChatResponseStreaming,
     Model,
 )
+from divyam_llm_interop.translate.chat.unified.provider_finish_reason import (
+    gemini_block_reason,
+)
 from divyam_llm_interop.translate.chat.unified.unified_hosted_tools import (
     HOSTED_TOOL_EVENTS_FIELD,
     HOSTED_TOOLS_FIELD,
@@ -513,6 +516,16 @@ class GeminiTranslator(Translator):
                 choice_entry["gemini_finish_message"] = finish_message
             choices.append(choice_entry)
 
+        if gemini_block_reason(body):
+            # The prompt was blocked before any candidate: one empty, filtered choice.
+            choices.append(
+                {
+                    "index": 0,
+                    "message": {"role": "assistant"},
+                    "finish_reason": "content_filter",
+                }
+            )
+
         usage = self._openai_usage_from_gemini_body(body)
 
         completion_body = {
@@ -832,6 +845,10 @@ class GeminiTranslator(Translator):
             if finish_message is not None:
                 choice_entry["gemini_finish_message"] = finish_message
             choices.append(choice_entry)
+
+        if gemini_block_reason(body):
+            # The prompt was blocked before any candidate: one empty, filtered choice.
+            choices.append({"index": 0, "delta": {}, "finish_reason": "content_filter"})
 
         usage = GeminiTranslator._openai_usage_from_gemini_body(body)
         chunk_dict: dict[str, Any] = {

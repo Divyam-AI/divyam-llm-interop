@@ -17,6 +17,14 @@
   `ChatResponse.to_dict()` leaves it out. A stream's dict is complete once
   the stream has ended.
 - Other reasons keep their nearest wire value. No new wire values.
+- A Responses stream that ends with `response.incomplete` now closes with
+  the target's finish value: `length` or `content_filter` on Chat
+  Completions, `max_tokens` or `refusal` on Anthropic Messages. It sent none
+  before, and Anthropic streams failed with an error.
+- A Gemini prompt blocked before any candidate now reads as the target's
+  filter value, with one empty choice. It read as no choices, or `completed`
+  on Responses, before. Its block reason is in `provider_finish_reasons`. A
+  Gemini client still gets the block as Gemini sent it.
 
 ## 0.4.1
 

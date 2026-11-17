@@ -317,8 +317,7 @@ The dict is also filled when source and target share an API and nothing is
 translated. It is empty when the provider sent no finish reason.
 
 Treat an empty dict as unknown, not as a normal stop. A Gemini prompt blocked
-before any candidate (`promptFeedback.blockReason`) has no finish reason. On a
-Responses route its wire body still says `completed`.
+before any candidate records its `promptFeedback.blockReason` under index 0.
 
 What the reason string holds, by provider API:
 
@@ -326,7 +325,7 @@ What the reason string holds, by provider API:
 |---|---|
 | Chat Completions | `finish_reason`, such as `stop` |
 | Anthropic Messages | `stop_reason`, such as `model_context_window_exceeded` |
-| Gemini | `finishReason`, such as `PROHIBITED_CONTENT` |
+| Gemini | `finishReason`, or `promptFeedback.blockReason` when the prompt was blocked before any candidate |
 | Responses | `incomplete_details.reason` when incomplete, else the status, such as `completed` or `cancelled` |
 
 How Gemini finish reasons read on each target API:
@@ -337,6 +336,7 @@ How Gemini finish reasons read on each target API:
 | `MAX_TOKENS` | `length` | `max_tokens` | `incomplete`, `max_output_tokens` |
 | `SAFETY`, `PROHIBITED_CONTENT`, `BLOCKLIST`, `SPII`, `IMAGE_SAFETY`, `RECITATION` | `content_filter` | `refusal` | `incomplete`, `content_filter` |
 | `MALFORMED_FUNCTION_CALL`, `UNEXPECTED_TOOL_CALL`, any other | `stop` | `end_turn` | `completed` |
+| Prompt blocked before any candidate (`promptFeedback.blockReason`) | `content_filter` | `refusal` | `incomplete`, `content_filter` |
 
 Other provider reasons keep their nearest wire value too. Anthropic
 `model_context_window_exceeded` reads as `length`. Responses `cancelled`

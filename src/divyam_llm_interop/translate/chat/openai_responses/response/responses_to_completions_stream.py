@@ -35,7 +35,8 @@ class ResponsesToCompletionsStreamConverter:
     - response.content_part.added / response.content_part.done
     - response.output_text.delta / response.output_text.done
     - response.function_call_arguments.delta / response.function_call_arguments.done
-    - response.completed / response.failed / response.cancelled
+    - response.completed / response.incomplete
+    - response.failed / response.cancelled
     """
 
     def __init__(self, model_name: str):
@@ -201,6 +202,14 @@ class ResponsesToCompletionsStreamConverter:
             # Terminal events — emit final chunk and stop
             elif event_type in ("response.completed", "response.done"):
                 response = event.get("response", {})
+                yield self._build_final_chunk(response)
+                break
+
+            elif event_type == "response.incomplete":
+                # A stream cut at max_output_tokens, or stopped by a filter.
+                response = dict(event.get("response") or {})
+                if not response.get("status"):
+                    response["status"] = "incomplete"
                 yield self._build_final_chunk(response)
                 break
 

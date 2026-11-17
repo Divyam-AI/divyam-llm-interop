@@ -969,3 +969,243 @@ def test_a_body_key_named_provider_finish_reason_is_not_lost(translator):
 
     assert unified.body.choices[0].unknowns["provider_finish_reason"] == "from-a-proxy"
     assert result.provider_finish_reasons[0].reason == "stop"
+
+
+# --- Responses streams that end with response.incomplete -------------------
+
+_INCOMPLETE_CASES = [
+    # (incomplete reason, Chat, Anthropic, Gemini)
+    ("max_output_tokens", "length", "max_tokens", "MAX_TOKENS"),
+    ("content_filter", "content_filter", "refusal", "SAFETY"),
+]
+
+
+def _gemini_finishes(events: list[dict[str, Any]]) -> list[str]:
+    return [
+        candidate["finishReason"]
+        for event in events
+        for candidate in event.get("candidates", [])
+        if candidate.get("finishReason")
+    ]
+
+
+@pytest.mark.parametrize(("reason", "chat", "anthropic", "gemini"), _INCOMPLETE_CASES)
+async def test_response_incomplete_closes_a_chat_stream(
+    translator, reason, chat, anthropic, gemini
+):
+    translated = translator.translate_response_streaming(
+        ChatResponseStreaming(
+            _events(_responses_stream("response.incomplete", "incomplete", reason))
+        ),
+        _RESPONSES,
+        _COMPLETIONS,
+    )
+    events = await _drain(translated)
+
+    assert _wire_stream(_COMPLETIONS, events)[0] == chat
+    assert events[-1]["usage"]["total_tokens"] == 4
+    assert translated.provider_finish_reasons == {
+        0: ProviderFinishReason(ModelApiType.RESPONSES, reason)
+    }
+
+
+@pytest.mark.parametrize(("reason", "chat", "anthropic", "gemini"), _INCOMPLETE_CASES)
+async def test_response_incomplete_closes_an_anthropic_stream(
+    translator, reason, chat, anthropic, gemini
+):
+    translated = translator.translate_response_streaming(
+        ChatResponseStreaming(
+            _events(_responses_stream("response.incomplete", "incomplete", reason))
+        ),
+        _RESPONSES,
+        _ANTHROPIC,
+    )
+    events = await _drain(translated)
+
+    assert _wire_stream(_ANTHROPIC, events)[0] == anthropic
+    assert events[-1]["type"] == "message_stop"
+    assert translated.provider_finish_reasons == {
+        0: ProviderFinishReason(ModelApiType.RESPONSES, reason)
+    }
+
+
+@pytest.mark.parametrize(("reason", "chat", "anthropic", "gemini"), _INCOMPLETE_CASES)
+async def test_response_incomplete_closes_a_gemini_stream(
+    translator, reason, chat, anthropic, gemini
+):
+    translated = translator.translate_response_streaming(
+        ChatResponseStreaming(
+            _events(_responses_stream("response.incomplete", "incomplete", reason))
+        ),
+        _RESPONSES,
+        _GEMINI,
+    )
+    events = await _drain(translated)
+
+    assert _gemini_finishes(events) == [gemini]
+    assert translated.provider_finish_reasons == {
+        0: ProviderFinishReason(ModelApiType.RESPONSES, reason)
+    }
+
+
+async def test_response_incomplete_without_a_status_reads_as_incomplete(translator):
+    events = _responses_stream("response.incomplete", "incomplete")
+    del events[-1]["response"]["status"]
+    translated = translator.translate_response_streaming(
+        ChatResponseStreaming(_events(events)), _RESPONSES, _COMPLETIONS
+    )
+    chunks = await _drain(translated)
+
+    assert _wire_stream(_COMPLETIONS, chunks)[0] == "length"
+
+
+# --- Gemini prompts blocked before any candidate ---------------------------
+
+
+class _BlockedReason(str, Enum):
+    """Stands in for the google-genai BlockedReason enum."""
+
+    PROHIBITED_CONTENT = "PROHIBITED_CONTENT"
+    OTHER = "OTHER"
+
+
+def _blocked_camel(reason: str) -> dict[str, Any]:
+    return {
+        "responseId": "g1",
+        "modelVersion": "gemini-2.5-flash",
+        "promptFeedback": {"blockReason": reason},
+        "usageMetadata": {"promptTokenCount": 3, "totalTokenCount": 3},
+    }
+
+
+def _blocked_snake(reason: _BlockedReason) -> dict[str, Any]:
+    return {
+        "response_id": "g1",
+        "model_version": "gemini-2.5-flash",
+        "prompt_feedback": {"block_reason": reason},
+        "usage_metadata": {"prompt_token_count": 3, "total_token_count": 3},
+    }
+
+
+_BLOCKED_BODIES = [
+    ("camel-prohibited", _blocked_camel("PROHIBITED_CONTENT"), "PROHIBITED_CONTENT"),
+    ("camel-other", _blocked_camel("OTHER"), "OTHER"),
+    (
+        "snake-enum-prohibited",
+        _blocked_snake(_BlockedReason.PROHIBITED_CONTENT),
+        "PROHIBITED_CONTENT",
+    ),
+    ("snake-enum-other", _blocked_snake(_BlockedReason.OTHER), "OTHER"),
+]
+_BLOCKED_IDS = [case[0] for case in _BLOCKED_BODIES]
+_BLOCKED_PARAMS = [case[1:] for case in _BLOCKED_BODIES]
+
+
+@pytest.mark.parametrize("target", _TARGETS, ids=_TARGET_IDS)
+@pytest.mark.parametrize(("body", "reason"), _BLOCKED_PARAMS, ids=_BLOCKED_IDS)
+def test_blocked_prompt_reads_as_filtered_whole(translator, body, reason, target):
+    result = translator.translate_response(ChatResponse(body=body), _GEMINI, target)
+
+    assert _wire_whole(target, result.body) == _FILTER_WIRE[target.api_type]
+    assert result.provider_finish_reasons == {
+        0: ProviderFinishReason(ModelApiType.GEMINI, reason)
+    }
+    assert "provider_finish_reason" not in json.dumps(result.body)
+
+
+@pytest.mark.parametrize("target", _TARGETS, ids=_TARGET_IDS)
+@pytest.mark.parametrize(("body", "reason"), _BLOCKED_PARAMS, ids=_BLOCKED_IDS)
+async def test_blocked_prompt_reads_as_filtered_streamed(
+    translator, body, reason, target
+):
+    translated = translator.translate_response_streaming(
+        ChatResponseStreaming(_events([body])), _GEMINI, target
+    )
+    events = await _drain(translated)
+
+    assert _wire_stream(target, events) == _FILTER_WIRE[target.api_type]
+    assert translated.provider_finish_reasons == {
+        0: ProviderFinishReason(ModelApiType.GEMINI, reason)
+    }
+
+
+def test_blocked_prompt_whole_answer_has_one_empty_choice(translator):
+    result = translator.translate_response(
+        ChatResponse(body=_blocked_camel("OTHER")), _GEMINI, _COMPLETIONS
+    )
+
+    assert result.body["choices"] == [
+        {
+            "index": 0,
+            "message": {"role": "assistant"},
+            "finish_reason": "content_filter",
+        }
+    ]
+
+
+def test_blocked_prompt_reaches_a_gemini_client_as_sent(translator):
+    sent = _blocked_camel("PROHIBITED_CONTENT")
+
+    result = translator.translate_response(ChatResponse(body=sent), _GEMINI, _GEMINI)
+
+    assert result.body == sent
+    assert "candidates" not in result.body
+    assert result.provider_finish_reasons == {
+        0: ProviderFinishReason(ModelApiType.GEMINI, "PROHIBITED_CONTENT")
+    }
+
+
+async def test_blocked_prompt_chunk_reaches_a_gemini_client_as_sent(translator):
+    sent = _blocked_camel("PROHIBITED_CONTENT")
+
+    translated = translator.translate_response_streaming(
+        ChatResponseStreaming(_events([sent])), _GEMINI, _GEMINI
+    )
+    events = await _drain(translated)
+
+    assert events == [sent]
+    assert translated.provider_finish_reasons == {
+        0: ProviderFinishReason(ModelApiType.GEMINI, "PROHIBITED_CONTENT")
+    }
+
+
+def test_prompt_feedback_without_a_block_reason_changes_nothing(translator):
+    body = _gemini_body("STOP", with_parts=True)
+    body["promptFeedback"] = {"safetyRatings": []}
+
+    result = translator.translate_response(
+        ChatResponse(body=body), _GEMINI, _COMPLETIONS
+    )
+
+    assert _wire_whole(_COMPLETIONS, result.body) == ("stop", None)
+    assert len(result.body["choices"]) == 1
+    assert result.provider_finish_reasons == {
+        0: ProviderFinishReason(ModelApiType.GEMINI, "STOP")
+    }
+
+
+async def test_prompt_feedback_without_a_block_reason_changes_nothing_streamed(
+    translator,
+):
+    chunk = _gemini_body("STOP", with_parts=True)
+    chunk["promptFeedback"] = {"safetyRatings": []}
+
+    translated = translator.translate_response_streaming(
+        ChatResponseStreaming(_events([chunk])), _GEMINI, _COMPLETIONS
+    )
+    events = await _drain(translated)
+
+    assert _wire_stream(_COMPLETIONS, events) == ("stop", None)
+    assert all(len(event["choices"]) == 1 for event in events)
+
+
+def test_a_block_reason_next_to_candidates_is_ignored(translator):
+    body = _gemini_body("STOP", with_parts=True)
+    body["promptFeedback"] = {"blockReason": "OTHER"}
+
+    result = translator.translate_response(
+        ChatResponse(body=body), _GEMINI, _COMPLETIONS
+    )
+
+    assert _wire_whole(_COMPLETIONS, result.body) == ("stop", None)
+    assert result.provider_finish_reasons[0].reason == "STOP"

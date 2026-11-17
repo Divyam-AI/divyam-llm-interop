@@ -14,7 +14,9 @@ It is never written into a wire body.
 Reason strings by API:
 - COMPLETIONS: the finish_reason, such as "stop" or "content_filter".
 - ANTHROPIC_MESSAGES: the stop_reason, such as "pause_turn".
-- GEMINI: the finishReason, such as "RECITATION".
+- GEMINI: the finishReason, such as "RECITATION". When Gemini blocks the
+  prompt before any candidate, the promptFeedback.blockReason, recorded
+  under index 0.
 - RESPONSES: incomplete_details.reason when the status is incomplete,
   such as "max_output_tokens". Otherwise the status, such as
   "completed", "failed" or "cancelled".
@@ -73,8 +75,25 @@ def _from_choices(
     return found
 
 
+def gemini_block_reason(body: dict[str, Any]) -> str | None:
+    """Return why Gemini blocked the prompt before any candidate, or None.
+
+    Applies only when the body has no candidates. Reads the camelCase or
+    snake_case form, as a string or an SDK enum.
+    """
+    if body.get("candidates"):
+        return None
+    feedback = body.get("promptFeedback", body.get("prompt_feedback"))
+    if not isinstance(feedback, dict):
+        return None
+    return _reason_text(feedback.get("blockReason", feedback.get("block_reason")))
+
+
 def _from_candidates(body: dict[str, Any]) -> dict[int, ProviderFinishReason]:
     found: dict[int, ProviderFinishReason] = {}
+    blocked = gemini_block_reason(body)
+    if blocked:
+        return {0: ProviderFinishReason(ModelApiType.GEMINI, blocked)}
     candidates = body.get("candidates")
     for position, candidate in enumerate(
         candidates if isinstance(candidates, list) else []
