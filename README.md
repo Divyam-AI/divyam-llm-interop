@@ -277,6 +277,59 @@ target = Model(name="gpt-4.1", api_type=ModelApiType.COMPLETIONS)
 translated = translator.translate_response(chat_response, source, target)
 ```
 
+### Read the provider's finish reason
+
+Translation maps each finish reason to the target API's nearest value.
+Several provider reasons share one target value. The original reason stays
+on the translated result, so a caller can still tell them apart.
+
+`ChatResponse.provider_finish_reasons` and
+`ChatResponseStreaming.provider_finish_reasons` map a choice index to a
+`ProviderFinishReason(api, reason)`. The reason is exactly what the provider
+sent. It is never written into the wire body or a stream event.
+
+```python
+translated = translator.translate_response(chat_response, source, target)
+original = translated.provider_finish_reasons.get(0)
+if original and original.reason == "RECITATION":
+    ...  # the provider blocked the answer; try another model
+```
+
+A stream fills its dict as events are read. The dict is complete once the
+stream has ended, and may be partial before that.
+
+```python
+stream = translator.translate_response_streaming(chat_response, source, target)
+async for event in stream.stream:
+    ...
+original = stream.provider_finish_reasons.get(0)  # complete here
+```
+
+The dict is also filled when source and target share an API and nothing is
+translated. It is empty when the provider sent no finish reason.
+
+What the reason string holds, by provider API:
+
+| Provider API | Reason |
+|---|---|
+| Chat Completions | `finish_reason`, such as `stop` |
+| Anthropic Messages | `stop_reason`, such as `model_context_window_exceeded` |
+| Gemini | `finishReason`, such as `PROHIBITED_CONTENT` |
+| Responses | `incomplete_details.reason` when incomplete, else the status, such as `completed` or `cancelled` |
+
+How Gemini finish reasons read on each target API:
+
+| Gemini `finishReason` | Chat Completions | Anthropic Messages | Responses |
+|---|---|---|---|
+| `STOP` | `stop` (`tool_calls` after a function call) | `end_turn` (`tool_use` after a function call) | `completed` |
+| `MAX_TOKENS` | `length` | `max_tokens` | `incomplete`, `max_output_tokens` |
+| `SAFETY`, `PROHIBITED_CONTENT`, `BLOCKLIST`, `SPII`, `IMAGE_SAFETY`, `RECITATION` | `content_filter` | `refusal` | `incomplete`, `content_filter` |
+| `MALFORMED_FUNCTION_CALL`, `UNEXPECTED_TOOL_CALL`, any other | `stop` | `end_turn` | `completed` |
+
+Other provider reasons keep their nearest wire value too. Anthropic
+`model_context_window_exceeded` reads as `length`. Responses `cancelled`
+reads as `stop` in a Chat Completions stream.
+
 ## Model Name Resolution and Fallback
 
 When a request model name is resolved against the catalog, matching happens in

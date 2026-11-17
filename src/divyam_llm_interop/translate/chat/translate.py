@@ -83,6 +83,11 @@ from divyam_llm_interop.translate.chat.types import (
     ChatResponseStreaming,
     Model,
 )
+from divyam_llm_interop.translate.chat.unified.provider_finish_reason import (
+    ProviderFinishReason,
+    finish_reasons_from_response,
+    record_finish_reasons,
+)
 from divyam_llm_interop.translate.chat.unified.unified_response import (
     UnifiedChatCompletionsStreamChunk,
 )
@@ -146,6 +151,21 @@ async def _anthropic_only_refused(
     try:
         async for chunk in stream:
             _refuse_anthropic_only(chunk.unknowns, client)
+            yield chunk
+    finally:
+        await translation_utils.close_async_stream(stream)
+
+
+async def _with_provider_finish_reasons(
+    stream: AsyncGenerator[UnifiedChatCompletionsStreamChunk, None],
+    reasons: dict[int, ProviderFinishReason],
+) -> AsyncGenerator[UnifiedChatCompletionsStreamChunk, None]:
+    """Set the provider's finish reason on each choice's closing chunk."""
+    try:
+        async for chunk in stream:
+            for choice in chunk.choices:
+                if choice.finish_reason is not None:
+                    choice.provider_finish_reason = reasons.get(choice.index)
             yield chunk
     finally:
         await translation_utils.close_async_stream(stream)
@@ -454,6 +474,7 @@ class ChatTranslator:
         source_translator = self._find_translator_for_model(model=source)
         target_translator = self._find_translator_for_model(model=target)
 
+        reasons = finish_reasons_from_response(source.api_type, chat_response.body)
         if (
             source_translator == target_translator
             and source_translator.are_responses_compatible(source, target)
@@ -470,6 +491,8 @@ class ChatTranslator:
                 )
         else:
             unified = source_translator.response_to_unified(chat_response, source)
+            for choice in unified.body.choices:
+                choice.provider_finish_reason = reasons.get(choice.index)
             if target.api_type != ModelApiType.ANTHROPIC_MESSAGES:
                 _refuse_anthropic_only(unified.body.unknowns, target)
             unified.body.unknowns[RESPONSE_DOMAIN_KEY] = self._reasoning_domain(source)
@@ -479,6 +502,8 @@ class ChatTranslator:
                 body=request.response_adapter.restore_response(translated.body),
                 headers=translated.headers,
             )
+        # Set in place: a passed-through answer is returned as the same object.
+        translated.provider_finish_reasons = reasons
         return translated
 
     def translate_response_streaming(
@@ -499,6 +524,12 @@ class ChatTranslator:
         source_translator = self._find_translator_for_model(model=source)
         target_translator = self._find_translator_for_model(model=target)
 
+        # Filled as the source stream is read, so complete once it has ended.
+        reasons: dict[int, ProviderFinishReason] = {}
+        # Set in place: a passed-through stream is returned as the same object.
+        chat_response.stream = record_finish_reasons(
+            source.api_type, chat_response.stream, reasons
+        )
         if (
             source_translator == target_translator
             and source_translator.are_streaming_responses_compatible(source, target)
@@ -515,6 +546,7 @@ class ChatTranslator:
                 chat_response, source
             )
             unified.reasoning_domain = self._reasoning_domain(source)
+            unified.stream = _with_provider_finish_reasons(unified.stream, reasons)
             if (
                 source.api_type == ModelApiType.ANTHROPIC_MESSAGES
                 and target.api_type != ModelApiType.ANTHROPIC_MESSAGES
@@ -526,6 +558,7 @@ class ChatTranslator:
                 stream=request.response_adapter.restore_stream(translated.stream),
                 headers=translated.headers,
             )
+        translated.provider_finish_reasons = reasons
         return translated
 
     def _refuse_unaccepted_tool_choice(

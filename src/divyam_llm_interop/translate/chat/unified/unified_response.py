@@ -5,6 +5,9 @@ from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field, fields
 from typing import Any, Optional
 
+from divyam_llm_interop.translate.chat.unified.provider_finish_reason import (
+    ProviderFinishReason,
+)
 from divyam_llm_interop.translate.chat.unified.unified_hosted_tools import (
     HOSTED_TOOL_EVENTS_FIELD,
     HOSTED_TOOLS_FIELD,
@@ -256,6 +259,10 @@ class UnifiedChoice:
     )
     logprobs: Optional[UnifiedLogProbs] = None
 
+    # The provider's own finish reason; see provider_finish_reason. Internal:
+    # set by the translator, never read from or written to a wire body.
+    provider_finish_reason: Optional[ProviderFinishReason] = None
+
     # Unknown fields
     unknowns: dict[str, Any] = field(default_factory=dict)
 
@@ -469,6 +476,10 @@ class UnifiedStreamChoice:
     delta: UnifiedChoiceDelta
     finish_reason: Optional[str] = None
     logprobs: Optional[UnifiedLogProbs] = None
+
+    # The provider's own finish reason, on the choice's last chunk; see
+    # provider_finish_reason. Internal, like UnifiedChoice's.
+    provider_finish_reason: Optional[ProviderFinishReason] = None
 
     # Unknown fields
     unknowns: dict[str, Any] = field(default_factory=dict)

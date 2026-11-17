@@ -88,6 +88,12 @@ _MAX_PART_ORDER_LENGTH = 1_000_000
 # Ends a streamed part order that outgrew it; no replay accepts it.
 _OMITTED_PLACEHOLDER = "omitted"
 
+# Gemini finish reasons that mean a filter blocked the answer. Each reads as
+# content_filter, as SAFETY always has.
+_GEMINI_FILTER_FINISH_REASONS = frozenset(
+    {"SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII", "IMAGE_SAFETY", "RECITATION"}
+)
+
 
 # Content part types holding text, as Chat Completions and Responses name them.
 _TEXT_PART_TYPES = ("text", "input_text", "output_text")
@@ -1778,7 +1784,7 @@ class GeminiTranslator(Translator):
             return "stop"
         if finish_reason == "MAX_TOKENS":
             return "length"
-        if finish_reason == "SAFETY":
+        if finish_reason in _GEMINI_FILTER_FINISH_REASONS:
             return "content_filter"
         return "stop"
 
