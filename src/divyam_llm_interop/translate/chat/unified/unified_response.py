@@ -270,7 +270,13 @@ class UnifiedChoice:
     def from_dict(cls, data: dict[str, Any]) -> "UnifiedChoice":
         """Create from dictionary."""
 
-        declared_fields = {f.name for f in fields(cls) if f.name != "unknowns"}
+        # provider_finish_reason is set by the translator, never read from a
+        # body, so a body key of that name stays in unknowns.
+        declared_fields = {
+            f.name
+            for f in fields(cls)
+            if f.name not in ("unknowns", "provider_finish_reason")
+        }
         unknowns = {k: v for k, v in data.items() if k not in declared_fields}
 
         message = UnifiedMessage.from_dict(data["message"])
@@ -487,7 +493,13 @@ class UnifiedStreamChoice:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "UnifiedStreamChoice":
         """Create from dictionary."""
-        declared_fields = {f.name for f in fields(cls) if f.name != "unknowns"}
+        # provider_finish_reason is set by the translator, never read from a
+        # body, so a body key of that name stays in unknowns.
+        declared_fields = {
+            f.name
+            for f in fields(cls)
+            if f.name not in ("unknowns", "provider_finish_reason")
+        }
         unknowns = {k: v for k, v in data.items() if k not in declared_fields}
 
         delta = UnifiedChoiceDelta.from_dict(data["delta"])

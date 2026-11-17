@@ -4,7 +4,7 @@
 import logging
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, cast
 
 from divyam_llm_interop.translate.chat.anthropic_messages import (
     AnthropicMessagesTranslator,
@@ -86,7 +86,7 @@ from divyam_llm_interop.translate.chat.types import (
 from divyam_llm_interop.translate.chat.unified.provider_finish_reason import (
     ProviderFinishReason,
     finish_reasons_from_response,
-    record_finish_reasons,
+    finish_reasons_from_stream_event,
 )
 from divyam_llm_interop.translate.chat.unified.unified_response import (
     UnifiedChatCompletionsStreamChunk,
@@ -154,6 +154,36 @@ async def _anthropic_only_refused(
             yield chunk
     finally:
         await translation_utils.close_async_stream(stream)
+
+
+class _RecordedStream:
+    """A source stream's events, unchanged, with finish reasons recorded.
+
+    Each reason is stored before its event is returned. Closing this
+    stream closes the source, even if no event was read.
+    """
+
+    def __init__(
+        self,
+        api: ModelApiType,
+        stream: AsyncGenerator[dict[str, Any], None],
+        reasons: dict[int, ProviderFinishReason],
+    ) -> None:
+        self._api = api
+        self._stream = stream
+        self._reasons = reasons
+
+    def __aiter__(self) -> "_RecordedStream":
+        return self
+
+    async def __anext__(self) -> dict[str, Any]:
+        event = await self._stream.__anext__()
+        if isinstance(event, dict):
+            self._reasons.update(finish_reasons_from_stream_event(self._api, event))
+        return event
+
+    async def aclose(self) -> None:
+        await translation_utils.close_async_stream(self._stream)
 
 
 async def _with_provider_finish_reasons(
@@ -526,15 +556,17 @@ class ChatTranslator:
 
         # Filled as the source stream is read, so complete once it has ended.
         reasons: dict[int, ProviderFinishReason] = {}
-        # Set in place: a passed-through stream is returned as the same object.
-        chat_response.stream = record_finish_reasons(
-            source.api_type, chat_response.stream, reasons
+        recorded = cast(
+            AsyncGenerator[dict[str, Any], None],
+            _RecordedStream(source.api_type, chat_response.stream, reasons),
         )
         if (
             source_translator == target_translator
             and source_translator.are_streaming_responses_compatible(source, target)
         ):
             # Short circuit the responses since the models are compatible.
+            # Set in place: a passed-through stream is the same object.
+            chat_response.stream = recorded
             translated = chat_response
             if source.api_type == ModelApiType.RESPONSES:
                 translated = replace(
@@ -543,7 +575,7 @@ class ChatTranslator:
                 )
         else:
             unified = source_translator.stream_response_to_unified(
-                chat_response, source
+                replace(chat_response, stream=recorded), source
             )
             unified.reasoning_domain = self._reasoning_domain(source)
             unified.stream = _with_provider_finish_reasons(unified.stream, reasons)

@@ -1,5 +1,23 @@
 # Release notes
 
+## Unreleased
+
+### The provider's finish reason survives translation
+
+- Gemini `PROHIBITED_CONTENT`, `BLOCKLIST`, `SPII`, `IMAGE_SAFETY` and
+  `RECITATION` now read as the target's filter value, as `SAFETY` did. That
+  is `content_filter` on Chat Completions, `refusal` on Anthropic Messages,
+  and `incomplete` with reason `content_filter` on Responses. They read
+  `stop`, `end_turn` and `completed` before. A caller that treats a filter
+  reason as a failure will now see failures it did not see.
+- New `provider_finish_reasons` on `ChatResponse` and
+  `ChatResponseStreaming`: the provider's own finish reason per choice
+  index, as `ProviderFinishReason(api, reason)`. It is set on translated
+  routes and on same-API passthrough. It is never part of a wire body, and
+  `ChatResponse.to_dict()` leaves it out. A stream's dict is complete once
+  the stream has ended.
+- Other reasons keep their nearest wire value. No new wire values.
+
 ## 0.4.1
 
 ### Thinking in the form the target takes

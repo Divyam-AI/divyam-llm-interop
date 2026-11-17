@@ -288,7 +288,15 @@ on the translated result, so a caller can still tell them apart.
 `ProviderFinishReason(api, reason)`. The reason is exactly what the provider
 sent. It is never written into the wire body or a stream event.
 
+The indexes are the provider's choice indexes. The dict can hold a choice
+that the target body dropped, such as the second choice of a Chat answer
+translated to Responses.
+
 ```python
+from divyam_llm_interop.translate.chat.unified.provider_finish_reason import (
+    ProviderFinishReason,
+)
+
 translated = translator.translate_response(chat_response, source, target)
 original = translated.provider_finish_reasons.get(0)
 if original and original.reason == "RECITATION":
@@ -307,6 +315,10 @@ original = stream.provider_finish_reasons.get(0)  # complete here
 
 The dict is also filled when source and target share an API and nothing is
 translated. It is empty when the provider sent no finish reason.
+
+Treat an empty dict as unknown, not as a normal stop. A Gemini prompt blocked
+before any candidate (`promptFeedback.blockReason`) has no finish reason. On a
+Responses route its wire body still says `completed`.
 
 What the reason string holds, by provider API:
 

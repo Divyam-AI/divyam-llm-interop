@@ -9,7 +9,9 @@ never in the wire body.
 """
 
 import json
-from typing import Any
+from collections.abc import AsyncGenerator
+from enum import Enum
+from typing import Any, cast
 
 import pytest
 
@@ -266,6 +268,21 @@ def test_to_dict_leaves_the_reasons_out(translator):
     )
 
     assert set(result.to_dict()) == {"body", "headers"}
+
+
+def test_to_dict_copies_the_body_and_headers(translator):
+    response = ChatResponse(
+        body=_completions_body("stop"), headers={"x-request-id": "r1"}
+    )
+    response.body["extra"] = [("a", [1, 2])]
+
+    copied = response.to_dict()
+
+    assert copied["body"] == response.body
+    assert copied["headers"] == response.headers
+    assert copied["body"] is not response.body
+    assert copied["body"]["extra"] is not response.body["extra"]
+    assert copied["headers"] is not response.headers
 
 
 # --- Anthropic source ------------------------------------------------------
@@ -576,7 +593,9 @@ async def test_completions_reason_reaches_every_target_streamed(translator, targ
     }
 
 
-# --- Same API: nothing is translated ---------------------------------------
+# --- Same API ---------------------------------------------------------------
+# Completions, Anthropic and Responses pass through unchanged. Gemini does
+# not: its answers are always translated, so that row runs the full path.
 
 
 _SAME_API = [
@@ -658,3 +677,295 @@ def test_anthropic_pause_turn_is_still_refused_for_completions(translator):
         translator.translate_response(
             ChatResponse(body=_anthropic_body("pause_turn")), _ANTHROPIC, _COMPLETIONS
         )
+
+
+# --- More than one choice --------------------------------------------------
+
+
+def _two_choice_completions_body() -> dict[str, Any]:
+    body = _completions_body("stop")
+    body["choices"].append(
+        {
+            "index": 1,
+            "message": {"role": "assistant", "content": "Hi."},
+            "finish_reason": "length",
+        }
+    )
+    return body
+
+
+def _two_choice_completions_stream() -> list[dict[str, Any]]:
+    def chunk(index: int, delta: dict[str, Any], reason: str | None):
+        return {
+            "id": "c1",
+            "object": "chat.completion.chunk",
+            "created": 1,
+            "model": "gpt-4.1",
+            "choices": [{"index": index, "delta": delta, "finish_reason": reason}],
+        }
+
+    return [
+        chunk(0, {"role": "assistant", "content": "Hello."}, None),
+        chunk(1, {"role": "assistant", "content": "Hi."}, None),
+        chunk(1, {}, "length"),
+        chunk(0, {}, "stop"),
+    ]
+
+
+def _two_candidate_gemini_body() -> dict[str, Any]:
+    body = _gemini_body("STOP", with_parts=True)
+    # Gemini sends no index for the first candidate.
+    del body["candidates"][0]["index"]
+    body["candidates"].append(
+        {
+            "index": 1,
+            "finishReason": "RECITATION",
+            "content": {"role": "model", "parts": [{"text": "Hi."}]},
+        }
+    )
+    return body
+
+
+_TWO_CHOICES = {
+    0: ProviderFinishReason(ModelApiType.COMPLETIONS, "stop"),
+    1: ProviderFinishReason(ModelApiType.COMPLETIONS, "length"),
+}
+_TWO_CANDIDATES = {
+    0: ProviderFinishReason(ModelApiType.GEMINI, "STOP"),
+    1: ProviderFinishReason(ModelApiType.GEMINI, "RECITATION"),
+}
+
+
+@pytest.mark.parametrize("target", [_RESPONSES, _GEMINI, _COMPLETIONS])
+def test_two_choices_keep_their_own_reasons_whole(translator, target):
+    result = translator.translate_response(
+        ChatResponse(body=_two_choice_completions_body()), _COMPLETIONS, target
+    )
+
+    # A Responses body keeps only the first choice. The dict still holds both.
+    # Anthropic targets refuse more than one choice, so they are not tried.
+    assert result.provider_finish_reasons == _TWO_CHOICES
+
+
+@pytest.mark.parametrize("target", [_RESPONSES, _GEMINI, _COMPLETIONS])
+async def test_two_choices_keep_their_own_reasons_streamed(translator, target):
+    translated = translator.translate_response_streaming(
+        ChatResponseStreaming(_events(_two_choice_completions_stream())),
+        _COMPLETIONS,
+        target,
+    )
+    await _drain(translated)
+
+    assert translated.provider_finish_reasons == _TWO_CHOICES
+
+
+@pytest.mark.parametrize(
+    "target", [_COMPLETIONS, _RESPONSES], ids=["completions", "responses"]
+)
+def test_two_candidates_keep_their_own_reasons_whole(translator, target):
+    result = translator.translate_response(
+        ChatResponse(body=_two_candidate_gemini_body()), _GEMINI, target
+    )
+
+    assert result.provider_finish_reasons == _TWO_CANDIDATES
+
+
+@pytest.mark.parametrize(
+    "target", [_COMPLETIONS, _RESPONSES], ids=["completions", "responses"]
+)
+async def test_two_candidates_keep_their_own_reasons_streamed(translator, target):
+    translated = translator.translate_response_streaming(
+        ChatResponseStreaming(_events([_two_candidate_gemini_body()])),
+        _GEMINI,
+        target,
+    )
+    await _drain(translated)
+
+    assert translated.provider_finish_reasons == _TWO_CANDIDATES
+
+
+# --- The Gemini SDK shape Switch sends -------------------------------------
+
+
+class _FinishReason(str, Enum):
+    """Stands in for the google-genai FinishReason enum."""
+
+    PROHIBITED_CONTENT = "PROHIBITED_CONTENT"
+    STOP = "STOP"
+
+
+def _sdk_chunk(finish: _FinishReason | None) -> dict[str, Any]:
+    """A chunk as model_dump(exclude_none=True) leaves it: snake_case keys."""
+    candidate: dict[str, Any] = {
+        "index": 0,
+        "content": {"role": "model", "parts": [{"text": "Hello."}]},
+    }
+    if finish is not None:
+        candidate["finish_reason"] = finish
+    return {
+        "response_id": "g1",
+        "model_version": "gemini-2.5-flash",
+        "candidates": [candidate],
+    }
+
+
+@pytest.mark.parametrize("target", _TARGETS, ids=_TARGET_IDS)
+def test_sdk_enum_finish_reason_is_read_whole(translator, target):
+    result = translator.translate_response(
+        ChatResponse(body=_sdk_chunk(_FinishReason.PROHIBITED_CONTENT)),
+        _GEMINI,
+        target,
+    )
+
+    assert _wire_whole(target, result.body) == _FILTER_WIRE[target.api_type]
+    assert result.provider_finish_reasons == {
+        0: ProviderFinishReason(ModelApiType.GEMINI, "PROHIBITED_CONTENT")
+    }
+
+
+@pytest.mark.parametrize("target", _TARGETS, ids=_TARGET_IDS)
+async def test_sdk_enum_finish_reason_is_read_streamed(translator, target):
+    translated = translator.translate_response_streaming(
+        ChatResponseStreaming(
+            _events([_sdk_chunk(None), _sdk_chunk(_FinishReason.PROHIBITED_CONTENT)])
+        ),
+        _GEMINI,
+        target,
+    )
+    events = await _drain(translated)
+
+    assert _wire_stream(target, events) == _FILTER_WIRE[target.api_type]
+    assert translated.provider_finish_reasons == {
+        0: ProviderFinishReason(ModelApiType.GEMINI, "PROHIBITED_CONTENT")
+    }
+
+
+# --- Stream wrappers: closing, errors, timing ------------------------------
+
+
+class _CountingSource:
+    """A source stream that counts closes and can fail at a given read."""
+
+    def __init__(self, items: list[dict[str, Any]], fail_at: int | None = None):
+        self._items = items
+        self._fail_at = fail_at
+        self._next = 0
+        self.closes = 0
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self) -> dict[str, Any]:
+        if self._next == self._fail_at:
+            raise RuntimeError("provider failed")
+        if self._next >= len(self._items):
+            raise StopAsyncIteration
+        self._next += 1
+        return self._items[self._next - 1]
+
+    async def aclose(self) -> None:
+        self.closes += 1
+
+
+def _streaming(source: _CountingSource) -> ChatResponseStreaming:
+    return ChatResponseStreaming(cast(AsyncGenerator[dict[str, Any], None], source))
+
+
+async def test_passthrough_stream_closed_before_a_read_closes_the_source(
+    translator,
+):
+    source = _CountingSource(_completions_stream("stop"))
+    result = translator.translate_response_streaming(
+        _streaming(source), _COMPLETIONS, _COMPLETIONS
+    )
+
+    await result.stream.aclose()
+
+    assert source.closes == 1
+
+
+async def test_translated_stream_closed_after_one_read_closes_the_source(
+    translator,
+):
+    source = _CountingSource(_gemini_stream("STOP", with_parts=True))
+    result = translator.translate_response_streaming(
+        _streaming(source), _GEMINI, _COMPLETIONS
+    )
+
+    await anext(result.stream)
+    await result.stream.aclose()
+
+    assert source.closes == 1
+
+
+async def test_provider_error_reaches_the_caller_unchanged(translator):
+    source = _CountingSource(_gemini_stream("STOP", with_parts=True), fail_at=1)
+    result = translator.translate_response_streaming(
+        _streaming(source), _GEMINI, _COMPLETIONS
+    )
+
+    with pytest.raises(RuntimeError, match="provider failed"):
+        await _drain(result)
+
+    assert source.closes == 1
+
+
+async def test_stream_without_a_finish_leaves_the_dict_empty(translator):
+    chunk = _gemini_body("STOP", with_parts=True)
+    del chunk["candidates"][0]["finishReason"]
+    result = translator.translate_response_streaming(
+        ChatResponseStreaming(_events([chunk])), _GEMINI, _COMPLETIONS
+    )
+
+    await _drain(result)
+
+    assert result.provider_finish_reasons == {}
+
+
+async def test_reason_is_recorded_as_soon_as_its_event_is_read(translator):
+    result = translator.translate_response_streaming(
+        ChatResponseStreaming(_events(_completions_stream("length"))),
+        _COMPLETIONS,
+        _COMPLETIONS,
+    )
+
+    seen = []
+    async for event in result.stream:
+        seen.append(dict(result.provider_finish_reasons))
+        if event["choices"][0]["finish_reason"]:
+            break
+
+    assert seen[0] == {}
+    assert seen[-1] == {0: ProviderFinishReason(ModelApiType.COMPLETIONS, "length")}
+
+
+async def test_anthropic_pause_turn_stream_is_refused_and_still_recorded(
+    translator,
+):
+    result = translator.translate_response_streaming(
+        ChatResponseStreaming(_events(_anthropic_stream("pause_turn"))),
+        _ANTHROPIC,
+        _COMPLETIONS,
+    )
+
+    with pytest.raises(UnsupportedFeatureError):
+        await _drain(result)
+
+    assert result.provider_finish_reasons == {
+        0: ProviderFinishReason(ModelApiType.ANTHROPIC_MESSAGES, "pause_turn")
+    }
+
+
+def test_a_body_key_named_provider_finish_reason_is_not_lost(translator):
+    body = _completions_body("stop")
+    body["choices"][0]["provider_finish_reason"] = "from-a-proxy"
+
+    result = translator.translate_response(
+        ChatResponse(body=body), _COMPLETIONS, _RESPONSES
+    )
+    unified = translator._find_translator_for_model(_COMPLETIONS).response_to_unified(
+        ChatResponse(body=body), _COMPLETIONS
+    )
+
+    assert unified.body.choices[0].unknowns["provider_finish_reason"] == "from-a-proxy"
+    assert result.provider_finish_reasons[0].reason == "stop"

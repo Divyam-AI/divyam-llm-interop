@@ -20,7 +20,6 @@ Reason strings by API:
   "completed", "failed" or "cancelled".
 """
 
-from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from typing import Any
 
@@ -143,24 +142,3 @@ def finish_reasons_from_stream_event(
             0: ProviderFinishReason(api, _responses_reason(response, default_status))
         }
     return {}
-
-
-async def record_finish_reasons(
-    api: ModelApiType,
-    stream: AsyncGenerator[dict[str, Any], None],
-    reasons: dict[int, ProviderFinishReason],
-) -> AsyncGenerator[dict[str, Any], None]:
-    """Pass events through unchanged and record each finish reason.
-
-    The reason is stored before its event is yielded. So the dict is
-    complete once the stream has ended.
-    """
-    try:
-        async for event in stream:
-            if isinstance(event, dict):
-                reasons.update(finish_reasons_from_stream_event(api, event))
-            yield event
-    finally:
-        close = getattr(stream, "aclose", None)
-        if close is not None:
-            await close()
