@@ -270,6 +270,14 @@ class ModelCapabilities:
     # so a new one needs no release. Unset or empty, the endpoint runs none
     # and a request's safeguards are removed before it is sent there.
     anthropic_safeguards: Optional[list[str]] = None
+    # True for an Anthropic Messages endpoint that takes a top-level
+    # cache_control, Anthropic's automatic prompt caching. A request translated
+    # from another protocol is then sent with it, since those clients never
+    # mark a breakpoint and expect a repeated prefix to be cached. Requests in
+    # Anthropic's own protocol keep the markers they carry. Bedrock's legacy
+    # integration refuses the field, so it depends on the platform as well as
+    # the model, and an endpoint declaration replaces the model's.
+    supports_automatic_prompt_cache: Optional[bool] = None
     supports_google_thinking_config: Optional[bool] = None
     supports_google_extra_body: Optional[bool] = None
     # The tool_choice modes the target accepts, from TOOL_CHOICE_MODES. A

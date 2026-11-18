@@ -145,3 +145,21 @@
         - claude-sonnet-5-5
   capabilities:
     hosted_tools: [ "web_search", "web_fetch", "code_execution", "tool_search" ]
+
+# Automatic prompt caching (a top-level cache_control), which every platform
+# takes for these families. Bedrock's legacy integration, which serves Claude
+# Opus 4.6 and earlier, refuses it with a 400, so older models are left unset
+# and an endpoint that takes it declares it. See unified_to_anthropic.
+- selector:
+    name:
+      regex:
+        - claude-4-7
+        - claude-fable-5(?:-1)?
+        - claude-haiku-5-5
+        - claude-mythos(?:-5-1)?
+        - claude-opus-5
+        - claude-opus-5-5
+        - claude-sonnet-5
+        - claude-sonnet-5-5
+  capabilities:
+    supports_automatic_prompt_cache: true

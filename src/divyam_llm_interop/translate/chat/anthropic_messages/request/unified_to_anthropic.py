@@ -70,7 +70,23 @@ def unified_request_to_anthropic(
     body = _build_request_body(unified, target, model_registry)
     capabilities = model_registry.get_capabilities(target)
     _add_thinking(body, plan_thinking(unified, target, capabilities), capabilities)
+    _add_prompt_cache(body, capabilities)
     return _copy_request_envelope(from_request, _fit_to_target(body, capabilities))
+
+
+def _add_prompt_cache(body: dict[str, Any], capabilities: ModelCapabilities) -> None:
+    """Turn on automatic prompt caching where the target declares it.
+
+    Requests reaching here come from protocols whose clients never mark a cache
+    breakpoint, because OpenAI and Gemini cache a repeated prefix on their own.
+    Claude caches only what a request marks, so without this every turn pays
+    full input price. The top-level marker has Anthropic place the breakpoint
+    on the last cacheable block. A prefix below the model's minimum is not
+    cached and costs nothing extra; a cached one costs more to write than plain
+    input, and much less to read back.
+    """
+    if capabilities.supports_automatic_prompt_cache:
+        body["cache_control"] = {"type": "ephemeral"}
 
 
 def _build_request_body(

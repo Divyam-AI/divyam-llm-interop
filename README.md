@@ -64,6 +64,17 @@ that only take one. `none`, or no effort on a model that reasons by default,
 sends thinking disabled; a model that cannot stop reasoning never receives
 disabled and gets the lowest effort instead.
 
+Claude caches a prompt only when the request marks it, and clients of other
+protocols never do, since OpenAI and Gemini cache a repeated prefix on their
+own. A request from another protocol to an Anthropic Messages target that
+declares `supports_automatic_prompt_cache` is therefore sent a top-level
+`cache_control: {"type": "ephemeral"}`, Anthropic's automatic caching, and
+cache reads and writes come back in the client's usage fields. The catalog
+declares it for Claude Opus 4.7 and later families. Bedrock's legacy
+integration, which serves Claude Opus 4.6 and earlier, refuses the field, so
+older models are left unset; an endpoint declaration turns it on or off.
+Requests in Anthropic's own protocol keep whatever markers they carry.
+
 ### Structured output
 
 Each API's request for JSON reaches the target in the target's own form:

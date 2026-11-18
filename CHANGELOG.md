@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### Prompt caching on Claude for other protocols' clients
+
+- New model capability `supports_automatic_prompt_cache`. A request translated
+  from Chat Completions, Responses or Gemini to an Anthropic Messages target
+  that declares it now carries a top-level `cache_control: {"type":
+  "ephemeral"}`, Anthropic's automatic prompt caching. Those clients never
+  mark a breakpoint, so before this such requests were never cached.
+- Declared for Claude Opus 4.7 and the Fable, Mythos, Opus 5, Sonnet 5 and
+  Haiku 5.5 families. Older Claude models are left unset, since Bedrock's
+  legacy integration serves them and refuses the field. An endpoint
+  declaration turns it on or off.
+- Cost: a cached prefix is billed as a cache write, at a premium over plain
+  input, and read back at a fraction of it on the next request. A prompt sent
+  once and above the model's minimum cacheable length now costs a little more.
+  Set the capability to false on an endpoint to keep the old behaviour.
+- Requests in Anthropic's own protocol are unchanged and keep the markers
+  they carry.
+
 ### The provider's finish reason survives translation
 
 - Gemini `PROHIBITED_CONTENT`, `BLOCKLIST`, `SPII`, `IMAGE_SAFETY` and
