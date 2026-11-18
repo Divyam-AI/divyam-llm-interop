@@ -283,9 +283,10 @@ Translation maps each finish reason to the target API's nearest value.
 Several provider reasons share one target value. The original reason stays
 on the translated result, so a caller can still tell them apart.
 
-Use it for logs and metrics, such as counting Gemini `RECITATION` stops.
-Don't branch on the strings. Mapping provider reasons to behavior is the
-library's job, and the wire value already carries it.
+Use the wire value for ordinary handling. Read `provider_finish_reasons`
+when the wire value can't tell cases apart, such as Gemini
+`MALFORMED_FUNCTION_CALL`, which reads as `stop`. It also suits logs and
+metrics, such as counting Gemini `RECITATION` stops.
 
 `ChatResponse.provider_finish_reasons` and
 `ChatResponseStreaming.provider_finish_reasons` map a choice index to a
