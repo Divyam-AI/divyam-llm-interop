@@ -92,9 +92,21 @@ _MAX_PART_ORDER_LENGTH = 1_000_000
 _OMITTED_PLACEHOLDER = "omitted"
 
 # Gemini finish reasons that mean a filter blocked the answer. Each reads as
-# content_filter, as SAFETY always has.
+# content_filter, as SAFETY always has. Any reason not listed here, including
+# one Google adds later, falls back to stop. The original reason stays on
+# provider_finish_reasons.
 _GEMINI_FILTER_FINISH_REASONS = frozenset(
-    {"SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII", "IMAGE_SAFETY", "RECITATION"}
+    {
+        "SAFETY",
+        "PROHIBITED_CONTENT",
+        "BLOCKLIST",
+        "SPII",
+        "RECITATION",
+        "IMAGE_SAFETY",
+        "IMAGE_PROHIBITED_CONTENT",
+        "IMAGE_RECITATION",
+        "MODEL_ARMOR",
+    }
 )
 
 

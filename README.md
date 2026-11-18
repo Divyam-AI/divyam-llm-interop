@@ -283,6 +283,10 @@ Translation maps each finish reason to the target API's nearest value.
 Several provider reasons share one target value. The original reason stays
 on the translated result, so a caller can still tell them apart.
 
+Use it for logs and metrics, such as counting Gemini `RECITATION` stops.
+Don't branch on the strings. Mapping provider reasons to behavior is the
+library's job, and the wire value already carries it.
+
 `ChatResponse.provider_finish_reasons` and
 `ChatResponseStreaming.provider_finish_reasons` map a choice index to a
 `ProviderFinishReason(api, reason)`. The reason is exactly what the provider
@@ -299,8 +303,8 @@ from divyam_llm_interop.translate.chat.unified.provider_finish_reason import (
 
 translated = translator.translate_response(chat_response, source, target)
 original = translated.provider_finish_reasons.get(0)
-if original and original.reason == "RECITATION":
-    ...  # the provider blocked the answer; try another model
+if original:
+    metrics.increment("finish_reason", tags={"reason": original.reason})
 ```
 
 A stream fills its dict as events are read. The dict is complete once the
@@ -334,7 +338,7 @@ How Gemini finish reasons read on each target API:
 |---|---|---|---|
 | `STOP` | `stop` (`tool_calls` after a function call) | `end_turn` (`tool_use` after a function call) | `completed` |
 | `MAX_TOKENS` | `length` | `max_tokens` | `incomplete`, `max_output_tokens` |
-| `SAFETY`, `PROHIBITED_CONTENT`, `BLOCKLIST`, `SPII`, `IMAGE_SAFETY`, `RECITATION` | `content_filter` | `refusal` | `incomplete`, `content_filter` |
+| `SAFETY`, `PROHIBITED_CONTENT`, `BLOCKLIST`, `SPII`, `RECITATION`, `IMAGE_SAFETY`, `IMAGE_PROHIBITED_CONTENT`, `IMAGE_RECITATION`, `MODEL_ARMOR` | `content_filter` | `refusal` | `incomplete`, `content_filter` |
 | `MALFORMED_FUNCTION_CALL`, `UNEXPECTED_TOOL_CALL`, any other | `stop` | `end_turn` | `completed` |
 | Prompt blocked before any candidate (`promptFeedback.blockReason`) | `content_filter` | `refusal` | `incomplete`, `content_filter` |
 

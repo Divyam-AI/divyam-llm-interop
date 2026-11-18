@@ -42,8 +42,11 @@ _FILTER_REASONS = [
     "PROHIBITED_CONTENT",
     "BLOCKLIST",
     "SPII",
-    "IMAGE_SAFETY",
     "RECITATION",
+    "IMAGE_SAFETY",
+    "IMAGE_PROHIBITED_CONTENT",
+    "IMAGE_RECITATION",
+    "MODEL_ARMOR",
 ]
 _INVALID_CALL_REASONS = ["MALFORMED_FUNCTION_CALL", "UNEXPECTED_TOOL_CALL"]
 
@@ -659,13 +662,43 @@ async def test_same_api_stream_carries_the_reason_after_the_last_event(
     assert "provider_finish_reason" not in json.dumps(events)
 
 
-def test_same_api_passthrough_returns_the_same_object(translator):
+def test_same_api_passthrough_leaves_the_callers_response_untouched(translator):
     original = ChatResponse(body=_completions_body("stop"))
 
     result = translator.translate_response(original, _COMPLETIONS, _COMPLETIONS)
 
-    assert result is original
+    assert result is not original
+    assert result.body == original.body
     assert result.provider_finish_reasons[0].reason == "stop"
+    assert original.provider_finish_reasons == {}
+
+
+async def test_same_api_stream_passthrough_leaves_the_callers_stream_untouched(
+    translator,
+):
+    source = _events(_completions_stream("stop"))
+    original = ChatResponseStreaming(source)
+
+    result = translator.translate_response_streaming(
+        original, _COMPLETIONS, _COMPLETIONS
+    )
+    await _drain(result)
+
+    assert result is not original
+    assert original.stream is source
+    assert original.provider_finish_reasons == {}
+    assert result.provider_finish_reasons[0].reason == "stop"
+
+
+def test_unlisted_gemini_reason_reads_as_stop_and_is_kept(translator):
+    result = translator.translate_response(
+        ChatResponse(body=_gemini_body("SOME_FUTURE_REASON", with_parts=True)),
+        _GEMINI,
+        _COMPLETIONS,
+    )
+
+    assert result.body["choices"][0]["finish_reason"] == "stop"
+    assert result.provider_finish_reasons[0].reason == "SOME_FUTURE_REASON"
 
 
 def test_anthropic_pause_turn_is_still_refused_for_completions(translator):

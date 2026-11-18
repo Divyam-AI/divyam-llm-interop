@@ -532,9 +532,7 @@ class ChatTranslator:
                 body=request.response_adapter.restore_response(translated.body),
                 headers=translated.headers,
             )
-        # Set in place: a passed-through answer is returned as the same object.
-        translated.provider_finish_reasons = reasons
-        return translated
+        return replace(translated, provider_finish_reasons=reasons)
 
     def translate_response_streaming(
         self,
@@ -556,6 +554,9 @@ class ChatTranslator:
 
         # Filled as the source stream is read, so complete once it has ended.
         reasons: dict[int, ProviderFinishReason] = {}
+        # A class, not an async generator: a generator closed before its first
+        # read never runs its finally block, so the source would stay open.
+        # Callers only iterate and close it, so the cast is safe.
         recorded = cast(
             AsyncGenerator[dict[str, Any], None],
             _RecordedStream(source.api_type, chat_response.stream, reasons),
@@ -565,13 +566,10 @@ class ChatTranslator:
             and source_translator.are_streaming_responses_compatible(source, target)
         ):
             # Short circuit the responses since the models are compatible.
-            # Set in place: a passed-through stream is the same object.
-            chat_response.stream = recorded
-            translated = chat_response
+            translated = replace(chat_response, stream=recorded)
             if source.api_type == ModelApiType.RESPONSES:
                 translated = replace(
-                    chat_response,
-                    stream=_responses_tool_usage_stated(chat_response.stream),
+                    translated, stream=_responses_tool_usage_stated(recorded)
                 )
         else:
             unified = source_translator.stream_response_to_unified(
@@ -590,8 +588,7 @@ class ChatTranslator:
                 stream=request.response_adapter.restore_stream(translated.stream),
                 headers=translated.headers,
             )
-        translated.provider_finish_reasons = reasons
-        return translated
+        return replace(translated, provider_finish_reasons=reasons)
 
     def _refuse_unaccepted_tool_choice(
         self, body: dict[str, Any], source: Model, target: Model
