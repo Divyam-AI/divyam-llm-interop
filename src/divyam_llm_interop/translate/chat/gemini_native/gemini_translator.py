@@ -55,6 +55,9 @@ from divyam_llm_interop.translate.chat.types import (
     ChatResponseStreaming,
     Model,
 )
+from divyam_llm_interop.translate.chat.unified.provider_finish_reason import (
+    gemini_block_reason,
+)
 from divyam_llm_interop.translate.chat.unified.unified_hosted_tools import (
     HOSTED_TOOL_EVENTS_FIELD,
     HOSTED_TOOLS_FIELD,
@@ -87,6 +90,24 @@ _SKIP_SIGNATURE_VALIDATOR = "skip_thought_signature_validator"
 _MAX_PART_ORDER_LENGTH = 1_000_000
 # Ends a streamed part order that outgrew it; no replay accepts it.
 _OMITTED_PLACEHOLDER = "omitted"
+
+# Gemini finish reasons that mean a filter blocked the answer. Each reads as
+# content_filter, as SAFETY always has. Any reason not listed here, including
+# one Google adds later, falls back to stop. The original reason stays on
+# provider_finish_reasons.
+_GEMINI_FILTER_FINISH_REASONS = frozenset(
+    {
+        "SAFETY",
+        "PROHIBITED_CONTENT",
+        "BLOCKLIST",
+        "SPII",
+        "RECITATION",
+        "IMAGE_SAFETY",
+        "IMAGE_PROHIBITED_CONTENT",
+        "IMAGE_RECITATION",
+        "MODEL_ARMOR",
+    }
+)
 
 
 # Content part types holding text, as Chat Completions and Responses name them.
@@ -507,6 +528,16 @@ class GeminiTranslator(Translator):
                 choice_entry["gemini_finish_message"] = finish_message
             choices.append(choice_entry)
 
+        if gemini_block_reason(body):
+            # The prompt was blocked before any candidate: one empty, filtered choice.
+            choices.append(
+                {
+                    "index": 0,
+                    "message": {"role": "assistant"},
+                    "finish_reason": "content_filter",
+                }
+            )
+
         usage = self._openai_usage_from_gemini_body(body)
 
         completion_body = {
@@ -826,6 +857,10 @@ class GeminiTranslator(Translator):
             if finish_message is not None:
                 choice_entry["gemini_finish_message"] = finish_message
             choices.append(choice_entry)
+
+        if gemini_block_reason(body):
+            # The prompt was blocked before any candidate: one empty, filtered choice.
+            choices.append({"index": 0, "delta": {}, "finish_reason": "content_filter"})
 
         usage = GeminiTranslator._openai_usage_from_gemini_body(body)
         chunk_dict: dict[str, Any] = {
@@ -1778,7 +1813,7 @@ class GeminiTranslator(Translator):
             return "stop"
         if finish_reason == "MAX_TOKENS":
             return "length"
-        if finish_reason == "SAFETY":
+        if finish_reason in _GEMINI_FILTER_FINISH_REASONS:
             return "content_filter"
         return "stop"
 

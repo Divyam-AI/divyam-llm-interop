@@ -409,12 +409,13 @@ GEMINI_MULTI_CANDIDATE_CHUNKS = [
 
 
 # ===================================================================
-# Completions passthrough (short-circuit — same object returned)
+# Completions passthrough (short-circuit — same chunks returned)
 # ===================================================================
 
 
 class TestCompletionsStreamingPassthrough:
-    """Completions same-type streaming short-circuits: exact same object back."""
+    """Completions same-type streaming short-circuits: the same chunks and
+    headers come back. The wrapper is a new object, so the caller's is untouched."""
 
     @pytest.mark.asyncio
     async def test_text_chunks_identity(self, translator):
@@ -424,7 +425,7 @@ class TestCompletionsStreamingPassthrough:
 
         result = translator.translate_response_streaming(original, source, target)
 
-        assert result is original
+        assert result.headers is original.headers
         chunks = await _collect(result)
         assert len(chunks) == len(COMPLETIONS_CHUNKS)
         for got, expected in zip(chunks, COMPLETIONS_CHUNKS):
@@ -440,7 +441,7 @@ class TestCompletionsStreamingPassthrough:
 
         result = translator.translate_response_streaming(original, source, target)
 
-        assert result is original
+        assert result.headers is original.headers
         chunks = await _collect(result)
         assert len(chunks) == len(COMPLETIONS_TOOL_CALL_CHUNKS)
 
@@ -466,7 +467,8 @@ class TestCompletionsStreamingPassthrough:
         original = _make_streaming(COMPLETIONS_CHUNKS)
 
         result = translator.translate_response_streaming(original, source, target)
-        assert result is original
+        assert result.headers is original.headers
+        assert len(await _collect(result)) == len(COMPLETIONS_CHUNKS)
 
     @pytest.mark.asyncio
     async def test_headers_preserved(self, translator):
@@ -484,7 +486,7 @@ class TestCompletionsStreamingPassthrough:
         original = _make_streaming([])
 
         result = translator.translate_response_streaming(original, source, target)
-        assert result is original
+        assert result.headers is original.headers
         assert await _collect(result) == []
 
 

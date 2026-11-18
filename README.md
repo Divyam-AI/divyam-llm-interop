@@ -277,6 +277,75 @@ target = Model(name="gpt-4.1", api_type=ModelApiType.COMPLETIONS)
 translated = translator.translate_response(chat_response, source, target)
 ```
 
+### Read the provider's finish reason
+
+Translation maps each finish reason to the target API's nearest value.
+Several provider reasons share one target value. The original reason stays
+on the translated result, so a caller can still tell them apart.
+
+Use the wire value for ordinary handling. Read `provider_finish_reasons`
+when the wire value can't tell cases apart, such as Gemini
+`MALFORMED_FUNCTION_CALL`, which reads as `stop`. It also suits logs and
+metrics, such as counting Gemini `RECITATION` stops.
+
+`ChatResponse.provider_finish_reasons` and
+`ChatResponseStreaming.provider_finish_reasons` map a choice index to a
+`ProviderFinishReason(api, reason)`. The reason is exactly what the provider
+sent. It is never written into the wire body or a stream event.
+
+The indexes are the provider's choice indexes. The dict can hold a choice
+that the target body dropped, such as the second choice of a Chat answer
+translated to Responses.
+
+```python
+from divyam_llm_interop.translate.chat.unified.provider_finish_reason import (
+    ProviderFinishReason,
+)
+
+translated = translator.translate_response(chat_response, source, target)
+original = translated.provider_finish_reasons.get(0)
+if original:
+    metrics.increment("finish_reason", tags={"reason": original.reason})
+```
+
+A stream fills its dict as events are read. The dict is complete once the
+stream has ended, and may be partial before that.
+
+```python
+stream = translator.translate_response_streaming(chat_response, source, target)
+async for event in stream.stream:
+    ...
+original = stream.provider_finish_reasons.get(0)  # complete here
+```
+
+The dict is also filled when source and target share an API and nothing is
+translated. It is empty when the provider sent no finish reason.
+
+Treat an empty dict as unknown, not as a normal stop.
+
+What the reason string holds, by provider API:
+
+| Provider API | Reason |
+|---|---|
+| Chat Completions | `finish_reason`, such as `stop` |
+| Anthropic Messages | `stop_reason`, such as `model_context_window_exceeded` |
+| Gemini | `finishReason`, or `promptFeedback.blockReason` under index 0 when the prompt was blocked before any candidate |
+| Responses | `incomplete_details.reason` when incomplete, else the status, such as `completed` or `cancelled` |
+
+How Gemini finish reasons read on each target API:
+
+| Gemini `finishReason` | Chat Completions | Anthropic Messages | Responses |
+|---|---|---|---|
+| `STOP` | `stop` (`tool_calls` after a function call) | `end_turn` (`tool_use` after a function call) | `completed` |
+| `MAX_TOKENS` | `length` | `max_tokens` | `incomplete`, `max_output_tokens` |
+| `SAFETY`, `PROHIBITED_CONTENT`, `BLOCKLIST`, `SPII`, `RECITATION`, `IMAGE_SAFETY`, `IMAGE_PROHIBITED_CONTENT`, `IMAGE_RECITATION`, `MODEL_ARMOR` | `content_filter` | `refusal` | `incomplete`, `content_filter` |
+| `MALFORMED_FUNCTION_CALL`, `UNEXPECTED_TOOL_CALL`, any other | `stop` | `end_turn` | `completed` |
+| Prompt blocked before any candidate (`promptFeedback.blockReason`) | `content_filter` | `refusal` | `incomplete`, `content_filter` |
+
+Other provider reasons keep their nearest wire value too. Anthropic
+`model_context_window_exceeded` reads as `length`. Responses `cancelled`
+reads as `stop` in a Chat Completions stream.
+
 ## Model Name Resolution and Fallback
 
 When a request model name is resolved against the catalog, matching happens in

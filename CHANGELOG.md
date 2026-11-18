@@ -1,5 +1,31 @@
 # Release notes
 
+## Unreleased
+
+### The provider's finish reason survives translation
+
+- Gemini `PROHIBITED_CONTENT`, `BLOCKLIST`, `SPII`, `IMAGE_SAFETY` and
+  `RECITATION` now read as the target's filter value, as `SAFETY` did. That
+  is `content_filter` on Chat Completions, `refusal` on Anthropic Messages,
+  and `incomplete` with reason `content_filter` on Responses. They read
+  `stop`, `end_turn` and `completed` before. A caller that treats a filter
+  reason as a failure will now see failures it did not see.
+- New `provider_finish_reasons` on `ChatResponse` and
+  `ChatResponseStreaming`: the provider's own finish reason per choice
+  index, as `ProviderFinishReason(api, reason)`. It is set on translated
+  routes and on same-API passthrough. It is never part of a wire body, and
+  `ChatResponse.to_dict()` leaves it out. A stream's dict is complete once
+  the stream has ended.
+- Other reasons keep their nearest wire value. No new wire values.
+- A Responses stream that ends with `response.incomplete` now closes with
+  the target's finish value: `length` or `content_filter` on Chat
+  Completions, `max_tokens` or `refusal` on Anthropic Messages. It sent none
+  before, and Anthropic streams failed with an error.
+- A Gemini prompt blocked before any candidate now reads as the target's
+  filter value, with one empty choice. It read as no choices, or `completed`
+  on Responses, before. Its block reason is in `provider_finish_reasons`. A
+  Gemini client still gets the block as Gemini sent it.
+
 ## 0.4.1
 
 ### Thinking in the form the target takes

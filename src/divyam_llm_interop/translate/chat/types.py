@@ -2,10 +2,14 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from collections.abc import AsyncGenerator
-from dataclasses import asdict, dataclass, field
+from copy import deepcopy
+from dataclasses import dataclass, field
 from typing import Any, Optional, Protocol
 
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
+from divyam_llm_interop.translate.chat.unified.provider_finish_reason import (
+    ProviderFinishReason,
+)
 
 
 class ResponseAdapter(Protocol):
@@ -102,10 +106,18 @@ class ChatResponse:
 
     body: dict[str, Any]
     headers: Optional[dict[str, str]] = None
+    # The provider's own finish reason per choice index, set by
+    # ChatTranslator.translate_response; never part of the body.
+    provider_finish_reasons: dict[int, ProviderFinishReason] = field(
+        default_factory=dict, compare=False
+    )
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert the ChatResponse instance to a dictionary."""
-        return asdict(self)
+        """Convert the ChatResponse instance to a dictionary.
+
+        The provider finish reasons are not included.
+        """
+        return {"body": deepcopy(self.body), "headers": deepcopy(self.headers)}
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ChatResponse":
@@ -121,3 +133,10 @@ class ChatResponseStreaming:
 
     stream: AsyncGenerator[dict[str, Any], None]
     headers: Optional[dict[str, str]] = None
+    # The provider's own finish reason per choice index, set by
+    # ChatTranslator.translate_response_streaming; never part of an event.
+    # It fills as the stream is consumed. It is complete once the stream has
+    # ended, and may be partial before that.
+    provider_finish_reasons: dict[int, ProviderFinishReason] = field(
+        default_factory=dict, compare=False
+    )
