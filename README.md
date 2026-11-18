@@ -66,14 +66,17 @@ disabled and gets the lowest effort instead.
 
 Claude caches a prompt only when the request marks it, and clients of other
 protocols never do, since OpenAI and Gemini cache a repeated prefix on their
-own. A request from another protocol to an Anthropic Messages target that
-declares `supports_automatic_prompt_cache` is therefore sent a top-level
-`cache_control: {"type": "ephemeral"}`, Anthropic's automatic caching, and
-cache reads and writes come back in the client's usage fields. The catalog
-declares it for Claude Opus 4.7 and later families. Bedrock's legacy
-integration, which serves Claude Opus 4.6 and earlier, refuses the field, so
-older models are left unset; an endpoint declaration turns it on or off.
-Requests in Anthropic's own protocol keep whatever markers they carry.
+own. A request from another protocol to Anthropic's API is therefore sent a
+top-level `cache_control: {"type": "ephemeral"}`, Anthropic's automatic
+caching, and cache reads and writes come back in the client's usage fields.
+Whether a target takes the field depends on the platform, not the model:
+Bedrock's `bedrock-runtime` refuses it with a 400 for the same models. So it
+is sent by default only when the caller names the target's provider
+`anthropic` (the `provider` on the target `Model`), and never for another or
+no provider. Name a Bedrock or gateway endpoint `anthropic` and it will be
+sent the field. An endpoint's `supports_automatic_prompt_cache` capability,
+true or false, decides instead. Requests in Anthropic's own protocol keep
+whatever markers they carry.
 
 ### Structured output
 

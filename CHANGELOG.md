@@ -4,19 +4,23 @@
 
 ### Prompt caching on Claude for other protocols' clients
 
-- New model capability `supports_automatic_prompt_cache`. A request translated
-  from Chat Completions, Responses or Gemini to an Anthropic Messages target
-  that declares it now carries a top-level `cache_control: {"type":
-  "ephemeral"}`, Anthropic's automatic prompt caching. Those clients never
-  mark a breakpoint, so before this such requests were never cached.
-- Declared for Claude Opus 4.7 and the Fable, Mythos, Opus 5, Sonnet 5 and
-  Haiku 5.5 families. Older Claude models are left unset, since Bedrock's
-  legacy integration serves them and refuses the field. An endpoint
-  declaration turns it on or off.
+- A request translated from Chat Completions, Responses or Gemini to an
+  Anthropic Messages target whose caller names its provider `anthropic` now
+  carries a top-level `cache_control: {"type": "ephemeral"}`, Anthropic's
+  automatic prompt caching. Those clients never mark a breakpoint, so before
+  this such requests were never cached.
+- Other and missing providers get no marker: Bedrock's `bedrock-runtime`
+  refuses the field with a 400, for the same models the direct API takes it
+  for. The provider is the one on the caller's target `Model`; the catalog
+  entry a Bedrock model ID matches names `anthropic` too, and is not read.
+- New endpoint capability `supports_automatic_prompt_cache`: true or false
+  decides over the provider, to opt in a platform that takes the field or opt
+  out the direct API. The model catalog sets it for no model.
 - Cost: a cached prefix is billed as a cache write, at a premium over plain
   input, and read back at a fraction of it on the next request. A prompt sent
-  once and above the model's minimum cacheable length now costs a little more.
-  Set the capability to false on an endpoint to keep the old behaviour.
+  once and above the model's minimum cacheable length now costs a little more
+  on the direct API. Set the capability to false on an endpoint to keep the old
+  behaviour.
 - Requests in Anthropic's own protocol are unchanged and keep the markers
   they carry.
 
