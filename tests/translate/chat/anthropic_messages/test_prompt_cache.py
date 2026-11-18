@@ -107,7 +107,7 @@ def test_bedrock_id_is_judged_by_the_callers_provider_not_the_catalogs():
     assert registry.find_matching_model(bedrock).provider == "anthropic"
 
 
-def test_bedrock_id_with_its_catalog_provider_still_gets_no_marker(translator):
+def test_bedrock_id_gets_no_marker_despite_its_catalog_provider(translator):
     target = Model(
         "global.anthropic.claude-opus-4-7", ANTHROPIC, provider="aws_bedrock"
     )
