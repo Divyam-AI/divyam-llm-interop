@@ -321,8 +321,7 @@ original = stream.provider_finish_reasons.get(0)  # complete here
 The dict is also filled when source and target share an API and nothing is
 translated. It is empty when the provider sent no finish reason.
 
-Treat an empty dict as unknown, not as a normal stop. A Gemini prompt blocked
-before any candidate records its `promptFeedback.blockReason` under index 0.
+Treat an empty dict as unknown, not as a normal stop.
 
 What the reason string holds, by provider API:
 
@@ -330,7 +329,7 @@ What the reason string holds, by provider API:
 |---|---|
 | Chat Completions | `finish_reason`, such as `stop` |
 | Anthropic Messages | `stop_reason`, such as `model_context_window_exceeded` |
-| Gemini | `finishReason`, or `promptFeedback.blockReason` when the prompt was blocked before any candidate |
+| Gemini | `finishReason`, or `promptFeedback.blockReason` under index 0 when the prompt was blocked before any candidate |
 | Responses | `incomplete_details.reason` when incomplete, else the status, such as `completed` or `cancelled` |
 
 How Gemini finish reasons read on each target API:
