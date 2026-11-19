@@ -16,11 +16,17 @@
 - New endpoint capability `supports_automatic_prompt_cache`: true or false
   decides over the provider, to opt in a platform that takes the field or opt
   out the direct API. The model catalog sets it for no model.
+- New endpoint capability `automatic_prompt_cache_ttl`, `"5m"` or `"1h"`,
+  sent as the marker's `ttl`; unset, the marker carries none and Anthropic's
+  five-minute default applies. It never turns caching on. Any other value is
+  a `ValueError` from `ModelCapabilities.from_dict`, which callers can run
+  when their config loads; otherwise translation to that endpoint fails.
 - Cost: a cached prefix is billed as a cache write, at a premium over plain
   input, and read back at a fraction of it on the next request. A prompt sent
   once and above the model's minimum cacheable length now costs a little more
   on the direct API. Set the capability to false on an endpoint to keep the old
-  behaviour.
+  behaviour. A one-hour write costs twice base input, against 1.25 times for
+  five minutes.
 - Requests in Anthropic's own protocol are unchanged and keep the markers
   they carry.
 

@@ -103,7 +103,15 @@ def _add_prompt_cache(
         provider = (target.provider or "").strip().lower()
         declared = provider == _DIRECT_ANTHROPIC_PROVIDER
     if declared:
-        body["cache_control"] = {"type": "ephemeral"}
+        body["cache_control"] = _cache_marker(capabilities)
+
+
+def _cache_marker(capabilities: ModelCapabilities) -> dict[str, str]:
+    """The automatic-caching marker, carrying the endpoint's lifetime if it sets one."""
+    marker = {"type": "ephemeral"}
+    if capabilities.automatic_prompt_cache_ttl is not None:
+        marker["ttl"] = capabilities.automatic_prompt_cache_ttl
+    return marker
 
 
 def _build_request_body(

@@ -78,6 +78,13 @@ sent the field. An endpoint's `supports_automatic_prompt_cache` capability,
 true or false, decides instead. Requests in Anthropic's own protocol keep
 whatever markers they carry.
 
+A cached prefix lives five minutes, refreshed each time it is read, so an
+active conversation keeps it. An endpoint's `automatic_prompt_cache_ttl`
+capability, `"5m"` or `"1h"`, is sent as the marker's `ttl`; it never turns
+caching on where the rules above leave it off. A one-hour write costs twice
+base input against 1.25 times for five minutes, and pays off only when
+conversations pause for longer than five minutes.
+
 ### Structured output
 
 Each API's request for JSON reaches the target in the target's own form:

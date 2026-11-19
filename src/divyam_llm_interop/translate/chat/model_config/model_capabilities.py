@@ -22,6 +22,12 @@ from divyam_llm_interop.translate.chat.unified.unified_request import (
 #: "required" makes the model call some tool, "named" a particular one.
 TOOL_CHOICE_MODES = frozenset({"auto", "none", "required", "named"})
 
+#: The lifetimes Anthropic takes for a prompt cache entry, as an endpoint
+#: declares them in `automatic_prompt_cache_ttl`. Checked, unlike safeguard
+#: types: a misspelt one would fail every request sent there, and mapping a
+#: client's cache retention must order them. A new lifetime needs a release.
+PROMPT_CACHE_TTLS = frozenset({"5m", "1h"})
+
 #: Provider-independent names for tools a provider runs on its own servers,
 #: as an endpoint declares them in `hosted_tools`. Each provider's own tool
 #: types map onto these; see hosted_tools.split.
@@ -281,6 +287,15 @@ class ModelCapabilities:
     # and off for any other or no provider. An endpoint declares true or false
     # to decide instead. The model catalog never sets it.
     supports_automatic_prompt_cache: Optional[bool] = None
+    # How long that automatic prompt cache lives, from PROMPT_CACHE_TTLS: "5m"
+    # or "1h", sent as the marker's ttl. Unset, the marker carries none and
+    # Anthropic keeps the prefix five minutes, refreshed on every read. It only
+    # shapes the marker: whether one is sent is decided as above. A one-hour
+    # write costs twice base input, against 1.25 times for five minutes, and
+    # pays off only when a conversation pauses for longer than five minutes.
+    # Any other value raises ValueError when the capabilities are parsed, so a
+    # caller validating its endpoint config with from_dict catches it at load.
+    automatic_prompt_cache_ttl: Optional[str] = None
     supports_google_thinking_config: Optional[bool] = None
     supports_google_extra_body: Optional[bool] = None
     # The tool_choice modes the target accepts, from TOOL_CHOICE_MODES. A
@@ -322,6 +337,15 @@ class ModelCapabilities:
             )
         ):
             raise ValueError("anthropic_safeguards must be a list of safeguard types")
+        if (
+            self.automatic_prompt_cache_ttl is not None
+            and self.automatic_prompt_cache_ttl not in PROMPT_CACHE_TTLS
+        ):
+            # Anthropic would refuse every request with a 400 instead.
+            raise ValueError(
+                "automatic_prompt_cache_ttl must be one of "
+                f"{', '.join(sorted(PROMPT_CACHE_TTLS))}"
+            )
         unknown_modes = set(self.supported_tool_choices or []) - TOOL_CHOICE_MODES
         if unknown_modes:
             raise ValueError(

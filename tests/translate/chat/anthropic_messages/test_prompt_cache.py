@@ -138,6 +138,79 @@ def test_catalog_declares_it_for_no_model():
     for name in ("claude-sonnet-5-5", "claude-opus-4-7", "claude-haiku-4-5"):
         capabilities = registry.get_capabilities(Model(name, ANTHROPIC))
         assert capabilities.supports_automatic_prompt_cache is None
+        assert capabilities.automatic_prompt_cache_ttl is None
+
+
+@pytest.mark.parametrize("api_type", list(_SOURCES))
+@pytest.mark.parametrize("ttl", ["5m", "1h"])
+def test_endpoint_ttl_is_sent_on_the_marker(translator, api_type, ttl):
+    target = Model(
+        "claude-sonnet-5-5",
+        ANTHROPIC,
+        provider="anthropic",
+        capability_overrides={"automatic_prompt_cache_ttl": ttl},
+    )
+
+    assert _translate(translator, target, api_type)["cache_control"] == {
+        "type": "ephemeral",
+        "ttl": ttl,
+    }
+
+
+def test_endpoint_ttl_applies_to_an_opted_in_platform(translator):
+    target = Model(
+        "global.anthropic.claude-opus-4-7",
+        ANTHROPIC,
+        provider="aws_bedrock_mantle",
+        capability_overrides={
+            "supports_automatic_prompt_cache": True,
+            "automatic_prompt_cache_ttl": "1h",
+        },
+    )
+
+    assert _translate(translator, target)["cache_control"] == {
+        "type": "ephemeral",
+        "ttl": "1h",
+    }
+
+
+@pytest.mark.parametrize(
+    ("provider", "overrides"),
+    [
+        ("aws_bedrock", {"automatic_prompt_cache_ttl": "1h"}),
+        (None, {"automatic_prompt_cache_ttl": "1h"}),
+        (
+            "anthropic",
+            {
+                "supports_automatic_prompt_cache": False,
+                "automatic_prompt_cache_ttl": "1h",
+            },
+        ),
+    ],
+)
+def test_endpoint_ttl_never_turns_caching_on(translator, provider, overrides):
+    target = Model(
+        "claude-opus-4-7",
+        ANTHROPIC,
+        provider=provider,
+        capability_overrides=overrides,
+    )
+
+    assert "cache_control" not in _translate(translator, target)
+
+
+@pytest.mark.parametrize("ttl", ["24h", "1H", "60m", "", 60, 3600])
+def test_unknown_ttl_is_refused_when_capabilities_are_built(ttl):
+    registry = ModelRegistry()
+    target = Model(
+        "claude-sonnet-5-5",
+        ANTHROPIC,
+        provider="anthropic",
+        capability_overrides={"automatic_prompt_cache_ttl": ttl},
+    )
+
+    with pytest.raises(ValueError, match="automatic_prompt_cache_ttl"):
+        registry.get_capabilities(target)
 
 
 def test_target_dropping_the_field_is_sent_none(translator):
@@ -177,7 +250,10 @@ def test_anthropic_request_keeps_its_own_caching_choice(translator, target_profi
         "claude-sonnet-5-5",
         ANTHROPIC,
         provider="anthropic",
-        capability_overrides={"anthropic_wire_profile": target_profile},
+        capability_overrides={
+            "anthropic_wire_profile": target_profile,
+            "automatic_prompt_cache_ttl": "1h",
+        },
     )
 
     result = translator.translate_request(
