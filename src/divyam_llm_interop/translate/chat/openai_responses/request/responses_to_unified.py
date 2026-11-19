@@ -308,6 +308,8 @@ def convert_responses_to_completions_request(
         "parallel_tool_calls",
         "user",
         "response_format",
+        "prompt_cache_retention",
+        "prompt_cache_key",
     ):
         value = responses_request.get(param)
         if value is not None:

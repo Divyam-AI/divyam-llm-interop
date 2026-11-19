@@ -19,6 +19,7 @@ from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
 )
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
 from divyam_llm_interop.translate.chat.model_config.model_capabilities import (
+    PROMPT_CACHE_TTLS,
     ModelCapabilities,
 )
 from divyam_llm_interop.translate.chat.model_config.model_registry import (
@@ -70,7 +71,7 @@ def unified_request_to_anthropic(
     body = _build_request_body(unified, target, model_registry)
     capabilities = model_registry.get_capabilities(target)
     _add_thinking(body, plan_thinking(unified, target, capabilities), capabilities)
-    _add_prompt_cache(body, target, capabilities)
+    _add_prompt_cache(body, unified, target, capabilities)
     return _copy_request_envelope(from_request, _fit_to_target(body, capabilities))
 
 
@@ -79,8 +80,15 @@ def unified_request_to_anthropic(
 _DIRECT_ANTHROPIC_PROVIDER = "anthropic"
 
 
+#: The cache lifetime an OpenAI client's prompt_cache_retention asks for.
+_RETENTION_TTLS = {"in_memory": "5m", "24h": "1h"}
+
+
 def _add_prompt_cache(
-    body: dict[str, Any], target: Model, capabilities: ModelCapabilities
+    body: dict[str, Any],
+    unified: UnifiedChatCompletionsRequestBody,
+    target: Model,
+    capabilities: ModelCapabilities,
 ) -> None:
     """Turn on automatic prompt caching where the target takes it.
 
@@ -103,14 +111,27 @@ def _add_prompt_cache(
         provider = (target.provider or "").strip().lower()
         declared = provider == _DIRECT_ANTHROPIC_PROVIDER
     if declared:
-        body["cache_control"] = _cache_marker(capabilities)
+        body["cache_control"] = _cache_marker(unified, capabilities)
 
 
-def _cache_marker(capabilities: ModelCapabilities) -> dict[str, str]:
-    """The automatic-caching marker, carrying the endpoint's lifetime if it sets one."""
+def _cache_marker(
+    unified: UnifiedChatCompletionsRequestBody, capabilities: ModelCapabilities
+) -> dict[str, str]:
+    """The automatic-caching marker.
+
+    The endpoint's lifetime is the default and the longest a client gets; a
+    client's prompt_cache_retention may ask for a shorter one. A retention with
+    no Claude counterpart is ignored, since the default cache still applies.
+    """
+    ttl = capabilities.automatic_prompt_cache_ttl
+    retention: Any = unified.prompt_cache_retention
+    asked = _RETENTION_TTLS.get(retention) if isinstance(retention, str) else None
+    longest = PROMPT_CACHE_TTLS.index(ttl if ttl is not None else PROMPT_CACHE_TTLS[0])
+    if asked is not None and PROMPT_CACHE_TTLS.index(asked) < longest:
+        ttl = asked
     marker = {"type": "ephemeral"}
-    if capabilities.automatic_prompt_cache_ttl is not None:
-        marker["ttl"] = capabilities.automatic_prompt_cache_ttl
+    if ttl is not None:
+        marker["ttl"] = ttl
     return marker
 
 

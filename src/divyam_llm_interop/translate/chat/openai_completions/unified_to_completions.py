@@ -72,6 +72,11 @@ class UnifiedToCompletionsTranslator:
         target_capabilities.translate_fields_with_range(unified)
 
         body = unified.to_dict()
+        # OpenAI's prompt cache hints reach only Claude, as its cache lifetime.
+        # A translated request never carried them to a Chat Completions target,
+        # whose OpenAI-compatible providers may refuse fields they don't know.
+        body.pop("prompt_cache_retention", None)
+        body.pop("prompt_cache_key", None)
 
         # Pick extra body if present in unknowns
         if (

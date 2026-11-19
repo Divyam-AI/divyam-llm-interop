@@ -22,11 +22,12 @@ from divyam_llm_interop.translate.chat.unified.unified_request import (
 #: "required" makes the model call some tool, "named" a particular one.
 TOOL_CHOICE_MODES = frozenset({"auto", "none", "required", "named"})
 
-#: The lifetimes Anthropic takes for a prompt cache entry, as an endpoint
-#: declares them in `automatic_prompt_cache_ttl`. Checked, unlike safeguard
-#: types: a misspelt one would fail every request sent there, and mapping a
-#: client's cache retention must order them. A new lifetime needs a release.
-PROMPT_CACHE_TTLS = frozenset({"5m", "1h"})
+#: The lifetimes Anthropic takes for a prompt cache entry, shortest first, as
+#: an endpoint declares them in `automatic_prompt_cache_ttl`. Checked, unlike
+#: safeguard types: a misspelt one would fail every request sent there, and
+#: mapping a client's cache retention must order them. A new lifetime needs a
+#: release.
+PROMPT_CACHE_TTLS = ("5m", "1h")
 
 #: Provider-independent names for tools a provider runs on its own servers,
 #: as an endpoint declares them in `hosted_tools`. Each provider's own tool
@@ -289,7 +290,9 @@ class ModelCapabilities:
     supports_automatic_prompt_cache: Optional[bool] = None
     # How long that automatic prompt cache lives, from PROMPT_CACHE_TTLS: "5m"
     # or "1h", sent as the marker's ttl. Unset, the marker carries none and
-    # Anthropic keeps the prefix five minutes, refreshed on every read. It only
+    # Anthropic keeps the prefix five minutes, refreshed on every read. It is
+    # both the default and the longest a client may ask for: an OpenAI
+    # client's prompt_cache_retention can shorten it, never lengthen it. It only
     # shapes the marker: whether one is sent is decided as above. A one-hour
     # write costs twice base input, against 1.25 times for five minutes, and
     # pays off only when a conversation pauses for longer than five minutes.

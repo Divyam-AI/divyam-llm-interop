@@ -85,6 +85,12 @@ caching on where the rules above leave it off. A one-hour write costs twice
 base input against 1.25 times for five minutes, and pays off only when
 conversations pause for longer than five minutes.
 
+The endpoint's lifetime is also the longest a client gets. A Chat Completions
+or Responses client's `prompt_cache_retention` may shorten it (`in_memory` is
+five minutes) but never lengthen it: `24h` gets the endpoint's lifetime. An
+unknown retention is ignored. `prompt_cache_key` has no Claude counterpart and
+is left out. Neither field is carried to a Chat Completions or Gemini target.
+
 ### Structured output
 
 Each API's request for JSON reaches the target in the target's own form:

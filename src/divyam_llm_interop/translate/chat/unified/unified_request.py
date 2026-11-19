@@ -420,6 +420,12 @@ class UnifiedChatCompletionsRequestBody:
     # Service tier selection
     service_tier: str | None = None
 
+    # OpenAI's prompt cache hints: how long a cached prefix is kept
+    # ("in_memory" or "24h"), and a key grouping requests that share one.
+    # Kept as the client sent them; each target maps or leaves them out.
+    prompt_cache_retention: str | None = None
+    prompt_cache_key: str | None = None
+
     # Input/output modalities
     modalities: list[str] | None = None
 
@@ -521,6 +527,8 @@ class UnifiedChatCompletionsRequestBody:
             response_format=response_format,
             seed=data.get("seed"),
             service_tier=data.get("service_tier"),
+            prompt_cache_retention=data.get("prompt_cache_retention"),
+            prompt_cache_key=data.get("prompt_cache_key"),
             modalities=data.get("modalities"),
             prediction=data.get("prediction"),
             audio=audio,
@@ -566,6 +574,8 @@ class UnifiedChatCompletionsRequestBody:
             "parallel_tool_calls": self.parallel_tool_calls,
             "seed": self.seed,
             "service_tier": self.service_tier,
+            "prompt_cache_retention": self.prompt_cache_retention,
+            "prompt_cache_key": self.prompt_cache_key,
             "modalities": self.modalities,
             "prediction": self.prediction,
             "store": self.store,

@@ -286,3 +286,125 @@ def test_other_targets_get_no_marker(translator):
     )
 
     assert "cache_control" not in result.body
+
+
+_RETENTION_SOURCES = [ModelApiType.COMPLETIONS, ModelApiType.RESPONSES]
+
+
+def _translate_with(
+    translator,
+    target: Model,
+    api_type: ModelApiType,
+    **fields,
+) -> dict:
+    name, body = _SOURCES[api_type]
+    request = {**copy.deepcopy(body), **fields}
+    result = translator.translate_request(
+        ChatRequest(body=request), Model(name, api_type), target
+    )
+    return result.body
+
+
+def _claude(ttl: str | None = None, **overrides) -> Model:
+    if ttl is not None:
+        overrides["automatic_prompt_cache_ttl"] = ttl
+    return Model(
+        "claude-sonnet-5-5",
+        ANTHROPIC,
+        provider="anthropic",
+        capability_overrides=overrides,
+    )
+
+
+@pytest.mark.parametrize("api_type", _RETENTION_SOURCES)
+@pytest.mark.parametrize(
+    ("endpoint_ttl", "retention", "expected"),
+    [
+        # The endpoint's lifetime is the default and the longest a client gets.
+        (None, None, AUTOMATIC),
+        (None, "in_memory", AUTOMATIC),
+        (None, "24h", AUTOMATIC),
+        ("5m", "24h", {"type": "ephemeral", "ttl": "5m"}),
+        ("1h", None, {"type": "ephemeral", "ttl": "1h"}),
+        ("1h", "24h", {"type": "ephemeral", "ttl": "1h"}),
+        # A client may ask for less.
+        ("1h", "in_memory", {"type": "ephemeral", "ttl": "5m"}),
+    ],
+)
+def test_client_retention_shortens_the_endpoint_lifetime_only(
+    translator, api_type, endpoint_ttl, retention, expected
+):
+    fields = {} if retention is None else {"prompt_cache_retention": retention}
+
+    body = _translate_with(translator, _claude(endpoint_ttl), api_type, **fields)
+
+    assert body["cache_control"] == expected
+
+
+@pytest.mark.parametrize("api_type", _RETENTION_SOURCES)
+@pytest.mark.parametrize("retention", ["7d", "", "IN_MEMORY", 42, ["24h"]])
+def test_unknown_retention_falls_back_to_the_endpoint_lifetime(
+    translator, api_type, retention
+):
+    body = _translate_with(
+        translator, _claude("1h"), api_type, prompt_cache_retention=retention
+    )
+
+    assert body["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
+
+
+@pytest.mark.parametrize("api_type", _RETENTION_SOURCES)
+@pytest.mark.parametrize(
+    "target",
+    [
+        Model("global.anthropic.claude-opus-4-7", ANTHROPIC, provider="aws_bedrock"),
+        _claude("1h", supports_automatic_prompt_cache=False),
+    ],
+)
+def test_client_retention_never_turns_caching_on(translator, api_type, target):
+    body = _translate_with(translator, target, api_type, prompt_cache_retention="24h")
+
+    assert "cache_control" not in body
+
+
+@pytest.mark.parametrize("api_type", _RETENTION_SOURCES)
+def test_openai_cache_hints_reach_claude_as_its_lifetime_only(translator, api_type):
+    body = _translate_with(
+        translator,
+        _claude("1h"),
+        api_type,
+        prompt_cache_retention="in_memory",
+        prompt_cache_key="thread-1",
+    )
+
+    assert body["cache_control"] == {"type": "ephemeral", "ttl": "5m"}
+    assert {"prompt_cache_retention", "prompt_cache_key"}.isdisjoint(body)
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        Model("gpt-4.1-mini", ModelApiType.COMPLETIONS, provider="openai"),
+        Model("gemini-2.5-pro", ModelApiType.GEMINI, provider="google"),
+    ],
+)
+def test_openai_cache_hints_are_not_carried_to_other_targets(translator, target):
+    body = _translate_with(
+        translator,
+        target,
+        ModelApiType.RESPONSES,
+        prompt_cache_retention="24h",
+        prompt_cache_key="thread-1",
+    )
+
+    assert {"prompt_cache_retention", "prompt_cache_key"}.isdisjoint(body)
+
+
+def test_gemini_to_chat_completions_carries_no_cache_hints(translator):
+    body = _translate_with(
+        translator,
+        Model("gpt-4.1-mini", ModelApiType.COMPLETIONS, provider="openai"),
+        ModelApiType.GEMINI,
+    )
+
+    assert {"prompt_cache_retention", "prompt_cache_key"}.isdisjoint(body)

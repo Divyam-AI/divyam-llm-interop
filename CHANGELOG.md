@@ -21,6 +21,13 @@
   five-minute default applies. It never turns caching on. Any other value is
   a `ValueError` from `ModelCapabilities.from_dict`, which callers can run
   when their config loads; otherwise translation to that endpoint fails.
+- A client's `prompt_cache_retention` sets the lifetime within the endpoint's:
+  `in_memory` asks for five minutes, `24h` for the endpoint's lifetime, never
+  longer; an unknown value is ignored. It never turns caching on.
+- A Chat Completions request to Claude carrying `prompt_cache_retention` or
+  `prompt_cache_key` is no longer refused. The key has no Claude counterpart
+  and is left out. The unified request carries both fields; a translated
+  request to a Chat Completions or Gemini target still carries neither.
 - Cost: a cached prefix is billed as a cache write, at a premium over plain
   input, and read back at a fraction of it on the next request. A prompt sent
   once and above the model's minimum cacheable length now costs a little more
