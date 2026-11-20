@@ -96,7 +96,7 @@ The endpoint's lifetime is also the longest a client gets. A Chat Completions
 or Responses client's `prompt_cache_retention` may shorten it (`in_memory` is
 five minutes) but never lengthen it: `24h` gets the endpoint's lifetime. An
 unknown retention is ignored. `prompt_cache_key` has no Claude counterpart and
-is left out. Neither field is carried to a Chat Completions or Gemini target.
+is left out. A request translated for any other target carries neither field.
 
 ### Structured output
 

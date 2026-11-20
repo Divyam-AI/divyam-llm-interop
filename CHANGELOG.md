@@ -25,13 +25,13 @@
   longer; an unknown value is ignored. It never turns caching on.
 - A Chat Completions request to Claude carrying `prompt_cache_retention` or
   `prompt_cache_key` is no longer refused. The key has no Claude counterpart
-  and is left out. The unified request carries both fields; a translated
-  request to a Chat Completions or Gemini target still carries neither.
+  and is left out. The unified request carries both fields; a request
+  translated for any other target still carries neither.
 - Cost: a cached prefix is billed as a cache write, at a premium over plain
   input, and read back at a fraction of it on the next request. A prompt sent
   once and above the model's minimum cacheable length costs a little more on
-  an endpoint declaring the capability. A one-hour write costs twice base input, against 1.25 times for
-  five minutes.
+  an endpoint declaring the capability. A one-hour write costs twice base
+  input, against 1.25 times for five minutes.
 - Requests in Anthropic's own protocol are unchanged and keep the markers
   they carry.
 
