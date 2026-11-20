@@ -71,13 +71,8 @@ def unified_request_to_anthropic(
     body = _build_request_body(unified, target, model_registry)
     capabilities = model_registry.get_capabilities(target)
     _add_thinking(body, plan_thinking(unified, target, capabilities), capabilities)
-    _add_prompt_cache(body, unified, target, capabilities)
+    _add_prompt_cache(body, unified, capabilities)
     return _copy_request_envelope(from_request, _fit_to_target(body, capabilities))
-
-
-#: The provider name that identifies Anthropic's own API, as a caller passes it
-#: on the target Model.
-_DIRECT_ANTHROPIC_PROVIDER = "anthropic"
 
 
 #: The cache lifetime an OpenAI client's prompt_cache_retention asks for.
@@ -87,10 +82,9 @@ _RETENTION_TTLS = {"in_memory": "5m", "24h": "1h"}
 def _add_prompt_cache(
     body: dict[str, Any],
     unified: UnifiedChatCompletionsRequestBody,
-    target: Model,
     capabilities: ModelCapabilities,
 ) -> None:
-    """Turn on automatic prompt caching where the target takes it.
+    """Turn on automatic prompt caching where the endpoint declares it.
 
     Requests reaching here come from protocols whose clients never mark a cache
     breakpoint, because OpenAI and Gemini cache a repeated prefix on their own.
@@ -100,17 +94,11 @@ def _add_prompt_cache(
     cached and costs nothing extra; a cached one costs more to write than plain
     input, and much less to read back.
 
-    The same model takes the field on Anthropic's API and is refused it on
-    Bedrock's bedrock-runtime, so the platform decides. An endpoint
-    declaration wins; without one, only a target whose caller names the
-    direct API's provider gets it. That is the caller's own target: the catalog
-    entry a Bedrock model ID matches names provider anthropic too.
+    Whether the field is taken depends on the platform, not the model, and a
+    provider name cannot tell where a request really goes, so only an endpoint
+    declaring supports_automatic_prompt_cache is sent it.
     """
-    declared = capabilities.supports_automatic_prompt_cache
-    if declared is None:
-        provider = (target.provider or "").strip().lower()
-        declared = provider == _DIRECT_ANTHROPIC_PROVIDER
-    if declared:
+    if capabilities.supports_automatic_prompt_cache:
         body["cache_control"] = _cache_marker(unified, capabilities)
 
 

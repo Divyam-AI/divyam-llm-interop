@@ -283,10 +283,9 @@ class ModelCapabilities:
     # breakpoint and expect a repeated prefix to be cached; requests in
     # Anthropic's own protocol keep the markers they carry. Support depends on
     # the platform, not the model: Anthropic's API takes it and Bedrock's
-    # bedrock-runtime integration refuses it with a 400. Unset, it is on only
-    # for a target whose caller names its provider "anthropic", the direct API,
-    # and off for any other or no provider. An endpoint declares true or false
-    # to decide instead. The model catalog never sets it.
+    # bedrock-runtime may refuse it with a 400. A provider name cannot tell
+    # where a request really goes, so an endpoint declares it. Unset or false,
+    # the endpoint is sent none. The model catalog never sets it.
     supports_automatic_prompt_cache: Optional[bool] = None
     # How long that automatic prompt cache lives, from PROMPT_CACHE_TTLS: "5m"
     # or "1h", sent as the marker's ttl. Unset, the marker carries none and

@@ -13,6 +13,8 @@ from divyam_llm_interop.translate.chat.types import ChatRequest, Model
 
 AUTOMATIC = {"type": "ephemeral"}
 ANTHROPIC = ModelApiType.ANTHROPIC_MESSAGES
+#: The endpoint declaration that turns automatic caching on.
+CACHED = {"supports_automatic_prompt_cache": True}
 
 _SOURCES = {
     ModelApiType.COMPLETIONS: (
@@ -50,6 +52,20 @@ def _translate(
     return result.body
 
 
+def _claude(
+    ttl: str | None = None,
+    *,
+    model: str = "claude-sonnet-5-5",
+    provider: str | None = "anthropic",
+    **overrides,
+) -> Model:
+    """A Claude endpoint declaring automatic caching, unless overrides say not."""
+    overrides = {**CACHED, **overrides}
+    if ttl is not None:
+        overrides["automatic_prompt_cache_ttl"] = ttl
+    return Model(model, ANTHROPIC, provider=provider, capability_overrides=overrides)
+
+
 @pytest.mark.parametrize("api_type", list(_SOURCES))
 @pytest.mark.parametrize(
     "model",
@@ -62,75 +78,53 @@ def _translate(
         "claude-haiku-4-5",
     ],
 )
-def test_direct_anthropic_target_turns_on_automatic_caching(
-    translator, api_type, model
-):
-    target = Model(model, ANTHROPIC, provider="anthropic")
-
-    assert _translate(translator, target, api_type)["cache_control"] == AUTOMATIC
-
-
-@pytest.mark.parametrize("provider", ["Anthropic", " anthropic "])
-def test_direct_provider_name_ignores_case_and_spaces(translator, provider):
-    target = Model("claude-sonnet-5-5", ANTHROPIC, provider=provider)
-
-    assert _translate(translator, target)["cache_control"] == AUTOMATIC
+def test_declaring_endpoint_turns_on_automatic_caching(translator, api_type, model):
+    assert (
+        _translate(translator, _claude(model=model), api_type)["cache_control"]
+        == AUTOMATIC
+    )
 
 
 @pytest.mark.parametrize(
     ("model", "provider"),
     [
-        # bedrock-runtime refuses the field for the same models the direct
+        # A provider name cannot tell where a request really goes: a gateway
+        # named anthropic may forward to Bedrock.
+        ("claude-sonnet-5-5", "anthropic"),
+        ("claude-opus-4-7", "Anthropic"),
+        # bedrock-runtime may refuse the field for the same models the direct
         # API takes it for.
         ("global.anthropic.claude-opus-4-7", "aws_bedrock"),
         ("us.anthropic.claude-sonnet-5-5-v1:0", "bedrock"),
-        ("claude-opus-4-7", "aws_bedrock"),
-        # An unknown or missing provider is ambiguous.
         ("claude-opus-4-7", "vertex"),
         ("claude-opus-4-7", "my-gateway"),
         ("claude-opus-4-7", None),
         ("claude-sonnet-5-5", ""),
     ],
 )
-def test_other_or_unknown_providers_get_no_marker(translator, model, provider):
+def test_undeclared_endpoints_get_no_marker(translator, model, provider):
     target = Model(model, ANTHROPIC, provider=provider)
 
     assert "cache_control" not in _translate(translator, target)
 
 
-def test_bedrock_id_is_judged_by_the_callers_provider_not_the_catalogs():
-    """The catalog entry a Bedrock model ID matches names provider anthropic."""
-    registry = ModelRegistry()
-    bedrock = Model(
-        "global.anthropic.claude-opus-4-7", ANTHROPIC, provider="aws_bedrock"
-    )
-    assert registry.find_matching_model(bedrock).provider == "anthropic"
+@pytest.mark.parametrize(
+    ("model", "provider"),
+    [
+        ("claude-sonnet-5-5", "anthropic"),
+        ("global.anthropic.claude-opus-4-7", "aws_bedrock_mantle"),
+        ("claude-opus-4-7", "my-gateway"),
+        ("claude-opus-4-7", None),
+    ],
+)
+def test_endpoint_declaration_decides_whatever_the_provider(
+    translator, model, provider
+):
+    on = _claude(model=model, provider=provider)
+    off = _claude(model=model, provider=provider, supports_automatic_prompt_cache=False)
 
-
-def test_bedrock_id_gets_no_marker_despite_its_catalog_provider(translator):
-    target = Model(
-        "global.anthropic.claude-opus-4-7", ANTHROPIC, provider="aws_bedrock"
-    )
-
-    assert "cache_control" not in _translate(translator, target)
-
-
-def test_endpoint_declaration_decides_over_the_provider(translator):
-    off = Model(
-        "claude-sonnet-5-5",
-        ANTHROPIC,
-        provider="anthropic",
-        capability_overrides={"supports_automatic_prompt_cache": False},
-    )
-    on = Model(
-        "global.anthropic.claude-opus-4-7",
-        ANTHROPIC,
-        provider="aws_bedrock_mantle",
-        capability_overrides={"supports_automatic_prompt_cache": True},
-    )
-
-    assert "cache_control" not in _translate(translator, off)
     assert _translate(translator, on)["cache_control"] == AUTOMATIC
+    assert "cache_control" not in _translate(translator, off)
 
 
 def test_catalog_declares_it_for_no_model():
@@ -144,28 +138,15 @@ def test_catalog_declares_it_for_no_model():
 @pytest.mark.parametrize("api_type", list(_SOURCES))
 @pytest.mark.parametrize("ttl", ["5m", "1h"])
 def test_endpoint_ttl_is_sent_on_the_marker(translator, api_type, ttl):
-    target = Model(
-        "claude-sonnet-5-5",
-        ANTHROPIC,
-        provider="anthropic",
-        capability_overrides={"automatic_prompt_cache_ttl": ttl},
-    )
-
-    assert _translate(translator, target, api_type)["cache_control"] == {
+    assert _translate(translator, _claude(ttl), api_type)["cache_control"] == {
         "type": "ephemeral",
         "ttl": ttl,
     }
 
 
 def test_endpoint_ttl_applies_to_an_opted_in_platform(translator):
-    target = Model(
-        "global.anthropic.claude-opus-4-7",
-        ANTHROPIC,
-        provider="aws_bedrock_mantle",
-        capability_overrides={
-            "supports_automatic_prompt_cache": True,
-            "automatic_prompt_cache_ttl": "1h",
-        },
+    target = _claude(
+        "1h", model="global.anthropic.claude-opus-4-7", provider="aws_bedrock_mantle"
     )
 
     assert _translate(translator, target)["cache_control"] == {
@@ -177,6 +158,7 @@ def test_endpoint_ttl_applies_to_an_opted_in_platform(translator):
 @pytest.mark.parametrize(
     ("provider", "overrides"),
     [
+        ("anthropic", {"automatic_prompt_cache_ttl": "1h"}),
         ("aws_bedrock", {"automatic_prompt_cache_ttl": "1h"}),
         (None, {"automatic_prompt_cache_ttl": "1h"}),
         (
@@ -214,15 +196,8 @@ def test_unknown_ttl_is_refused_when_capabilities_are_built(ttl):
 
 
 def test_target_dropping_the_field_is_sent_none(translator):
-    target = Model(
-        "claude-sonnet-5-5",
-        ANTHROPIC,
-        provider="anthropic",
-        capability_overrides={
-            "api_capabilities": {
-                "anthropic_messages": {"drop_fields": ["cache_control"]}
-            }
-        },
+    target = _claude(
+        api_capabilities={"anthropic_messages": {"drop_fields": ["cache_control"]}}
     )
 
     assert "cache_control" not in _translate(translator, target)
@@ -246,15 +221,7 @@ def test_anthropic_request_keeps_its_own_caching_choice(translator, target_profi
         provider="anthropic",
         capability_overrides={"anthropic_wire_profile": "account-a"},
     )
-    target = Model(
-        "claude-sonnet-5-5",
-        ANTHROPIC,
-        provider="anthropic",
-        capability_overrides={
-            "anthropic_wire_profile": target_profile,
-            "automatic_prompt_cache_ttl": "1h",
-        },
-    )
+    target = _claude("1h", anthropic_wire_profile=target_profile)
 
     result = translator.translate_request(
         ChatRequest(body=_anthropic_request()), source, target
@@ -305,17 +272,6 @@ def _translate_with(
     return result.body
 
 
-def _claude(ttl: str | None = None, **overrides) -> Model:
-    if ttl is not None:
-        overrides["automatic_prompt_cache_ttl"] = ttl
-    return Model(
-        "claude-sonnet-5-5",
-        ANTHROPIC,
-        provider="anthropic",
-        capability_overrides=overrides,
-    )
-
-
 @pytest.mark.parametrize("api_type", _RETENTION_SOURCES)
 @pytest.mark.parametrize(
     ("endpoint_ttl", "retention", "expected"),
@@ -357,6 +313,7 @@ def test_unknown_retention_falls_back_to_the_endpoint_lifetime(
 @pytest.mark.parametrize(
     "target",
     [
+        Model("claude-sonnet-5-5", ANTHROPIC, provider="anthropic"),
         Model("global.anthropic.claude-opus-4-7", ANTHROPIC, provider="aws_bedrock"),
         _claude("1h", supports_automatic_prompt_cache=False),
     ],

@@ -66,22 +66,21 @@ disabled and gets the lowest effort instead.
 
 Claude caches a prompt only when the request marks it, and clients of other
 protocols never do, since OpenAI and Gemini cache a repeated prefix on their
-own. A request from another protocol to Anthropic's API is therefore sent a
-top-level `cache_control: {"type": "ephemeral"}`, Anthropic's automatic
-caching, and cache reads and writes come back in the client's usage fields.
-Whether a target takes the field depends on the platform, not the model:
-Bedrock's `bedrock-runtime` refuses it with a 400 for the same models. So it
-is sent by default only when the caller names the target's provider
-`anthropic` (the `provider` on the target `Model`), and never for another or
-no provider. Name a Bedrock or gateway endpoint `anthropic` and it will be
-sent the field. An endpoint's `supports_automatic_prompt_cache` capability,
-true or false, decides instead. Requests in Anthropic's own protocol keep
-whatever markers they carry.
+own. A request from another protocol to an endpoint declaring
+`supports_automatic_prompt_cache: true` is therefore sent a top-level
+`cache_control: {"type": "ephemeral"}`, Anthropic's automatic caching, and
+cache reads and writes come back in the client's usage fields. Whether a
+target takes the field depends on the platform, not the model: Anthropic's
+API takes it, and Bedrock's `bedrock-runtime` may refuse it with a 400 for the
+same models. A provider name cannot tell where a request really goes, so an
+endpoint that does not declare the capability is sent none, whatever its
+provider. Requests in Anthropic's own protocol keep whatever markers they
+carry.
 
 A cached prefix lives five minutes, refreshed each time it is read, so an
 active conversation keeps it. An endpoint's `automatic_prompt_cache_ttl`
 capability, `"5m"` or `"1h"`, is sent as the marker's `ttl`; it never turns
-caching on where the rules above leave it off. A one-hour write costs twice
+caching on for an endpoint that does not declare it. A one-hour write costs twice
 base input against 1.25 times for five minutes, and pays off only when
 conversations pause for longer than five minutes.
 
