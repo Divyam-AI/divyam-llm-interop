@@ -46,6 +46,11 @@ _COMPLETIONS_FIELDS = {
     # on every request: conversion leaves out store false and refuses store
     # true, as it does a Responses request's.
     "store",
+    # OpenAI's prompt cache hints. The retention maps to the lifetime of
+    # Claude's automatic prompt cache, within what the target allows; the key
+    # has no counterpart and is left out.
+    "prompt_cache_key",
+    "prompt_cache_retention",
 }
 _RESPONSES_FIELDS = {
     "model",
@@ -59,14 +64,18 @@ _RESPONSES_FIELDS = {
     "tool_choice",
     "parallel_tool_calls",
     "reasoning",
+    # OpenAI's prompt cache hints, which Codex sends on every request: the
+    # retention maps to the lifetime of Claude's automatic prompt cache,
+    # within what the target allows; the key has no counterpart and is left
+    # out.
+    "prompt_cache_key",
+    "prompt_cache_retention",
     # OpenAI's own bookkeeping, which a stateless harness such as Codex sends
     # on every request and no other provider has a use for: conversion leaves
     # each out. store is refused when true, before this; see
     # ResponsesToolAdapter.normalize.
     "store",
     "include",
-    "prompt_cache_key",
-    "prompt_cache_retention",
     "client_metadata",
     "safety_identifier",
     "service_tier",

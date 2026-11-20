@@ -64,6 +64,40 @@ that only take one. `none`, or no effort on a model that reasons by default,
 sends thinking disabled; a model that cannot stop reasoning never receives
 disabled and gets the lowest effort instead.
 
+Claude caches a prompt only when the request marks it, and clients of other
+protocols never do, since OpenAI and Gemini cache a repeated prefix on their
+own. A request from another protocol to an endpoint declaring
+`supports_automatic_prompt_cache: true` is therefore sent a top-level
+`cache_control: {"type": "ephemeral"}`, Anthropic's automatic caching, and
+cache reads and writes come back in the client's usage fields. Whether a
+target takes the field depends on the platform, not the model: Anthropic's
+API takes it, and Bedrock's `bedrock-runtime` may refuse it with a 400 for the
+same models. A provider name cannot tell where a request really goes, so an
+endpoint that does not declare the capability is sent none, whatever its
+provider. Claude on Vertex AI and on Azure takes the field too, according to
+Anthropic's docs, but is sent it only once its endpoint declares the
+capability. Requests in Anthropic's own protocol keep whatever markers they
+carry.
+
+A cached prefix lives five minutes, refreshed each time it is read, so an
+active conversation keeps it. An endpoint's `automatic_prompt_cache_ttl`
+capability, `"5m"` or `"1h"`, is sent as the marker's `ttl`; it never turns
+caching on for an endpoint that does not declare it. A one-hour write costs
+twice base input against 1.25 times for five minutes, and pays off only when
+conversations pause for longer than five minutes.
+
+Anthropic caches per model. A caller that sends each turn of a conversation to
+a different Claude model, as a router may, pays the write premium on every
+turn and never reads the cache back, so caching costs more than it saves
+there. Keep a conversation on one model to benefit, or leave the capability
+unset on endpoints that serve such traffic.
+
+The endpoint's lifetime is also the longest a client gets. A Chat Completions
+or Responses client's `prompt_cache_retention` may shorten it (`in_memory` is
+five minutes) but never lengthen it: `24h` gets the endpoint's lifetime. An
+unknown retention is ignored. `prompt_cache_key` has no Claude counterpart and
+is left out. A request translated for any other target carries neither field.
+
 ### Structured output
 
 Each API's request for JSON reaches the target in the target's own form:

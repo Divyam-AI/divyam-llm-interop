@@ -22,6 +22,13 @@ from divyam_llm_interop.translate.chat.unified.unified_request import (
 #: "required" makes the model call some tool, "named" a particular one.
 TOOL_CHOICE_MODES = frozenset({"auto", "none", "required", "named"})
 
+#: The lifetimes Anthropic takes for a prompt cache entry, shortest first, as
+#: an endpoint declares them in `automatic_prompt_cache_ttl`. Checked, unlike
+#: safeguard types: a misspelt one would fail every request sent there, and
+#: mapping a client's cache retention must order them. A new lifetime needs a
+#: release.
+PROMPT_CACHE_TTLS = ("5m", "1h")
+
 #: Provider-independent names for tools a provider runs on its own servers,
 #: as an endpoint declares them in `hosted_tools`. Each provider's own tool
 #: types map onto these; see hosted_tools.split.
@@ -270,6 +277,27 @@ class ModelCapabilities:
     # so a new one needs no release. Unset or empty, the endpoint runs none
     # and a request's safeguards are removed before it is sent there.
     anthropic_safeguards: Optional[list[str]] = None
+    # Whether an Anthropic Messages endpoint takes a top-level cache_control,
+    # Anthropic's automatic prompt caching. A request translated from another
+    # protocol is then sent with it, since those clients never mark a
+    # breakpoint and expect a repeated prefix to be cached; requests in
+    # Anthropic's own protocol keep the markers they carry. Support depends on
+    # the platform, not the model: Anthropic's API takes it and Bedrock's
+    # bedrock-runtime may refuse it with a 400. A provider name cannot tell
+    # where a request really goes, so an endpoint declares it. Unset or false,
+    # the endpoint is sent none. The model catalog never sets it.
+    supports_automatic_prompt_cache: Optional[bool] = None
+    # How long that automatic prompt cache lives, from PROMPT_CACHE_TTLS: "5m"
+    # or "1h", sent as the marker's ttl. Unset, the marker carries none and
+    # Anthropic keeps the prefix five minutes, refreshed on every read. It is
+    # both the default and the longest a client may ask for: an OpenAI
+    # client's prompt_cache_retention can shorten it, never lengthen it. It only
+    # shapes the marker: whether one is sent is decided as above. A one-hour
+    # write costs twice base input, against 1.25 times for five minutes, and
+    # pays off only when a conversation pauses for longer than five minutes.
+    # Any other value raises ValueError when the capabilities are parsed, so a
+    # caller validating its endpoint config with from_dict catches it at load.
+    automatic_prompt_cache_ttl: Optional[str] = None
     supports_google_thinking_config: Optional[bool] = None
     supports_google_extra_body: Optional[bool] = None
     # The tool_choice modes the target accepts, from TOOL_CHOICE_MODES. A
@@ -311,6 +339,15 @@ class ModelCapabilities:
             )
         ):
             raise ValueError("anthropic_safeguards must be a list of safeguard types")
+        if (
+            self.automatic_prompt_cache_ttl is not None
+            and self.automatic_prompt_cache_ttl not in PROMPT_CACHE_TTLS
+        ):
+            # Anthropic would refuse every request with a 400 instead.
+            raise ValueError(
+                "automatic_prompt_cache_ttl must be one of "
+                f"{', '.join(sorted(PROMPT_CACHE_TTLS))}"
+            )
         unknown_modes = set(self.supported_tool_choices or []) - TOOL_CHOICE_MODES
         if unknown_modes:
             raise ValueError(

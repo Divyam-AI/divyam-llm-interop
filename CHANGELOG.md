@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+### Prompt caching on Claude for other protocols' clients
+
+- New endpoint capability `supports_automatic_prompt_cache`. A request
+  translated from Chat Completions, Responses or Gemini to an Anthropic
+  Messages endpoint declaring it true now carries a top-level
+  `cache_control: {"type": "ephemeral"}`, Anthropic's automatic prompt
+  caching. Those clients never mark a breakpoint, so before this such requests
+  were never cached.
+- Unset or false, an endpoint gets no marker, whatever its provider: support
+  depends on the platform, Bedrock's `bedrock-runtime` may refuse the field
+  with a 400 for the same models the direct API takes it for, and a provider
+  name cannot tell where a request really goes. Declare it on each endpoint
+  that reaches Anthropic's API. The model catalog sets it for no model.
+- New endpoint capability `automatic_prompt_cache_ttl`, `"5m"` or `"1h"`,
+  sent as the marker's `ttl`; unset, the marker carries none and Anthropic's
+  five-minute default applies. It never turns caching on. Any other value is
+  a `ValueError` from `ModelCapabilities.from_dict`, which callers can run
+  when their config loads; otherwise translation to that endpoint fails.
+- A client's `prompt_cache_retention` sets the lifetime within the endpoint's:
+  `in_memory` asks for five minutes, `24h` for the endpoint's lifetime, never
+  longer; an unknown value is ignored. It never turns caching on.
+- A Chat Completions request to Claude carrying `prompt_cache_retention` or
+  `prompt_cache_key` is no longer refused. The key has no Claude counterpart
+  and is left out. The unified request carries both fields; a request
+  translated for any other target still carries neither.
+- Cost: a cached prefix is billed as a cache write, at a premium over plain
+  input, and read back at a fraction of it on the next request. A prompt sent
+  once and above the model's minimum cacheable length costs a little more on
+  an endpoint declaring the capability. A one-hour write costs twice base
+  input, against 1.25 times for five minutes.
+- Requests in Anthropic's own protocol are unchanged and keep the markers
+  they carry.
+
 ### The provider's finish reason survives translation
 
 - Gemini `PROHIBITED_CONTENT`, `BLOCKLIST`, `SPII`, `IMAGE_SAFETY` and
