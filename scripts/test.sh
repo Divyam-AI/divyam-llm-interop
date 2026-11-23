@@ -73,7 +73,7 @@ if $RUN_ALL; then
     --cov=src \
     --cov-report=term-missing \
     -m "not integration" \
-    "${UNIT_PARALLEL_FLAGS[@]}" \
+    ${UNIT_PARALLEL_FLAGS[@]+"${UNIT_PARALLEL_FLAGS[@]}"} \
     "${PYTEST_EXTRA[@]}"
   log_success "Unit tests passed"
 
@@ -94,7 +94,7 @@ else
     MARKER_FLAGS=(-m integration)
     log_info "Running integration tests only."
   else
-    MARKER_FLAGS=(-m "not integration" "${UNIT_PARALLEL_FLAGS[@]}")
+    MARKER_FLAGS=(-m "not integration" ${UNIT_PARALLEL_FLAGS[@]+"${UNIT_PARALLEL_FLAGS[@]}"})
   fi
 
   log_section "Running tests"

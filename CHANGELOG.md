@@ -16,12 +16,15 @@
 - Fields that ask for something the client would miss are still refused,
   naming the field: `logprobs: true`, a non-zero penalty, a non-empty
   `logit_bias`, audio, legacy `functions` and `function_call`,
-  `web_search_options`.
+  `web_search_options`, and other APIs' names for settings that change the
+  answer, such as `max_output_tokens`, `stop_sequences`, `top_k` and
+  `reasoning`.
 - New `ChatTranslateConfig.drop_unsupported_request_fields`, default false.
   Set, those fields are left out too, as a gateway may prefer to serving the
   client nothing.
-- New `ChatRequest.dropped_fields`: the names of every field translation left
-  out, never part of the provider payload.
+- New `ChatRequest.dropped_fields`: the names of the fields this policy left
+  out, never part of the provider payload. Fields a translator leaves out on
+  its own account, such as `stream_options`, are not named.
 - `response_format` now reaches Claude from Chat Completions: a JSON Schema
   as `output_config.format`, JSON mode as an instruction to answer with JSON
   alone. It was refused before; a malformed one still is.
@@ -50,7 +53,8 @@
 - A strict tool's schema is fitted to Claude's structured output rules, as
   a `response_format` schema is: objects are closed, and numeric,
   string-length and array-size constraints move into the field's
-  description.
+  description. A strict tool holding a map, an object taking keys it does
+  not list, is refused, since closing it would leave it no keys.
 
 ### No empty text reaches Claude
 

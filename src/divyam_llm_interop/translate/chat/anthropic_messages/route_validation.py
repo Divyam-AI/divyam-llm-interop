@@ -53,24 +53,37 @@ _COMPLETIONS_FIELDS = {
     "prompt_cache_retention",
 }
 
+
+def _asks_nothing(value: Any) -> bool:
+    """Whether a setting's value turns it off: false, zero or empty."""
+    return not value
+
+
 # Chat Completions fields Claude has no counterpart for that ask for something
 # the client would miss: token probabilities, audio, a web search, legacy
-# functions. Each maps to the value that asks for nothing, if it has one; null
-# always does. Any other value is refused unless the translator is configured
-# to drop them.
+# functions, and other APIs' names for settings that change the answer, such
+# as an output cap. Each maps to the test for a value that asks for nothing,
+# if one does; null always does. Any other value is refused unless the
+# translator is configured to drop them.
 _ANSWER_CHANGING_FIELDS: dict[str, Callable[[Any], bool] | None] = {
-    "logprobs": lambda value: value is False,
-    "top_logprobs": lambda value: value == 0,
-    "logit_bias": lambda value: value == {},
-    "frequency_penalty": lambda value: value == 0,
-    "presence_penalty": lambda value: value == 0,
+    "logprobs": _asks_nothing,
+    "top_logprobs": _asks_nothing,
+    "logit_bias": _asks_nothing,
+    "frequency_penalty": _asks_nothing,
+    "presence_penalty": _asks_nothing,
     "modalities": lambda value: value == ["text"],
-    "functions": lambda value: value == [],
+    "functions": _asks_nothing,
     "function_call": lambda value: value in ("none", "auto"),
-    "echo": lambda value: value is False,
+    "echo": _asks_nothing,
     "best_of": lambda value: value == 1,
     "audio": None,
     "web_search_options": None,
+    # Other APIs' names, which a Chat Completions request does not take.
+    "max_output_tokens": None,
+    "stop_sequences": None,
+    "candidate_count": None,
+    "top_k": None,
+    "reasoning": None,
 }
 
 _RESPONSES_FIELDS = {

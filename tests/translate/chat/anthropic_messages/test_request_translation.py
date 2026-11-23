@@ -339,6 +339,41 @@ def test_an_empty_last_user_turn_is_refused_not_left_out(translator, completions
     assert raised.value.path == "$.messages[2]"
 
 
+def test_a_strict_tool_holding_a_map_is_refused(translator, completions_model):
+    """Claude's strict mode closes every object, so a map would take no keys:
+    the tool would mean something else, and is refused instead."""
+    body = {
+        "model": completions_model.name,
+        "messages": [{"role": "user", "content": "Hi"}],
+        "tools": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "send",
+                    "strict": True,
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "headers": {
+                                "type": "object",
+                                "additionalProperties": {"type": "string"},
+                            }
+                        },
+                    },
+                },
+            }
+        ],
+    }
+    target = Model("claude-target", ModelApiType.ANTHROPIC_MESSAGES)
+
+    with pytest.raises(TargetCapabilityError) as raised:
+        translator.translate_request(ChatRequest(body), completions_model, target)
+
+    assert raised.value.path == (
+        "$.tools[0].function.parameters.properties.headers.additionalProperties"
+    )
+
+
 def test_a_strict_tool_schema_is_fitted_to_claude(translator, completions_model):
     """A strict tool's schema follows Claude's structured output rules: objects
     are closed, and constraints it rejects move into the description."""
@@ -2435,6 +2470,7 @@ def test_gemini_media_other_than_images_is_rejected_for_anthropic(
         ("prediction", {"type": "content", "content": "x"}),
         ("verbosity", "low"),
         ("logprobs", False),
+        ("logprobs", 0),
         ("top_logprobs", 0),
         ("logit_bias", {}),
         ("frequency_penalty", 0),
@@ -2478,6 +2514,10 @@ _ANSWER_CHANGING = [
     ("functions", [{}]),
     ("function_call", {"name": "f"}),
     ("web_search_options", {}),
+    ("max_output_tokens", 200),
+    ("stop_sequences", ["END"]),
+    ("top_k", 40),
+    ("reasoning", {"effort": "high"}),
 ]
 
 

@@ -83,6 +83,42 @@ def claude_schema(schema: Any) -> Any:
     return result
 
 
+def open_object(schema: Any, path: str) -> str | None:
+    """The path of the first object in `schema` that takes keys it does not
+    list, as a map does, or None. Claude's structured output closes every
+    object, so such an object would take no keys at all."""
+    if not isinstance(schema, dict):
+        return None
+    source = cast(dict[str, Any], schema)
+    extra = source.get("additionalProperties")
+    if extra is True or isinstance(extra, dict):
+        return f"{path}.additionalProperties"
+    for key in ("properties", "$defs", "definitions"):
+        children = source.get(key)
+        if isinstance(children, dict):
+            for name, sub in cast(dict[str, Any], children).items():
+                found = open_object(sub, f"{path}.{key}.{name}")
+                if found:
+                    return found
+    items = source.get("items")
+    for index, sub in enumerate(
+        cast(list[Any], items) if isinstance(items, list) else [items]
+    ):
+        found = open_object(
+            sub, f"{path}.items" + (f"[{index}]" if isinstance(items, list) else "")
+        )
+        if found:
+            return found
+    for key in ("anyOf", "allOf", "oneOf"):
+        options = source.get(key)
+        if isinstance(options, list):
+            for index, sub in enumerate(cast(list[Any], options)):
+                found = open_object(sub, f"{path}.{key}[{index}]")
+                if found:
+                    return found
+    return None
+
+
 def with_json_instruction(system: Any) -> Any:
     """The system prompt with the JSON-only instruction after it, once."""
     if JSON_ONLY_INSTRUCTION in str(system or ""):

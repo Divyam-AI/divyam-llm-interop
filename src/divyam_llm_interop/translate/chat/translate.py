@@ -297,8 +297,8 @@ class ChatTranslateConfig:
     # logprobs false, and fields the translator does not know, are always
     # left out. Those that ask for something the client would miss, such as
     # logprobs true, audio or legacy functions, are refused; with this set,
-    # they are left out too. ChatRequest.dropped_fields names every field
-    # left out.
+    # they are left out too. ChatRequest.dropped_fields names the fields left
+    # out this way.
     drop_unsupported_request_fields: bool = False
 
 

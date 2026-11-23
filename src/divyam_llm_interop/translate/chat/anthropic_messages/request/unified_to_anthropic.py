@@ -489,9 +489,19 @@ def _add_tools(
             # itself: $defs and $ref, titles, anyOf with null and the other
             # keywords generated schemas carry reach it as written. Only the
             # object root it requires is checked here. A strict tool's schema
-            # follows structured output's rules, and is fitted to them.
+            # follows structured output's rules, and is fitted to them; one
+            # holding a map, which those rules would close, is refused.
             _require_object_schema(schema, f"$.tools[{index}].function.parameters")
             if strict is True:
+                open_at = structured_output.open_object(
+                    schema, f"$.tools[{index}].function.parameters"
+                )
+                if open_at is not None:
+                    _target_error(
+                        "a strict tool's objects must list their keys; Claude's "
+                        "strict mode cannot take a map",
+                        open_at,
+                    )
                 schema = structured_output.claude_schema(schema)
             encoded_tool: dict[str, Any] = {
                 "name": tool.function.name,
