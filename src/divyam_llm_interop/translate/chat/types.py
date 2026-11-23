@@ -96,6 +96,12 @@ class ChatRequest:
     dropped_hosted_tools: frozenset[str] = field(
         default_factory=frozenset, compare=False
     )
+    # Top-level Chat Completions fields left out of a request for an Anthropic
+    # Messages target, which has no counterpart for them; see
+    # ChatTranslateConfig.drop_unsupported_request_fields. Fields a translator
+    # leaves out on its own account, such as stream_options, are not named.
+    # Never part of the provider payload.
+    dropped_fields: tuple[str, ...] = field(default=(), compare=False)
 
 
 @dataclass

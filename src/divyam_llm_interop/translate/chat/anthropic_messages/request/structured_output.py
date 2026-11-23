@@ -40,11 +40,13 @@ def output_format(response_format: UnifiedResponseFormat) -> dict[str, Any] | No
         return None
     return {
         "type": "json_schema",
-        "schema": _claude_schema(json_schema.schema.to_dict()),
+        "schema": claude_schema(json_schema.schema.to_dict()),
     }
 
 
-def _claude_schema(schema: Any) -> Any:
+def claude_schema(schema: Any) -> Any:
+    """A JSON Schema fitted to Claude's structured output rules, which strict
+    tools' input schemas follow too."""
     if not isinstance(schema, dict):
         return schema
     source = cast(dict[str, Any], schema)
@@ -57,17 +59,17 @@ def _claude_schema(schema: Any) -> Any:
             described.append(f"{key}: {value}")
         elif key in ("properties", "$defs", "definitions") and isinstance(value, dict):
             result[key] = {
-                name: _claude_schema(sub)
+                name: claude_schema(sub)
                 for name, sub in cast(dict[str, Any], value).items()
             }
         elif key == "items":
             result[key] = (
-                [_claude_schema(sub) for sub in cast(list[Any], value)]
+                [claude_schema(sub) for sub in cast(list[Any], value)]
                 if isinstance(value, list)
-                else _claude_schema(value)
+                else claude_schema(value)
             )
         elif key in ("anyOf", "allOf", "oneOf") and isinstance(value, list):
-            result[key] = [_claude_schema(sub) for sub in cast(list[Any], value)]
+            result[key] = [claude_schema(sub) for sub in cast(list[Any], value)]
         elif key != "additionalProperties":
             result[key] = value
     if source.get("type") == "object" or "properties" in source:
@@ -79,6 +81,42 @@ def _claude_schema(schema: Any) -> Any:
             f"{description} {note}" if isinstance(description, str) else note
         )
     return result
+
+
+def open_object(schema: Any, path: str) -> str | None:
+    """The path of the first object in `schema` that takes keys it does not
+    list, as a map does, or None. Claude's structured output closes every
+    object, so such an object would take no keys at all."""
+    if not isinstance(schema, dict):
+        return None
+    source = cast(dict[str, Any], schema)
+    extra = source.get("additionalProperties")
+    if extra is True or isinstance(extra, dict):
+        return f"{path}.additionalProperties"
+    for key in ("properties", "$defs", "definitions"):
+        children = source.get(key)
+        if isinstance(children, dict):
+            for name, sub in cast(dict[str, Any], children).items():
+                found = open_object(sub, f"{path}.{key}.{name}")
+                if found:
+                    return found
+    items = source.get("items")
+    for index, sub in enumerate(
+        cast(list[Any], items) if isinstance(items, list) else [items]
+    ):
+        found = open_object(
+            sub, f"{path}.items" + (f"[{index}]" if isinstance(items, list) else "")
+        )
+        if found:
+            return found
+    for key in ("anyOf", "allOf", "oneOf"):
+        options = source.get(key)
+        if isinstance(options, list):
+            for index, sub in enumerate(cast(list[Any], options)):
+                found = open_object(sub, f"{path}.{key}[{index}]")
+                if found:
+                    return found
+    return None
 
 
 def with_json_instruction(system: Any) -> Any:

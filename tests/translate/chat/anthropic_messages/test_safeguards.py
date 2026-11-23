@@ -26,7 +26,6 @@ from divyam_llm_interop.translate.chat.api_types import ModelApiType
 from divyam_llm_interop.translate.chat.model_config.model_capabilities import (
     ModelCapabilities,
 )
-from divyam_llm_interop.translate.chat.translation_errors import UnsupportedFeatureError
 from divyam_llm_interop.translate.chat.types import (
     ChatRequest,
     ChatResponse,
@@ -139,12 +138,12 @@ def test_the_beta_alone_reaches_only_an_endpoint_that_reviews(
 
 
 @pytest.mark.parametrize("declared", [False, True])
-def test_another_apis_client_is_held_to_its_own_profile(
+def test_another_apis_client_cannot_ask_for_the_review(
     translator, anthropic_model, completions_model, declared
 ):
     """Only an Anthropic client can ask for the review. A Chat Completions
-    body naming `safeguards` is refused as any unknown field is, whatever the
-    target declares."""
+    body naming `safeguards` has it left out as any unknown field is, whatever
+    the target declares: neither the entries nor the review beta reach it."""
     target = _reviewing(anthropic_model) if declared else anthropic_model
     request = ChatRequest(
         body={
@@ -154,8 +153,10 @@ def test_another_apis_client_is_held_to_its_own_profile(
         },
         api_type=ModelApiType.COMPLETIONS,
     )
-    with pytest.raises(UnsupportedFeatureError):
-        translator.translate_request(request, completions_model, target)
+    result = translator.translate_request(request, completions_model, target)
+    assert "safeguards" not in json.dumps(result.body)
+    betas = (result.headers or {}).get("anthropic-beta", "")
+    assert not any(is_review_beta(beta) for beta in betas.split(","))
 
 
 def test_review_betas_are_known_values_and_any_variant_is_stripped() -> None:

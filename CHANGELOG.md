@@ -27,6 +27,77 @@
 - Under budget thinking, a system entry between a tool call and its result no
   longer hides the exchange from the rewrite that keeps thinking verifiable.
 
+### Chat Completions clients reach Claude with the fields they send by default
+
+- A Chat Completions request to an Anthropic Messages endpoint is translated
+  without the fields Claude has no counterpart for that ask for nothing:
+  bookkeeping such as `user`, `metadata`, `service_tier`,
+  `safety_identifier` and `store`, settings such as `seed`, `prediction` and
+  `verbosity`, the neutral values `logprobs: false`, `top_logprobs: 0`,
+  `logit_bias: {}`, penalties of `0`, `modalities: ["text"]` and
+  `functions: []`, and any field the translator does not know. Before this,
+  any one of them refused the whole request, which locked out clients that
+  send them on every call.
+- Fields that ask for something the client would miss are still refused,
+  naming the field: `logprobs: true`, a non-zero penalty, a non-empty
+  `logit_bias`, audio, legacy `functions` and `function_call`,
+  `web_search_options`, and other APIs' names for settings that change the
+  answer, such as `max_output_tokens`, `stop_sequences`, `top_k` and
+  `reasoning`.
+- New `ChatTranslateConfig.drop_unsupported_request_fields`, default false.
+  Set, those fields are left out too, as a gateway may prefer to serving the
+  client nothing.
+- New `ChatRequest.dropped_fields`: the names of the fields this policy left
+  out, never part of the provider payload. Fields a translator leaves out on
+  its own account, such as `stream_options`, are not named.
+- `response_format` now reaches Claude from Chat Completions: a JSON Schema
+  as `output_config.format`, JSON mode as an instruction to answer with JSON
+  alone. It was refused before; a malformed one still is.
+- `stream_options` other than `{"include_usage": true}` is accepted and left
+  out; Claude's stream reports usage either way.
+- Unchanged: `n` above 1, and content Claude cannot read (file and audio
+  parts, images outside user and tool turns, refusal parts), are still
+  refused. A Chat Completions body naming `safeguards` has it left out, and
+  never turns on a review.
+
+### Client fields named like translator state are refused
+
+- On a translated route, a request field named `anthropic_request_raw` or
+  starting with `interop_` is refused. The translator keeps its own state
+  under those names, and a client field of the same name would have been
+  read as that state.
+
+### Tool schemas reach Claude as written
+
+- A Chat Completions, Responses or Gemini client's tool parameters reach a
+  Claude model as its `input_schema` unchanged, rather than being refused
+  for keywords outside a short portable list. `$defs` and `$ref`, `title`,
+  `anyOf`, `default` and the other keywords generated schemas carry are
+  JSON Schema, which Anthropic checks itself. Only the object root Anthropic
+  requires is checked here.
+- A strict tool's schema is fitted to Claude's structured output rules, as
+  a `response_format` schema is: objects are closed, and numeric,
+  string-length and array-size constraints move into the field's
+  description. A strict tool holding a map, an object taking keys it does
+  not list, is refused, since closing it would leave it no keys.
+
+### No empty text reaches Claude
+
+- Anthropic refuses a text block that is empty or holds only whitespace.
+  Such text beside an assistant turn's tool calls, or as a part of user
+  content, is left out, and a turn with no content at all is left out of the
+  request; Claude reads the turns either side as one when they share a role.
+- An empty last user turn is refused rather than left out, since the request
+  would then end on an assistant turn, which Claude continues as its own
+  answer.
+
+### Unit tests run in parallel
+
+- `scripts/test.sh`, and so CI, runs the unit tests across processes with
+  pytest-xdist, one per CPU by default; `INTEROP_TEST_WORKERS` sets the
+  number, and `1` runs them in one process. Integration tests, which call
+  live APIs, still run in one.
+
 ### Prompt caching on Claude for other protocols' clients
 
 - New endpoint capability `supports_automatic_prompt_cache`. A request
