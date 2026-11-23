@@ -24,6 +24,10 @@ while [[ $# -gt 0 ]]; do
       echo "  --integration   Run only integration tests (requires API keys)"
       echo "  --all           Run all tests (unit + integration) with combined coverage"
       echo "  -- <args>       Pass extra arguments to pytest"
+      echo ""
+      echo "  Unit tests run across INTEROP_TEST_WORKERS processes (default: one per CPU;"
+      echo "  1 runs them in this process). Integration tests always run in one, since"
+      echo "  they call live APIs."
       exit 0 ;;
     --) shift; PYTEST_EXTRA=("$@"); break ;;
     *)  log_error "Unknown argument: $1"; exit 1 ;;
@@ -49,6 +53,15 @@ if $COVERAGE; then
   log_info "Coverage tracking enabled."
 fi
 # --------------------------------------------------------
+# Parallelism: unit tests only. Integration tests call live provider APIs,
+# where parallel requests would run into rate limits.
+# --------------------------------------------------------
+WORKERS="${INTEROP_TEST_WORKERS:-auto}"
+UNIT_PARALLEL_FLAGS=()
+if [[ "$WORKERS" != "1" ]]; then
+  UNIT_PARALLEL_FLAGS=(-n "$WORKERS")
+fi
+# --------------------------------------------------------
 # Run tests
 # --------------------------------------------------------
 if $RUN_ALL; then
@@ -60,6 +73,7 @@ if $RUN_ALL; then
     --cov=src \
     --cov-report=term-missing \
     -m "not integration" \
+    "${UNIT_PARALLEL_FLAGS[@]}" \
     "${PYTEST_EXTRA[@]}"
   log_success "Unit tests passed"
 
@@ -80,7 +94,7 @@ else
     MARKER_FLAGS=(-m integration)
     log_info "Running integration tests only."
   else
-    MARKER_FLAGS=(-m "not integration")
+    MARKER_FLAGS=(-m "not integration" "${UNIT_PARALLEL_FLAGS[@]}")
   fi
 
   log_section "Running tests"

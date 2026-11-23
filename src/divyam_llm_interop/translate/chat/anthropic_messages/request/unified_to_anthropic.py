@@ -15,7 +15,6 @@ from divyam_llm_interop.translate.chat.anthropic_messages.request.reasoning_hist
 )
 from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
     is_portable_tool_name,
-    validate_portable_schema,
 )
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
 from divyam_llm_interop.translate.chat.model_config.model_capabilities import (
@@ -228,6 +227,9 @@ def _build_messages(
     messages: list[dict[str, Any]] = []
     call_names: dict[str, str] = {}
     seen_call_ids: set[str] = set()
+    # The last user turn left out for having no content, while no turn has
+    # followed it.
+    empty_user_turn: int | None = None
     index = 0
     while index < len(unified_messages):
         message = unified_messages[index]
@@ -245,16 +247,28 @@ def _build_messages(
                 )
             call_names = {}
             messages.append(result_message)
+            empty_user_turn = None
             continue
         if call_names:
             _target_error(
                 "tool-call turn is missing its immediately following tool results",
                 f"$.messages[{index}]",
             )
-        messages.append(
-            _build_regular_message(message, call_names, seen_call_ids, index)
-        )
+        built = _build_regular_message(message, call_names, seen_call_ids, index)
+        # A turn with no content at all is left out: Anthropic refuses it, and
+        # it reads the turns either side as one when they share a role.
+        if built["content"]:
+            messages.append(built)
+            empty_user_turn = None
+        elif built["role"] == "user":
+            empty_user_turn = index
         index += 1
+    if empty_user_turn is not None and messages and messages[-1]["role"] == "assistant":
+        # Left out, it would end the request on an assistant turn, which Claude
+        # reads as the start of its own answer to continue.
+        _target_error(
+            "the last user turn has no content", f"$.messages[{empty_user_turn}]"
+        )
     return messages, system
 
 
@@ -274,10 +288,14 @@ def _build_regular_message(
                 "role": "user",
                 "content": _content_blocks(message.content, f"$.messages[{index}]"),
             }
-        return {"role": "user", "content": message.content or ""}
+        return {
+            "role": "user",
+            "content": message.content if _has_text(message.content) else "",
+        }
 
     blocks: list[dict[str, Any]] = []
-    if message.content is not None:
+    # Clients send empty text beside a turn's tool calls.
+    if _has_text(message.content):
         blocks.append({"type": "text", "text": message.content})
     for tool_index, tool_call in enumerate(message.tool_calls or []):
         if tool_call.type != "function":
@@ -357,7 +375,7 @@ def _build_tool_result_message(
         user_message = messages[index]
         if isinstance(user_message.content, list):
             blocks.extend(_content_blocks(user_message.content, f"$.messages[{index}]"))
-        elif user_message.content:
+        elif _has_text(user_message.content):
             blocks.append({"type": "text", "text": user_message.content})
         index += 1
     return {"role": "user", "content": blocks}, index, result_ids
@@ -375,14 +393,13 @@ _GEMINI_FILES = re.compile(
 
 def _content_blocks(parts: list[Any], path: str) -> list[dict[str, Any]]:
     """Chat Completions text and image_url parts as Anthropic content blocks.
-    Empty text parts are left out, since Anthropic refuses an empty text
-    block."""
+    Text parts without text are left out; see _has_text."""
     blocks: list[dict[str, Any]] = []
     for part_index, part in enumerate(parts):
         part_path = f"{path}.content[{part_index}]"
         if part.get("type") != "text":
             blocks.append(_image_block(part["image_url"]["url"], part_path))
-        elif part.get("text"):
+        elif _has_text(part.get("text")):
             blocks.append({"type": "text", "text": part["text"]})
     return blocks
 
@@ -468,14 +485,14 @@ def _add_tools(
                     f"$.tools[{index}].function.name",
                 )
             tool_names.add(tool.function.name)
-            # Anthropic's input_schema is JSON Schema, so it takes the
-            # constraint keywords other OpenAI-format routes keep.
-            validate_portable_schema(
-                schema,
-                f"$.tools[{index}].function.parameters",
-                require_object_root=True,
-                allow_constraints=True,
-            )
+            # Anthropic's input_schema is JSON Schema, which Anthropic checks
+            # itself: $defs and $ref, titles, anyOf with null and the other
+            # keywords generated schemas carry reach it as written. Only the
+            # object root it requires is checked here. A strict tool's schema
+            # follows structured output's rules, and is fitted to them.
+            _require_object_schema(schema, f"$.tools[{index}].function.parameters")
+            if strict is True:
+                schema = structured_output.claude_schema(schema)
             encoded_tool: dict[str, Any] = {
                 "name": tool.function.name,
                 "input_schema": schema,
@@ -784,6 +801,21 @@ def _text_and_images(content: Any) -> bool:
         )
         for part in cast(list[Any], content)
     )
+
+
+def _has_text(text: Any) -> bool:
+    """Whether text can be an Anthropic text block, which must hold more than
+    whitespace."""
+    return isinstance(text, str) and bool(text.strip())
+
+
+def _require_object_schema(schema: Any, path: str) -> None:
+    """A tool's parameters as Anthropic requires its input_schema: a JSON
+    Schema object whose root type is object."""
+    if not isinstance(schema, dict):
+        _target_error("tool parameters must be a JSON Schema object", path)
+    if cast(dict[str, Any], schema).get("type") != "object":
+        _target_error("tool input_schema must have an object root", f"{path}.type")
 
 
 def _json_object(value: str, path: str) -> dict[str, Any]:

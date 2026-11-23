@@ -7,6 +7,13 @@ import json
 import pytest
 
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
+from divyam_llm_interop.translate.chat.base.translation_utils import (
+    JSON_ONLY_INSTRUCTION,
+)
+from divyam_llm_interop.translate.chat.translate import (
+    ChatTranslateConfig,
+    ChatTranslator,
+)
 from divyam_llm_interop.translate.chat.translation_errors import (
     InvalidProtocolRequestError,
     TargetCapabilityError,
@@ -79,6 +86,90 @@ def test_completions_to_anthropic_still_enforces_target_tool_capability(
         translator.translate_request(ChatRequest(body), completions_model, target)
 
 
+# A tool schema as Pydantic generates it: $defs and $ref, titles, a nullable
+# field as anyOf with null, and a default.
+_GENERATED_SCHEMA = {
+    "$defs": {
+        "Step": {
+            "title": "Step",
+            "type": "object",
+            "properties": {
+                "text": {"title": "Text", "type": "string"},
+                "done": {
+                    "anyOf": [{"type": "boolean"}, {"type": "null"}],
+                    "default": None,
+                    "title": "Done",
+                },
+            },
+            "required": ["text"],
+        }
+    },
+    "title": "PlanArgs",
+    "type": "object",
+    "properties": {
+        "steps": {"title": "Steps", "type": "array", "items": {"$ref": "#/$defs/Step"}}
+    },
+    "required": ["steps"],
+}
+
+
+@pytest.mark.parametrize("source", ["completions", "responses"])
+def test_generated_tool_schemas_reach_claude_as_written(
+    translator, completions_model, responses_model, anthropic_model, source
+):
+    if source == "completions":
+        model = completions_model
+        body = {
+            "model": completions_model.name,
+            "messages": [{"role": "user", "content": "Plan it"}],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {"name": "plan", "parameters": _GENERATED_SCHEMA},
+                }
+            ],
+        }
+    else:
+        model = responses_model
+        body = {
+            "model": responses_model.name,
+            "input": "Plan it",
+            "tools": [
+                {"type": "function", "name": "plan", "parameters": _GENERATED_SCHEMA}
+            ],
+        }
+
+    result = translator.translate_request(
+        ChatRequest(body=body), model, anthropic_model
+    )
+
+    assert result.body["tools"][0]["input_schema"] == _GENERATED_SCHEMA
+
+
+@pytest.mark.parametrize(
+    "parameters, message",
+    [
+        ({"type": "string"}, "object root"),
+        ({"anyOf": [{"type": "object"}]}, "object root"),
+    ],
+)
+def test_a_tool_schema_claude_cannot_take_is_refused(
+    translator, completions_model, anthropic_model, parameters, message
+):
+    body = {
+        "model": completions_model.name,
+        "messages": [{"role": "user", "content": "Hello"}],
+        "tools": [
+            {"type": "function", "function": {"name": "f", "parameters": parameters}}
+        ],
+    }
+
+    with pytest.raises(Exception, match=message):
+        translator.translate_request(
+            ChatRequest(body=body), completions_model, anthropic_model
+        )
+
+
 def test_completions_store_reaches_anthropic_left_out(translator, completions_model):
     """pi sends OpenAI's store flag on every request; Anthropic has no use for
     it, so the request is translated without it rather than refused."""
@@ -96,11 +187,12 @@ def test_completions_store_reaches_anthropic_left_out(translator, completions_mo
 
     assert "store" not in result.body
     assert result.body["messages"] == [{"role": "user", "content": "Hello"}]
-    # Asking for the completion to be kept is a request no Claude target can serve.
-    with pytest.raises(TargetCapabilityError, match="store"):
-        translator.translate_request(
-            ChatRequest({**body, "store": True}), completions_model, target
-        )
+    # Asking for the completion to be kept is OpenAI's bookkeeping, left out
+    # all the same.
+    kept = translator.translate_request(
+        ChatRequest({**body, "store": True}), completions_model, target
+    )
+    assert "store" not in kept.body
 
 
 def test_completions_text_parts_reach_anthropic_as_their_text(
@@ -127,6 +219,194 @@ def test_completions_text_parts_reach_anthropic_as_their_text(
     assert result.body["messages"] == [
         {"role": "user", "content": "Read acceptance.txt"}
     ]
+
+
+def test_completions_empty_text_never_reaches_anthropic(translator, completions_model):
+    """Anthropic refuses an empty text block. Clients send empty content beside
+    a turn's tool calls, and empty turns; neither reaches Claude."""
+    body = {
+        "model": completions_model.name,
+        "messages": [
+            {"role": "user", "content": "Read a"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "read_file", "arguments": "{}"},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": "file body"},
+            {"role": "assistant", "content": ""},
+            {"role": "user", "content": [{"type": "text", "text": ""}]},
+            {"role": "user", "content": "Go on"},
+        ],
+        "tools": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "read_file",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+        ],
+    }
+    target = Model("claude-target", ModelApiType.ANTHROPIC_MESSAGES)
+
+    result = translator.translate_request(ChatRequest(body), completions_model, target)
+
+    messages = result.body["messages"]
+    assert [message["role"] for message in messages] == [
+        "user",
+        "assistant",
+        "user",
+        "user",
+    ]
+    assert [block["type"] for block in messages[1]["content"]] == ["tool_use"]
+    assert messages[-1]["content"] == "Go on"
+
+
+def test_completions_whitespace_text_never_reaches_anthropic(
+    translator, completions_model
+):
+    """Anthropic refuses a text block holding only whitespace, as it does an
+    empty one."""
+    body = {
+        "model": completions_model.name,
+        "messages": [
+            {"role": "user", "content": "Read a"},
+            {
+                "role": "assistant",
+                "content": "\n",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "read_file", "arguments": "{}"},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": "file body"},
+            {"role": "user", "content": [{"type": "text", "text": " "}]},
+            {"role": "user", "content": "Go on"},
+        ],
+        "tools": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "read_file",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+        ],
+    }
+    target = Model("claude-target", ModelApiType.ANTHROPIC_MESSAGES)
+
+    result = translator.translate_request(ChatRequest(body), completions_model, target)
+
+    texts = [
+        block["text"]
+        for message in result.body["messages"]
+        if isinstance(message["content"], list)
+        for block in message["content"]
+        if block["type"] == "text"
+    ]
+    assert all(text.strip() for text in texts)
+    assert [block["type"] for block in result.body["messages"][1]["content"]] == [
+        "tool_use"
+    ]
+
+
+def test_an_empty_last_user_turn_is_refused_not_left_out(translator, completions_model):
+    """Left out, it would end the request on an assistant turn, which Claude
+    continues as its own answer."""
+    body = {
+        "model": completions_model.name,
+        "messages": [
+            {"role": "user", "content": "Hi"},
+            {"role": "assistant", "content": "Hello"},
+            {"role": "user", "content": " "},
+        ],
+    }
+    target = Model("claude-target", ModelApiType.ANTHROPIC_MESSAGES)
+
+    with pytest.raises(TargetCapabilityError) as raised:
+        translator.translate_request(ChatRequest(body), completions_model, target)
+
+    assert raised.value.path == "$.messages[2]"
+
+
+def test_a_strict_tool_schema_is_fitted_to_claude(translator, completions_model):
+    """A strict tool's schema follows Claude's structured output rules: objects
+    are closed, and constraints it rejects move into the description."""
+    body = {
+        "model": completions_model.name,
+        "messages": [{"role": "user", "content": "Hi"}],
+        "tools": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "pick",
+                    "strict": True,
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"n": {"type": "integer", "minimum": 1}},
+                        "required": ["n"],
+                    },
+                },
+            }
+        ],
+    }
+    target = Model("claude-target", ModelApiType.ANTHROPIC_MESSAGES)
+
+    result = translator.translate_request(ChatRequest(body), completions_model, target)
+
+    tool = result.body["tools"][0]
+    assert tool["strict"] is True
+    assert tool["input_schema"] == {
+        "type": "object",
+        "properties": {"n": {"type": "integer", "description": "{minimum: 1}"}},
+        "required": ["n"],
+        "additionalProperties": False,
+    }
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "anthropic_request_raw",
+        "interop_default_reasoning_effort",
+        "interop_client_returns_reasoning_state",
+    ],
+)
+@pytest.mark.parametrize("client", ["completions_model", "responses_model"])
+def test_a_client_field_named_like_translator_state_is_refused(
+    translator, request, client, field
+):
+    """The raw Anthropic body and interop flags ride among a unified request's
+    unknown fields. A client field of the same name would be trusted as that
+    state, sending a body nothing has checked."""
+    source = request.getfixturevalue(client)
+    body: dict = {"model": source.name, "max_tokens": 64}
+    if source.api_type == ModelApiType.COMPLETIONS:
+        body["messages"] = [{"role": "user", "content": "Hi"}]
+    else:
+        body["input"] = "Hi"
+    body[field] = {
+        "model": "claude-target",
+        "max_tokens": 99999,
+        "messages": [{"role": "user", "content": "Hi"}],
+        "mcp_servers": [{"type": "url", "url": "https://example.com", "name": "x"}],
+    }
+    target = Model("claude-target", ModelApiType.ANTHROPIC_MESSAGES)
+
+    with pytest.raises(UnsupportedFeatureError) as raised:
+        translator.translate_request(ChatRequest(body), source, target)
+
+    assert raised.value.path == f"$.{field}"
 
 
 def _anthropic_tool_request() -> dict:
@@ -1359,19 +1639,51 @@ def test_tool_results_must_immediately_follow_their_tool_use_turn(
         )
 
 
-def test_target_anthropic_rejects_structured_output(
+def test_completions_json_mode_reaches_anthropic_as_an_instruction(
     translator, completions_model, anthropic_model
 ):
+    """Claude has no JSON mode without a schema, so a json_object
+    response_format becomes the JSON-only instruction in the system prompt."""
     source = {
         "model": "gpt-4.1-mini",
         "messages": [{"role": "user", "content": "hello"}],
         "response_format": {"type": "json_object"},
     }
 
-    with pytest.raises(UnsupportedFeatureError, match="response_format"):
-        translator.translate_request(
-            ChatRequest(body=source), completions_model, anthropic_model
-        )
+    result = translator.translate_request(
+        ChatRequest(body=source), completions_model, anthropic_model
+    )
+
+    assert JSON_ONLY_INSTRUCTION in str(result.body["system"])
+    assert "output_config" not in result.body
+    assert "response_format" not in result.body
+
+
+def test_completions_json_schema_reaches_anthropic_as_structured_output(
+    translator, completions_model, anthropic_model
+):
+    schema = {
+        "type": "object",
+        "properties": {"a": {"type": "string"}},
+        "required": ["a"],
+    }
+    source = {
+        "model": "gpt-4.1-mini",
+        "messages": [{"role": "user", "content": "hello"}],
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {"name": "answer", "schema": schema},
+        },
+    }
+
+    result = translator.translate_request(
+        ChatRequest(body=source), completions_model, anthropic_model
+    )
+
+    assert result.body["output_config"]["format"] == {
+        "type": "json_schema",
+        "schema": {**schema, "additionalProperties": False},
+    }
 
 
 def test_minimal_string_and_text_block_requests_have_identical_semantics(
@@ -2114,21 +2426,124 @@ def test_gemini_media_other_than_images_is_rejected_for_anthropic(
 @pytest.mark.parametrize(
     ("field", "value"),
     [
-        ("modalities", ["text"]),
         ("user", "opaque-user"),
-        ("logprobs", True),
+        ("metadata", {"k": "v"}),
+        ("service_tier", "auto"),
+        ("safety_identifier", "s"),
+        ("seed", 7),
+        ("store", True),
+        ("prediction", {"type": "content", "content": "x"}),
+        ("verbosity", "low"),
+        ("logprobs", False),
+        ("top_logprobs", 0),
+        ("logit_bias", {}),
+        ("frequency_penalty", 0),
+        ("presence_penalty", 0),
+        ("modalities", ["text"]),
+        ("functions", []),
+        ("audio", None),
+        ("an_unknown_field", {"a": 1}),
     ],
 )
-def test_nonportable_completions_controls_fail_before_anthropic_translation(
+def test_completions_fields_that_ask_for_nothing_are_left_out_for_anthropic(
     translator, completions_model, anthropic_model, field, value
 ):
+    """OpenAI clients send settings and bookkeeping Claude has no counterpart
+    for on every call; the request is served without them, and they are named
+    on the translated request."""
     source = {
         "model": "gpt-4.1-mini",
         "messages": [{"role": "user", "content": "Hello"}],
         field: value,
     }
 
-    with pytest.raises(UnsupportedFeatureError, match=field):
+    result = translator.translate_request(
+        ChatRequest(body=source), completions_model, anthropic_model
+    )
+
+    assert field not in result.body
+    assert result.body["messages"] == [{"role": "user", "content": "Hello"}]
+    assert result.dropped_fields == (field,)
+
+
+_ANSWER_CHANGING = [
+    ("logprobs", True),
+    ("top_logprobs", 3),
+    ("logit_bias", {"50256": -100}),
+    ("frequency_penalty", 0.5),
+    ("presence_penalty", -0.5),
+    ("modalities", ["text", "audio"]),
+    ("audio", {"voice": "alloy", "format": "wav"}),
+    ("functions", [{"name": "f", "parameters": {"type": "object"}}]),
+    ("functions", [{}]),
+    ("function_call", {"name": "f"}),
+    ("web_search_options", {}),
+]
+
+
+@pytest.mark.parametrize(("field", "value"), _ANSWER_CHANGING)
+def test_completions_fields_claude_cannot_answer_are_refused(
+    translator, completions_model, anthropic_model, field, value
+):
+    """A field asking for something the client would miss is refused, so a
+    router can serve the request elsewhere."""
+    source = {
+        "model": "gpt-4.1-mini",
+        "messages": [{"role": "user", "content": "Hello"}],
+        field: value,
+    }
+
+    with pytest.raises(UnsupportedFeatureError) as raised:
+        translator.translate_request(
+            ChatRequest(body=source), completions_model, anthropic_model
+        )
+
+    assert raised.value.path == f"$.{field}"
+
+
+@pytest.mark.parametrize(("field", "value"), _ANSWER_CHANGING)
+def test_completions_fields_claude_cannot_answer_are_left_out_when_configured(
+    completions_model, anthropic_model, field, value
+):
+    translator = ChatTranslator(
+        ChatTranslateConfig(
+            allow_generic_translate=True, drop_unsupported_request_fields=True
+        )
+    )
+    source = {
+        "model": "gpt-4.1-mini",
+        "messages": [{"role": "user", "content": "Hello"}],
+        "user": "u1",
+        field: value,
+    }
+
+    result = translator.translate_request(
+        ChatRequest(body=source), completions_model, anthropic_model
+    )
+
+    assert field not in result.body
+    assert result.dropped_fields == tuple(sorted({field, "user"}))
+
+
+@pytest.mark.parametrize(
+    "response_format",
+    [
+        "json",
+        {"type": "xml"},
+        {"type": "json_schema"},
+        {"type": "json_schema", "json_schema": {"name": "x", "schema": "object"}},
+    ],
+)
+def test_a_malformed_completions_response_format_is_refused(
+    translator, completions_model, anthropic_model, response_format
+):
+    source = {
+        "model": "gpt-4.1-mini",
+        "messages": [{"role": "user", "content": "Hello"}],
+        "response_format": response_format,
+    }
+
+    with pytest.raises(UnsupportedFeatureError):
         translator.translate_request(
             ChatRequest(body=source), completions_model, anthropic_model
         )
@@ -2238,17 +2653,23 @@ def test_strict_function_schema_reaches_an_anthropic_target(
     assert tool["strict"] is True
 
 
-def test_completions_stream_options_cannot_suppress_anthropic_usage(
-    translator, completions_model, anthropic_model
+@pytest.mark.parametrize(
+    "stream_options",
+    [{"include_usage": False}, {"include_usage": True, "include_obfuscation": False}],
+)
+def test_completions_stream_options_reach_anthropic_left_out(
+    translator, completions_model, anthropic_model, stream_options
 ):
     source = {
         "model": "gpt-4.1-mini",
         "messages": [{"role": "user", "content": "Hello"}],
         "stream": True,
-        "stream_options": {"include_usage": False},
+        "stream_options": stream_options,
     }
 
-    with pytest.raises(UnsupportedFeatureError, match="include_usage"):
-        translator.translate_request(
-            ChatRequest(body=source), completions_model, anthropic_model
-        )
+    result = translator.translate_request(
+        ChatRequest(body=source), completions_model, anthropic_model
+    )
+
+    assert result.body["stream"] is True
+    assert "stream_options" not in result.body

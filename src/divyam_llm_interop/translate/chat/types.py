@@ -96,6 +96,10 @@ class ChatRequest:
     dropped_hosted_tools: frozenset[str] = field(
         default_factory=frozenset, compare=False
     )
+    # Request fields translation left out because the target has no counterpart
+    # for them; see ChatTranslateConfig.drop_unsupported_request_fields. Never
+    # part of the provider payload.
+    dropped_fields: tuple[str, ...] = field(default=(), compare=False)
 
 
 @dataclass

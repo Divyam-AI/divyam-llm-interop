@@ -572,6 +572,9 @@ Unit tests (no API keys needed):
 ./scripts/test.sh
 ```
 
+They run across processes, one per CPU; `INTEROP_TEST_WORKERS` sets the
+number, and `INTEROP_TEST_WORKERS=1` runs them in one process.
+
 With coverage report:
 
 ```shell

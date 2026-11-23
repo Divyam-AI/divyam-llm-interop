@@ -19,6 +19,9 @@ from divyam_llm_interop.translate.chat.anthropic_messages.response.stream_state 
     ANTHROPIC_SAFEGUARD_FIELDS,
     anthropic_only_content,
 )
+from divyam_llm_interop.translate.chat.anthropic_messages.route_validation import (
+    completions_fields_for_anthropic,
+)
 from divyam_llm_interop.translate.chat.anthropic_messages.safeguards import (
     safeguards_for_target,
 )
@@ -143,6 +146,24 @@ def _refuse_anthropic_only(unknowns: dict[str, Any], client: Model) -> None:
             "outside the supported text/tool profile",
             target_api_type=client.api_type,
         )
+
+
+def _refuse_reserved_fields(body: dict[str, Any], source: Model) -> None:
+    """Refuse a client field named like the translator's own state.
+
+    A unified request carries translator state among its unknown fields, beside
+    the client's own: the raw Anthropic body an encoder sends as written, and
+    ``interop_*`` flags. A client field of the same name would be read as that
+    state, so it is refused rather than trusted.
+    """
+    for name in body:
+        if name == "anthropic_request_raw" or name.startswith("interop_"):
+            raise UnsupportedFeatureError(
+                f"{source.api_type.value} field {name!r} is reserved for "
+                "translation and cannot be sent",
+                source_api_type=source.api_type,
+                path=f"$.{name}",
+            )
 
 
 async def _anthropic_only_refused(
@@ -271,6 +292,14 @@ class ChatTranslateConfig:
     # names them, unless tool_choice forces one. See hosted_tools.split.
     # Requests served natively forward them as sent whatever the setting.
     drop_provider_hosted_tools: bool = False
+    # Chat Completions fields Claude has no counterpart for. Settings and
+    # bookkeeping that ask for nothing, such as user, metadata, seed or
+    # logprobs false, and fields the translator does not know, are always
+    # left out. Those that ask for something the client would miss, such as
+    # logprobs true, audio or legacy functions, are refused; with this set,
+    # they are left out too. ChatRequest.dropped_fields names every field
+    # left out.
+    drop_unsupported_request_fields: bool = False
 
 
 class ChatTranslator:
@@ -392,6 +421,7 @@ class ChatTranslator:
                 chat_request, source, target, native=True
             )
 
+        _refuse_reserved_fields(chat_request.body, source)
         body = chat_request.body
         if (
             source.api_type == ModelApiType.ANTHROPIC_MESSAGES
@@ -408,7 +438,21 @@ class ChatTranslator:
             drop=self._config.drop_provider_hosted_tools,
             note_dropped=True,
         )
-        chat_request = replace(chat_request, body=hosted.body)
+        body = hosted.body
+        dropped_fields: tuple[str, ...] = ()
+        if target.api_type == ModelApiType.ANTHROPIC_MESSAGES:
+            body, dropped_fields = completions_fields_for_anthropic(
+                body,
+                source,
+                drop_answer_changing=self._config.drop_unsupported_request_fields,
+            )
+            if dropped_fields:
+                logger.debug(
+                    "Fields left out of a request for %s: %s",
+                    target.api_type.value,
+                    ", ".join(dropped_fields),
+                )
+        chat_request = replace(chat_request, body=body)
         target_translator.validate_source_request(chat_request, source)
         original_request = chat_request
         chat_request = source_translator.prepare_translation(
@@ -484,6 +528,7 @@ class ChatTranslator:
             response_adapter=chat_request.response_adapter,
             api_type=target.api_type,
             dropped_hosted_tools=hosted.dropped,
+            dropped_fields=dropped_fields,
         )
 
     def translate_response(

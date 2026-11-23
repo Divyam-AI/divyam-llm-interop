@@ -40,11 +40,13 @@ def output_format(response_format: UnifiedResponseFormat) -> dict[str, Any] | No
         return None
     return {
         "type": "json_schema",
-        "schema": _claude_schema(json_schema.schema.to_dict()),
+        "schema": claude_schema(json_schema.schema.to_dict()),
     }
 
 
-def _claude_schema(schema: Any) -> Any:
+def claude_schema(schema: Any) -> Any:
+    """A JSON Schema fitted to Claude's structured output rules, which strict
+    tools' input schemas follow too."""
     if not isinstance(schema, dict):
         return schema
     source = cast(dict[str, Any], schema)
@@ -57,17 +59,17 @@ def _claude_schema(schema: Any) -> Any:
             described.append(f"{key}: {value}")
         elif key in ("properties", "$defs", "definitions") and isinstance(value, dict):
             result[key] = {
-                name: _claude_schema(sub)
+                name: claude_schema(sub)
                 for name, sub in cast(dict[str, Any], value).items()
             }
         elif key == "items":
             result[key] = (
-                [_claude_schema(sub) for sub in cast(list[Any], value)]
+                [claude_schema(sub) for sub in cast(list[Any], value)]
                 if isinstance(value, list)
-                else _claude_schema(value)
+                else claude_schema(value)
             )
         elif key in ("anyOf", "allOf", "oneOf") and isinstance(value, list):
-            result[key] = [_claude_schema(sub) for sub in cast(list[Any], value)]
+            result[key] = [claude_schema(sub) for sub in cast(list[Any], value)]
         elif key != "additionalProperties":
             result[key] = value
     if source.get("type") == "object" or "properties" in source:

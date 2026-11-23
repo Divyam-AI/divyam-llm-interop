@@ -1,7 +1,8 @@
 # Copyright 2025 Divyam.ai
 # SPDX-License-Identifier: Apache-2.0
 
-from typing import Any, NoReturn
+from collections.abc import Callable
+from typing import Any, NoReturn, cast
 
 from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
     validate_portable_schema,
@@ -42,16 +43,36 @@ _COMPLETIONS_FIELDS = {
     "n",
     # Mapped to Claude thinking; see plan_thinking.
     "reasoning_effort",
-    # Whether OpenAI keeps the completion for its own dashboard, which pi sends
-    # on every request: conversion leaves out store false and refuses store
-    # true, as it does a Responses request's.
-    "store",
+    # A JSON Schema becomes Claude's structured output, JSON mode an
+    # instruction to answer with JSON alone.
+    "response_format",
     # OpenAI's prompt cache hints. The retention maps to the lifetime of
     # Claude's automatic prompt cache, within what the target allows; the key
     # has no counterpart and is left out.
     "prompt_cache_key",
     "prompt_cache_retention",
 }
+
+# Chat Completions fields Claude has no counterpart for that ask for something
+# the client would miss: token probabilities, audio, a web search, legacy
+# functions. Each maps to the value that asks for nothing, if it has one; null
+# always does. Any other value is refused unless the translator is configured
+# to drop them.
+_ANSWER_CHANGING_FIELDS: dict[str, Callable[[Any], bool] | None] = {
+    "logprobs": lambda value: value is False,
+    "top_logprobs": lambda value: value == 0,
+    "logit_bias": lambda value: value == {},
+    "frequency_penalty": lambda value: value == 0,
+    "presence_penalty": lambda value: value == 0,
+    "modalities": lambda value: value == ["text"],
+    "functions": lambda value: value == [],
+    "function_call": lambda value: value in ("none", "auto"),
+    "echo": lambda value: value is False,
+    "best_of": lambda value: value == 1,
+    "audio": None,
+    "web_search_options": None,
+}
+
 _RESPONSES_FIELDS = {
     "model",
     "input",
@@ -125,11 +146,49 @@ def validate_portable_target_capabilities(
             )
 
 
+def completions_fields_for_anthropic(
+    body: dict[str, Any], source: Model, *, drop_answer_changing: bool
+) -> tuple[dict[str, Any], tuple[str, ...]]:
+    """A Chat Completions body without the fields Claude has no counterpart
+    for, and the names of those left out.
+
+    OpenAI clients send settings and bookkeeping such as user, metadata, seed
+    and store on every call; refusing them would lock the client out, so they
+    are left out, as is any field the translator does not know. A field that
+    asks for something the client would miss, such as logprobs true, is
+    refused instead, unless drop_answer_changing is set. A body from another
+    API is returned as it is.
+    """
+    if source.api_type != ModelApiType.COMPLETIONS:
+        return body, ()
+    left_out: list[str] = []
+    for name, value in body.items():
+        if name in _COMPLETIONS_FIELDS:
+            continue
+        if name in _ANSWER_CHANGING_FIELDS and not drop_answer_changing:
+            asks_nothing = _ANSWER_CHANGING_FIELDS[name]
+            if value is not None and not (asks_nothing and asks_nothing(value)):
+                _source_unsupported(
+                    f"{source.api_type.value} field {name!r} has no counterpart "
+                    "on Claude",
+                    source,
+                    f"$.{name}",
+                )
+        left_out.append(name)
+    if not left_out:
+        return body, ()
+    kept = {name: value for name, value in body.items() if name not in left_out}
+    return kept, tuple(sorted(left_out))
+
+
 def validate_source_profile_for_anthropic_target(
     body: dict[str, Any], source: Model
 ) -> None:
     if source.api_type == ModelApiType.COMPLETIONS:
+        # completions_fields_for_anthropic leaves out the fields outside this
+        # profile; any that reach here were not passed through it.
         _reject_unknown_source_fields(body, _COMPLETIONS_FIELDS, source)
+        _validate_completions_response_format(body.get("response_format"), source)
         _validate_openai_message_content(body.get("messages"), source)
         _validate_function_tools(body.get("tools"), source, "$.tools")
         _validate_completions_stream_options(body.get("stream_options"), source)
@@ -455,8 +514,40 @@ def _validate_function_tools(
             )
 
 
+def _validate_completions_response_format(value: Any, source: Model) -> None:
+    if value is None:
+        return
+    if not isinstance(value, dict):
+        _source_unsupported(
+            "response_format must be an object", source, "$.response_format"
+        )
+    response_format = cast(dict[str, Any], value)
+    kind = response_format.get("type")
+    if kind not in ("text", "json_object", "json_schema"):
+        _source_unsupported(
+            "response_format type must be text, json_object or json_schema",
+            source,
+            "$.response_format.type",
+        )
+    if kind != "json_schema":
+        return
+    json_schema = response_format.get("json_schema")
+    if not (
+        isinstance(json_schema, dict)
+        and isinstance(cast(dict[str, Any], json_schema).get("name"), str)
+        and isinstance(cast(dict[str, Any], json_schema).get("schema"), dict)
+    ):
+        _source_unsupported(
+            "response_format.json_schema must name a JSON Schema object",
+            source,
+            "$.response_format.json_schema",
+        )
+
+
 def _validate_completions_stream_options(value: Any, source: Model) -> None:
-    if value is None or value == {"include_usage": True}:
+    # Whether the final chunk reports usage is the one stream option Claude's
+    # stream can answer; other options are left out.
+    if value is None or isinstance(value, dict):
         return
     _source_unsupported(
         "only stream_options.include_usage=true is portable",
