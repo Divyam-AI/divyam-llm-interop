@@ -3,6 +3,7 @@
 
 import copy
 import json
+from itertools import pairwise
 from typing import Any
 
 from divyam_llm_interop.translate.chat.anthropic_messages.request.anthropic_to_unified import (
@@ -101,9 +102,9 @@ def reconcile_anthropic_history(
     requires_replay = capabilities.tool_loop_requires_reasoning_replay is not False
     if budget and requires_replay:
         loaded: set[str] = set()
-        for exchange in _tool_exchanges(messages):
+        for exchange, answer in _tool_exchanges(messages):
             if not valid_thinking.get(exchange):
-                loaded |= _flatten_tool_exchange(messages, exchange)
+                loaded |= _flatten_tool_exchange(messages, exchange, answer)
                 messages_changed = True
         if loaded:
             changed["tools"] = _with_tools_loaded(body.get("tools"), loaded)
@@ -156,12 +157,19 @@ def _reconcile_blocks(
     return blocks, has_valid
 
 
-def _tool_exchanges(messages: list[dict[str, Any]]) -> list[int]:
-    """Indexes of the assistant tool_use turns the next user turn answers."""
-    return [
+def _tool_exchanges(messages: list[dict[str, Any]]) -> list[tuple[int, int]]:
+    """The assistant tool_use turns the next user turn answers, each with the
+    index of that user turn. System entries between them are passed over:
+    they are not turns."""
+    turns = [
         index
-        for index in range(len(messages) - 1)
-        if _is_tool_exchange(messages[index], messages[index + 1])
+        for index, message in enumerate(messages)
+        if not (isinstance(message, dict) and message.get("role") == "system")
+    ]
+    return [
+        (index, following)
+        for index, following in pairwise(turns)
+        if _is_tool_exchange(messages[index], messages[following])
     ]
 
 
@@ -181,7 +189,7 @@ def _is_tool_exchange(assistant: dict[str, Any], user: dict[str, Any]) -> bool:
 
 
 def _flatten_tool_exchange(
-    messages: list[dict[str, Any]], assistant_index: int
+    messages: list[dict[str, Any]], assistant_index: int, user_index: int
 ) -> set[str]:
     """Rewrite an unfinished tool exchange as text; return the tools it loaded.
 
@@ -226,7 +234,7 @@ def _flatten_tool_exchange(
             assistant_blocks.append(block)
     messages[assistant_index] = {**assistant, "content": assistant_blocks}
 
-    user = messages[assistant_index + 1]
+    user = messages[user_index]
     user_blocks: list[dict[str, Any]] = []
     for block in user["content"]:
         if block.get("type") != "tool_result":
@@ -238,7 +246,7 @@ def _flatten_tool_exchange(
         user_blocks.append({"type": "text", "text": result})
         user_blocks.extend(images)
         loaded.update(_referenced_tools(block.get("content")))
-    messages[assistant_index + 1] = {**user, "content": user_blocks}
+    messages[user_index] = {**user, "content": user_blocks}
     return loaded
 
 

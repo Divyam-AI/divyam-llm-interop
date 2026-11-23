@@ -6,6 +6,9 @@ import json
 
 import pytest
 
+from divyam_llm_interop.translate.chat.anthropic_messages.request.anthropic_to_unified import (
+    normalize_system_messages,
+)
 from divyam_llm_interop.translate.chat.api_types import ModelApiType
 from divyam_llm_interop.translate.chat.reasoning_state import wrap_envelope
 from divyam_llm_interop.translate.chat.translate import (
@@ -1063,17 +1066,14 @@ def _with_system_turn(body: dict) -> dict:
     return body
 
 
-def test_lifted_system_turn_carries_its_separator_in_its_own_text(
-    translator, anthropic_model
-):
+def test_lifted_system_turn_carries_its_separator_in_its_own_text():
+    """Lifted for a translation to another API, whose request has one system
+    prompt."""
     body = _with_system_turn(_claude_code_request())
-    target = Model("claude-opus-4-7", ModelApiType.ANTHROPIC_MESSAGES)
 
-    result = translator.translate_request(
-        ChatRequest(body=body), anthropic_model, target
-    )
+    result = normalize_system_messages(body)
 
-    assert result.body["system"] == [
+    assert result["system"] == [
         *body["system"],
         {
             "type": "text",
@@ -1082,8 +1082,8 @@ def test_lifted_system_turn_carries_its_separator_in_its_own_text(
         },
     ]
     # Anthropic refuses a text block that is only whitespace.
-    assert all(block["text"].strip() for block in result.body["system"])
-    assert all(turn["role"] != "system" for turn in result.body["messages"])
+    assert all(block["text"].strip() for block in result["system"])
+    assert all(turn["role"] != "system" for turn in result["messages"])
 
 
 def test_lifted_system_turn_stays_apart_from_the_system_prompt(
@@ -1115,8 +1115,197 @@ def test_system_turn_output_settings_apply_to_the_turn_being_answered(
     )
 
     assert result.body["output_config"] == {"effort": "medium"}
-    assert result.body["system"][-1]["text"] == "\n# Environment\nToday is 2026-11-06."
+    assert result.body["messages"][-1]["content"][-1]["text"] == (
+        "# Environment\nToday is 2026-11-06."
+    )
     assert all(turn["role"] != "system" for turn in result.body["messages"])
+
+
+#: The endpoint declaration that keeps system turns where the client put them.
+_IN_PLACE = {"anthropic_system_messages": True}
+
+
+def _route(profile: str | None, declared: bool) -> tuple[Model, Model]:
+    """A source and a Claude Opus 5.5 target: native when both share
+    `profile`, translated otherwise; the target declaring system turns when
+    `declared`."""
+    shared = {"anthropic_wire_profile": profile} if profile else {}
+    source = Model(
+        "claude-opus-5-5", ModelApiType.ANTHROPIC_MESSAGES, capability_overrides=shared
+    )
+    target = Model(
+        "claude-opus-5-5",
+        ModelApiType.ANTHROPIC_MESSAGES,
+        capability_overrides={**shared, **(_IN_PLACE if declared else {})},
+    )
+    return source, target
+
+
+@pytest.mark.parametrize("profile", [None, "same"], ids=["translated", "native"])
+def test_system_turns_stay_in_place_for_an_endpoint_that_takes_them(
+    translator, profile
+):
+    """As sent, with their cache_control and output_config: the system field
+    stays the same from turn to turn, so the cached conversation after it is
+    read back."""
+    body = _with_system_turn(_claude_code_request())
+    body["messages"][-1]["output_config"] = {"effort": "medium"}
+    source, target = _route(profile, declared=True)
+
+    result = translator.translate_request(
+        ChatRequest(body=copy.deepcopy(body)), source, target
+    )
+
+    assert result.body["system"] == body["system"]
+    sent = result.body["messages"]
+    assert [turn["role"] for turn in sent] == [
+        turn["role"] for turn in body["messages"]
+    ]
+    assert sent[-1] == body["messages"][-1]
+
+
+@pytest.mark.parametrize("profile", [None, "same"], ids=["translated", "native"])
+def test_system_turns_become_user_content_where_they_sit_elsewhere(translator, profile):
+    """The form Claude Code falls back to for an endpoint that refuses system
+    turns: the system field is left as sent, and the turn's blocks, its cache
+    marker included, are user content in its place."""
+    body = _with_system_turn(_claude_code_request())
+    source, target = _route(profile, declared=False)
+
+    result = translator.translate_request(
+        ChatRequest(body=copy.deepcopy(body)), source, target
+    )
+
+    assert result.body["system"] == body["system"]
+    assert all(turn["role"] != "system" for turn in result.body["messages"])
+    assert result.body["messages"][-1] == {
+        "role": "user",
+        "content": body["messages"][-1]["content"],
+    }
+
+
+@pytest.mark.parametrize("declared", [True, False], ids=["declared", "folded"])
+@pytest.mark.parametrize("profile", [None, "same"], ids=["translated", "native"])
+def test_a_later_turn_keeps_the_earlier_request_as_its_prefix(
+    translator, profile, declared
+):
+    """Claude Code adds a system turn on most turns. Kept in place, each
+    request begins with the one before it, which is what a cache hit needs."""
+    first = _with_system_turn(_claude_code_request())
+    later = copy.deepcopy(first)
+    later["messages"] += [
+        {"role": "assistant", "content": [{"type": "text", "text": "Done."}]},
+        {"role": "user", "content": "And the tests?"},
+        {"role": "system", "content": [{"type": "text", "text": "Tokens: 40k"}]},
+    ]
+    source, target = _route(profile, declared=declared)
+
+    sent_first = translator.translate_request(ChatRequest(body=first), source, target)
+    sent_later = translator.translate_request(ChatRequest(body=later), source, target)
+
+    assert sent_later.body["system"] == sent_first.body["system"]
+    count = len(sent_first.body["messages"])
+    assert sent_later.body["messages"][:count] == sent_first.body["messages"]
+
+
+def test_a_system_turn_between_a_tool_call_and_its_result_is_not_a_turn(translator):
+    """Under budget thinking, a tool exchange without thinking the target can
+    verify is rewritten as text; a system turn between the call and its
+    result does not hide the exchange."""
+    body = {
+        "model": "claude-sonnet-4-5",
+        "max_tokens": 32000,
+        "thinking": {"type": "enabled", "budget_tokens": 2000},
+        "messages": [
+            {"role": "user", "content": "Read a"},
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "tool_use", "id": "toolu_1", "name": "Read", "input": {}}
+                ],
+            },
+            {"role": "system", "content": "Tokens: 20k"},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "tool_result", "tool_use_id": "toolu_1", "content": "a"}
+                ],
+            },
+        ],
+        "tools": [{"name": "Read", "input_schema": _READ_SCHEMA}],
+    }
+    source = Model("claude-sonnet-4-5", ModelApiType.ANTHROPIC_MESSAGES)
+    target = Model(
+        "claude-sonnet-4-5",
+        ModelApiType.ANTHROPIC_MESSAGES,
+        capability_overrides=_IN_PLACE,
+    )
+
+    result = translator.translate_request(ChatRequest(body=body), source, target)
+
+    blocks = [
+        block["type"]
+        for turn in result.body["messages"]
+        if isinstance(turn["content"], list)
+        for block in turn["content"]
+    ]
+    assert "tool_use" not in blocks and "tool_result" not in blocks
+    assert result.body["messages"][2]["role"] == "system"
+
+
+def test_a_folded_turn_after_a_tool_call_follows_its_results(translator):
+    """The results must open the user turn that answers a tool call, so a
+    system turn between them joins that turn after the results."""
+    body = {
+        "model": "claude-opus-5-5",
+        "max_tokens": 32000,
+        "messages": [
+            {"role": "user", "content": "Read a"},
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "tool_use", "id": "toolu_1", "name": "Read", "input": {}}
+                ],
+            },
+            {"role": "system", "content": "Tokens: 20k"},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "tool_result", "tool_use_id": "toolu_1", "content": "a"}
+                ],
+            },
+        ],
+        "tools": [{"name": "Read", "input_schema": _READ_SCHEMA}],
+    }
+    source, target = _route(None, declared=False)
+
+    result = translator.translate_request(ChatRequest(body=body), source, target)
+
+    messages = result.body["messages"]
+    assert [turn["role"] for turn in messages] == ["user", "assistant", "user"]
+    assert messages[2]["content"] == [
+        {"type": "tool_result", "tool_use_id": "toolu_1", "content": "a"},
+        {"type": "text", "text": "Tokens: 20k"},
+    ]
+
+
+@pytest.mark.parametrize(
+    "content", [[], "", " \n"], ids=["no-blocks", "empty", "blank"]
+)
+def test_a_system_turn_with_only_output_settings_adds_no_turn(translator, content):
+    """Claude Code sets effort per turn with a system turn that may have no
+    content: its setting applies, and no empty user turn is sent."""
+    body = _claude_code_request()
+    body["messages"].append(
+        {"role": "system", "content": content, "output_config": {"effort": "low"}}
+    )
+    count = len(body["messages"])
+    source, target = _route(None, declared=False)
+
+    result = translator.translate_request(ChatRequest(body=body), source, target)
+
+    assert len(result.body["messages"]) == count - 1
+    assert result.body["output_config"]["effort"] == "low"
 
 
 @pytest.mark.parametrize(
