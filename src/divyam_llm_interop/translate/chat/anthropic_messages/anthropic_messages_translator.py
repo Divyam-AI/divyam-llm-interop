@@ -12,6 +12,7 @@ from divyam_llm_interop.translate.chat.anthropic_messages.request import (
     unified_request_to_anthropic,
 )
 from divyam_llm_interop.translate.chat.anthropic_messages.request.anthropic_to_unified import (
+    fold_system_messages,
     normalize_system_messages,
 )
 from divyam_llm_interop.translate.chat.anthropic_messages.request.reasoning_history import (
@@ -75,9 +76,9 @@ class AnthropicMessagesTranslator(Translator):
         if native and not (
             self._model_registry.get_capabilities(target).anthropic_system_messages
         ):
-            # Sent as it is, so lifted here for a target that does not take
-            # system entries. A translated route lifts them where it encodes.
-            body = normalize_system_messages(body)
+            # Sent as it is, so folded here for a target that does not take
+            # system entries. A translated route folds them where it encodes.
+            body = fold_system_messages(body)
         if native:
             # The client's own Anthropic state verifies here. Envelopes the
             # router returned on earlier turns are restored or removed, so

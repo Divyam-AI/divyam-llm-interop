@@ -9,11 +9,21 @@
   `messages` where the client put them, with their `cache_control` and
   `output_config`, on native and translated routes alike. Claude Code sends
   them for Claude Opus 4.8 and later models.
-- Unset or false, they are lifted into the top-level `system` field, as
-  before. Lifting changes that field on every turn a new entry arrives, which
-  invalidates the cached conversation after it, so the conversation was billed
-  as uncached input on every turn. Declare the capability on each endpoint
-  that takes the entries. The model catalog sets it for no model.
+- Unset or false, each entry becomes user content where it sits, the form
+  Claude Code itself falls back to for an endpoint that refuses them: its
+  blocks, `cache_control` included, form a user turn, which Anthropic reads as
+  one with a user turn beside it. An entry between a tool call and its results
+  joins the results turn after them. An entry with no content carries only
+  its `output_config`, which applies at the top level as before. They were
+  lifted into the top-level `system` field before, which changed that field
+  on every turn a new entry arrived and invalidated the cached conversation
+  after it, so the conversation was billed as uncached input on every turn.
+- Either way a later turn begins as the one before it did, so the
+  conversation stays cached on every Anthropic Messages endpoint. Declare the
+  capability where an endpoint takes the entries, so it reads them as system
+  text. The model catalog sets it for no model.
+- A translation to another API still lifts the entries into its one system
+  prompt.
 - Under budget thinking, a system entry between a tool call and its result no
   longer hides the exchange from the rewrite that keeps thinking verifiable.
 

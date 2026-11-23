@@ -4,7 +4,7 @@
 import copy
 import hashlib
 import json
-from typing import Any
+from typing import Any, cast
 
 from divyam_llm_interop.translate.chat.anthropic_messages.validation import (
     DOCUMENT_BLOCK_TYPES,
@@ -41,51 +41,76 @@ _BUDGET_EFFORT = ((4096, "low"), (16384, "medium"))
 _SYSTEM_TURN_FIELDS = {"role", "content", "output_config"}
 
 
-def normalize_system_messages(body: dict[str, Any]) -> dict[str, Any]:
-    """Lift Claude Code's conversation-level system text into Anthropic's field."""
+def _system_turns(body: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """The request's system turns when it has any and each is well formed;
+    None otherwise, leaving a malformed one for the validator."""
     messages = body.get("messages")
     if not isinstance(messages, list):
-        return body
-    system_messages = [
-        message
-        for message in messages
+        return None
+    turns = [
+        cast(dict[str, Any], message)
+        for message in cast(list[Any], messages)
         if isinstance(message, dict) and message.get("role") == "system"
     ]
-    if not system_messages:
+    if not turns:
+        return None
+    for turn in turns:
+        if (
+            not {"role", "content"} <= set(turn) <= _SYSTEM_TURN_FIELDS
+            or not isinstance(turn["content"], (str, list))
+            or not isinstance(turn.get("output_config", {}), dict)
+        ):
+            return None
+    return turns
+
+
+def _with_turn_output(
+    body: dict[str, Any], turns: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """A copy of `body` with its system turns' output settings applied. A
+    system turn's output_config is the setting for the turns after it, so the
+    latest one is the setting for the turn being answered."""
+    result = copy.deepcopy(body)
+    turn_output: dict[str, Any] = {}
+    for turn in turns:
+        turn_output.update(turn.get("output_config") or {})
+    if turn_output:
+        result["output_config"] = {
+            **(body.get("output_config") or {}),
+            **copy.deepcopy(turn_output),
+        }
+    return result
+
+
+def _turn_blocks(content: Any) -> list[dict[str, Any]]:
+    """A turn's content as a list of blocks. Text that is empty or only
+    whitespace is no block: Anthropic refuses one."""
+    if isinstance(content, str):
+        return [{"type": "text", "text": content}] if content.strip() else []
+    return copy.deepcopy(cast(list[dict[str, Any]], content))
+
+
+def normalize_system_messages(body: dict[str, Any]) -> dict[str, Any]:
+    """Lift Claude Code's conversation-level system text into Anthropic's field.
+
+    For a translation to another API, whose unified request has one system
+    prompt. An Anthropic Messages target is sent them in place instead; see
+    fold_system_messages.
+    """
+    turns = _system_turns(body)
+    if turns is None:
         return body
     system = body.get("system")
     if system is not None and not isinstance(system, (str, list)):
         return body  # Preserve malformed input for the existing validator.
-    for message in system_messages:
-        if (
-            not {"role", "content"} <= set(message) <= _SYSTEM_TURN_FIELDS
-            or not isinstance(message["content"], (str, list))
-            or not isinstance(message.get("output_config", {}), dict)
-        ):
-            return body
-    normalized = copy.deepcopy(body)
-    # A system turn's output_config is the setting for the turns after it, so
-    # the latest one is the setting for the turn being answered.
-    turn_output: dict[str, Any] = {}
-    for message in system_messages:
-        turn_output.update(message.get("output_config") or {})
-    if turn_output:
-        normalized["output_config"] = {
-            **(body.get("output_config") or {}),
-            **copy.deepcopy(turn_output),
-        }
+    normalized = _with_turn_output(body, turns)
     blocks = (
         [{"type": "text", "text": system}]
         if isinstance(system, str)
         else copy.deepcopy(system or [])
     )
-    for message in system_messages:
-        content = message["content"]
-        lifted = (
-            [{"type": "text", "text": content}]
-            if isinstance(content, str)
-            else copy.deepcopy(content)
-        )
+    for turn in turns:
+        lifted = _turn_blocks(turn["content"])
         # A newline keeps the lifted text apart from what precedes it, at the
         # start of its own first block: Anthropic refuses a text block that is
         # only whitespace, so the separator cannot be a block of its own.
@@ -103,6 +128,68 @@ def normalize_system_messages(body: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def fold_system_messages(body: dict[str, Any]) -> dict[str, Any]:
+    """Claude Code's system turns as user content where each one sits, for
+    an Anthropic Messages endpoint that does not take them.
+
+    This is the form Claude Code itself falls back to when an endpoint
+    refuses them. Each turn's blocks, cache_control included, become a user
+    turn of their own, which Anthropic reads as one with a user turn beside
+    it. A turn between a tool call and its results joins the results turn
+    after them, since the results must come first. A turn with no content
+    carries only output settings, applied as normalize_system_messages
+    applies them.
+
+    Each turn's place depends only on the messages before it and the turn
+    after a tool call, so a request that adds to the conversation begins as
+    the one before it did, and the cached conversation is read back. Lifting
+    the turns into the system field changed that field on every turn.
+    """
+    turns = _system_turns(body)
+    if turns is None:
+        return body
+    folded = _with_turn_output(body, turns)
+    messages: list[Any] = []
+    # Turns waiting for the results of the tool call before them.
+    waiting: list[dict[str, Any]] = []
+    awaiting_results = False
+    for message in cast(list[Any], body["messages"]):
+        if isinstance(message, dict) and message.get("role") == "system":
+            blocks = _turn_blocks(cast(dict[str, Any], message)["content"])
+            if awaiting_results:
+                waiting.extend(blocks)
+            elif blocks:
+                messages.append({"role": "user", "content": blocks})
+            continue
+        if waiting:
+            if isinstance(message, dict) and message.get("role") == "user":
+                message = {
+                    **message,
+                    "content": [*_turn_blocks(message.get("content")), *waiting],
+                }
+            else:
+                messages.append({"role": "user", "content": waiting})
+            waiting = []
+        messages.append(message)
+        awaiting_results = _calls_tools(message)
+    if waiting:
+        messages.append({"role": "user", "content": waiting})
+    folded["messages"] = messages
+    return folded
+
+
+def _calls_tools(message: Any) -> bool:
+    """Whether a message is an assistant turn calling a tool, which the next
+    user turn must answer first."""
+    if not isinstance(message, dict) or message.get("role") != "assistant":
+        return False
+    content = cast(dict[str, Any], message).get("content")
+    return isinstance(content, list) and any(
+        isinstance(block, dict) and block.get("type") == "tool_use"
+        for block in cast(list[Any], content)
+    )
+
+
 def anthropic_request_to_unified(
     chat_request: ChatRequest, source: Model
 ) -> UnifiedChatCompletionsRequest:
@@ -114,8 +201,8 @@ def anthropic_request_to_unified(
         "model": body.get("model", source.name),
         "messages": _messages_to_unified(body),
         "max_tokens": body["max_tokens"],
-        # As the client sent it, system entries in place: the encoder lifts
-        # them for a target that does not take them; see
+        # As the client sent it, system entries in place: the encoder folds
+        # them into user content for a target that does not take them; see
         # ModelCapabilities.anthropic_system_messages.
         "anthropic_request_raw": copy.deepcopy(sent),
     }

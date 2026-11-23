@@ -11,7 +11,7 @@ from divyam_llm_interop.translate.chat.anthropic_messages.request import (
     structured_output,
 )
 from divyam_llm_interop.translate.chat.anthropic_messages.request.anthropic_to_unified import (
-    normalize_system_messages,
+    fold_system_messages,
 )
 from divyam_llm_interop.translate.chat.anthropic_messages.request.reasoning_history import (
     reconcile_anthropic_history,
@@ -53,7 +53,7 @@ def unified_request_to_anthropic(
     if isinstance(raw, dict):
         capabilities = model_registry.get_capabilities(target)
         if not capabilities.anthropic_system_messages:
-            raw = normalize_system_messages(cast(dict[str, Any], raw))
+            raw = fold_system_messages(cast(dict[str, Any], raw))
         # A translated route never shares the client's signing domain: a shared
         # anthropic_wire_profile is forwarded natively and does not reach here.
         body = copy.deepcopy(

@@ -281,10 +281,11 @@ class ModelCapabilities:
     # messages, which Claude Code sends for Claude Opus 4.8 and later models.
     # Declared true, a request in Anthropic's protocol reaches it with those
     # entries where the client put them, cache_control and output_config
-    # included. Otherwise they are lifted into the top-level system field.
-    # Lifting changes the system field on every turn a new entry arrives,
-    # which invalidates the cached conversation after it, so an endpoint that
-    # takes them should declare it. The model catalog never sets it.
+    # included. Otherwise each becomes user content where it sits, the form
+    # Claude Code falls back to for an endpoint that refuses them; either way
+    # a later turn begins as the one before it did, so the conversation stays
+    # cached. Declared, the endpoint reads them as system text. The model
+    # catalog never sets it.
     anthropic_system_messages: Optional[bool] = None
     # Whether an Anthropic Messages endpoint takes a top-level cache_control,
     # Anthropic's automatic prompt caching. A request translated from another
