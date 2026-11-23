@@ -277,6 +277,15 @@ class ModelCapabilities:
     # so a new one needs no release. Unset or empty, the endpoint runs none
     # and a request's safeguards are removed before it is sent there.
     anthropic_safeguards: Optional[list[str]] = None
+    # Whether an Anthropic Messages endpoint takes role "system" entries inside
+    # messages, which Claude Code sends for Claude Opus 4.8 and later models.
+    # Declared true, a request in Anthropic's protocol reaches it with those
+    # entries where the client put them, cache_control and output_config
+    # included. Otherwise they are lifted into the top-level system field.
+    # Lifting changes the system field on every turn a new entry arrives,
+    # which invalidates the cached conversation after it, so an endpoint that
+    # takes them should declare it. The model catalog never sets it.
+    anthropic_system_messages: Optional[bool] = None
     # Whether an Anthropic Messages endpoint takes a top-level cache_control,
     # Anthropic's automatic prompt caching. A request translated from another
     # protocol is then sent with it, since those clients never mark a

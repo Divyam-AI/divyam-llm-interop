@@ -71,7 +71,13 @@ class AnthropicMessagesTranslator(Translator):
     ) -> ChatRequest:
         # Search records written for another API's search reach no route as
         # Anthropic's own; see without_adapter_search_blocks.
-        body = without_adapter_search_blocks(normalize_system_messages(request.body))
+        body = without_adapter_search_blocks(request.body)
+        if native and not (
+            self._model_registry.get_capabilities(target).anthropic_system_messages
+        ):
+            # Sent as it is, so lifted here for a target that does not take
+            # system entries. A translated route lifts them where it encodes.
+            body = normalize_system_messages(body)
         if native:
             # The client's own Anthropic state verifies here. Envelopes the
             # router returned on earlier turns are restored or removed, so

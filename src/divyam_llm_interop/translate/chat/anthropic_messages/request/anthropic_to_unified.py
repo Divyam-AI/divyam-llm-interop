@@ -106,14 +106,18 @@ def normalize_system_messages(body: dict[str, Any]) -> dict[str, Any]:
 def anthropic_request_to_unified(
     chat_request: ChatRequest, source: Model
 ) -> UnifiedChatCompletionsRequest:
-    body = normalize_system_messages(without_null_fields(chat_request.body))
+    sent = without_null_fields(chat_request.body)
+    body = normalize_system_messages(sent)
     validate_anthropic_request(body)
 
     unified_body: dict[str, Any] = {
         "model": body.get("model", source.name),
         "messages": _messages_to_unified(body),
         "max_tokens": body["max_tokens"],
-        "anthropic_request_raw": copy.deepcopy(body),
+        # As the client sent it, system entries in place: the encoder lifts
+        # them for a target that does not take them; see
+        # ModelCapabilities.anthropic_system_messages.
+        "anthropic_request_raw": copy.deepcopy(sent),
     }
     _copy_sampling_fields(body, unified_body)
     _copy_tools(body, unified_body)

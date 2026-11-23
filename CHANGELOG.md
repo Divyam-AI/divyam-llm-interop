@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### System turns stay where Claude Code put them
+
+- New endpoint capability `anthropic_system_messages`. An Anthropic Messages
+  endpoint declaring it true is sent the `role: "system"` entries in
+  `messages` where the client put them, with their `cache_control` and
+  `output_config`, on native and translated routes alike. Claude Code sends
+  them for Claude Opus 4.8 and later models.
+- Unset or false, they are lifted into the top-level `system` field, as
+  before. Lifting changes that field on every turn a new entry arrives, which
+  invalidates the cached conversation after it, so the conversation was billed
+  as uncached input on every turn. Declare the capability on each endpoint
+  that takes the entries. The model catalog sets it for no model.
+- Under budget thinking, a system entry between a tool call and its result no
+  longer hides the exchange from the rewrite that keeps thinking verifiable.
+
 ### Prompt caching on Claude for other protocols' clients
 
 - New endpoint capability `supports_automatic_prompt_cache`. A request
