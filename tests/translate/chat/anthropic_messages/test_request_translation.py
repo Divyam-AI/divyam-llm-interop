@@ -542,11 +542,12 @@ def test_claude_system_messages_preserve_instructions_without_mutating_input(
         capability_overrides={"anthropic_wire_profile": "same"},
     )
     forwarded = translator.translate_request(request, native, native)
-    assert forwarded.body["messages"] == original["messages"][:1]
-    assert forwarded.body["system"] == [
-        {"type": "text", "text": "Follow policy."},
-        {"type": "text", "text": "\nEnvironment."},
+    # Claude takes the system turn as user content where it sits.
+    assert forwarded.body["messages"] == [
+        {"role": "user", "content": "Hello"},
+        {"role": "user", "content": [{"type": "text", "text": "Environment."}]},
     ]
+    assert forwarded.body["system"] == "Follow policy."
     assert body == original
 
 
